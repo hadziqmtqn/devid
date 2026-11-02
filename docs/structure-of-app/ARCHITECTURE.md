@@ -9,9 +9,9 @@
 | Crate | Runs as | Responsibility |
 |---|---|---|
 | `daemon` | User | Supervises one php-fpm pool per PHP version, the active web server, the `.test` DNS resolver and the local CA. Exposes a unix socket API. |
-| `cli` | User | Talks to the daemon over the unix socket. |
+| `cli` | User | A thin client of the daemon over the unix socket. Subcommands such as `link`, `park`, `use` and `secure`. |
 | `helper` | Root, one time | Writes `/etc/resolver/test`, trusts the CA, installs a LaunchDaemon that binds ports 80/443. |
-| `gui` | User | Tauri v2 + React + Tailwind + shadcn/ui. Menu bar first; main window on demand. Layout follows macOS System Settings (see the prototype). |
+| `cli` (TUI mode) | User | Running `devid` with no arguments opens a ratatui TUI with pages for Sites, PHP, Server, Logs and Settings, mapped from the prototype. Every action is also a plain subcommand. |
 
 ## Request flow
 
@@ -34,9 +34,13 @@ There is exactly one active web server globally.
 - **OPcache:** on. JIT is off (`opcache.jit=off`), so no JIT entitlement is needed under the hardened runtime.
 - **Shims:** `php` and `composer` live in `~/.devid/bin`. A shim resolves the version from the current directory: an isolated site's version if the directory belongs to one, otherwise the global default.
 
+## Client rule (D-012)
+
+All behaviour lives in `daemon` and is reached through its socket API. `cli` and the TUI only render state and send commands. A future GUI must be just another client of the same API.
+
 ## Trust boundaries
 
-- Only `helper` runs as root, and only during setup. `daemon` and `gui` run as the user.
+- Only `helper` runs as root, and only during setup. `daemon` and `cli` run as the user.
 - Downloaded PHP binaries are trusted only after the sha256 check against the manifest. All binaries are codesigned in CI.
 
 ## Unknowns
