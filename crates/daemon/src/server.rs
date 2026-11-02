@@ -230,6 +230,11 @@ fn handle(stream: UnixStream, state: &State) -> io::Result<()> {
         };
         serde_json::to_writer(&mut writer, &reply)?;
         writer.write_all(b"\n")?;
+        if state.stopping.load(Ordering::SeqCst) {
+            // Reply sent; now wake the accept loop so it sees the flag and shuts down.
+            let _ = UnixStream::connect(state.paths.socket());
+            break;
+        }
     }
     Ok(())
 }
@@ -282,9 +287,9 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             }))
         }
         Request::Stop => {
+            // handle() wakes the accept loop only after this reply is written; waking it here let
+            // the daemon exit before replying, so `devid daemon stop` sometimes reported failure.
             state.stopping.store(true, Ordering::SeqCst);
-            // Wake the accept loop so it sees the flag.
-            let _ = UnixStream::connect(state.paths.socket());
             Ok(json!({"ok": true}))
         }
         Request::PhpList => Ok(json!({"ok": true, "php": php_list(state)})),
