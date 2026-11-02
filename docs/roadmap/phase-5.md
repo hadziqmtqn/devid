@@ -2,7 +2,7 @@
 
 > Scope: building and shipping Devid's binaries, and how an installed Devid gets updates
 > Verified against: 2026-11-02
-> Status: R1–R4 done (devid v0.1.0 released 2026-11-02; installed on the owner's Mac with install.sh); R5 in review (devid-binaries#5); D-016 accepted
+> Status: done (R1–R5, 2026-11-02): devid v0.1.0 released and installed with install.sh; a weekly upstream check is verified ("up to date", no build started); D-016 accepted
 
 Today Devid installs PHP and nginx with `--from <spike folder>`, and an upgrade means `git pull && cargo build && ./target/release/devid setup`. Phase 5 replaces both with releases that the installed Devid downloads, verifies and updates by itself. `install.sh` (D-014) starts working at the end of this phase.
 
