@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (Phase 5 R3: downloads from releases)
+> Verified against: 2026-11-02 (Phase 4 T1: TUI shell)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -130,3 +130,11 @@ All behaviour lives in `daemon` and is reached through its socket API. `cli` and
 
 - Whether future macOS releases keep `/usr/sbin/httpd` (used for the Apache adapter; see PROJECT_CONTEXT spike results).
 - The daemon socket protocol and the on-disk config format are not designed yet.
+
+## TUI (Phase 4)
+
+`crates/cli/src/tui/` (D-012 client rule, D-017 colors):
+- `app.rs` holds the state and the key handling as a pure function (tested without a terminal or a daemon).
+- `ui.rs` renders. Pages: Sites, PHP, Server, Logs, Settings. It uses the 16-color palette semantically, gives every state a symbol and text, and honours `NO_COLOR` (selection uses REVERSED, so it still shows).
+- `mod.rs` runs the loop. `ratatui::init()` sets up the alternate screen and a panic hook that restores the terminal. The loop polls `status` + `sites` every 2 s (or on `r`), checks keys every 250 ms, and stops polling when the TUI closes.
+- `devid` with no command opens the TUI only when stdout is a terminal; scripts and pipes get the help text. `devid tui` opens it explicitly.
