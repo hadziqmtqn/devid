@@ -14,3 +14,5 @@ devid-daemon = { path = "../daemon" }
 clap.workspace = true
 serde_json.workspace = true
 libc = "0.2"
+# TUI (Phase 4, D-012/D-017); crossterm is its default backend.
+ratatui = "0.30"

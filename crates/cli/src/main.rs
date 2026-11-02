@@ -2,6 +2,7 @@
 
 mod setup;
 mod shim;
+mod tui;
 
 use clap::{Parser, Subcommand};
 use devid_daemon::{paths::Paths, protocol::Request, server};
@@ -15,12 +16,15 @@ use std::{
 #[derive(Parser)]
 #[command(name = "devid", version, about = "Local PHP development for macOS")]
 struct Cli {
+    /// Without a command, `devid` opens the TUI (in a terminal).
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open the TUI (also what `devid` with no command does in a terminal)
+    Tui,
     /// Show whether the daemon runs and its settings
     Status {
         /// Print the raw JSON response
@@ -179,7 +183,17 @@ fn main() -> ExitCode {
     if let Some(code) = shim::dispatch() {
         return code;
     }
-    match run(Cli::parse().command, &Paths::from_env()) {
+    let paths = Paths::from_env();
+    let command = match Cli::parse().command {
+        Some(command) => command,
+        // Scripts and pipes get the usual help instead of a full-screen UI.
+        None if std::io::IsTerminal::is_terminal(&std::io::stdout()) => Command::Tui,
+        None => {
+            let _ = <Cli as clap::CommandFactory>::command().print_help();
+            return ExitCode::SUCCESS;
+        }
+    };
+    match run(command, &paths) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("devid: {e}");
@@ -260,6 +274,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Helper { action } => helper(action, paths),
         Command::Setup { dry_run } => setup::setup(paths, dry_run),
         Command::Doctor => setup::doctor(paths),
+        Command::Tui => tui::run(paths),
         Command::SelfUpdate { check } => setup::self_update(paths, check),
         Command::Uninstall { dry_run, purge } => setup::uninstall(paths, dry_run, purge),
         Command::Sites { json } => send(Request::Sites).map(|v| print_sites(&v["sites"], json)),
