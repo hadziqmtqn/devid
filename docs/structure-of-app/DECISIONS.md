@@ -66,7 +66,7 @@ See ARCHITECTURE, "PHP runtime".
 
 **Evidence so far (2026-11-02):** on the owner's Mac, PHP 8.5.12 builds static, loads shared `xdebug.so` and `pcov.so`, serves Laravel through Caddy, and passes erdbpro-saas's 532 tests. The fallback is likely unnecessary. Still open:
 - ~~builds for 8.3 and 8.4~~ done 2026-11-02;
-- HTTPS to `.test` sites through the Devid CA;
+- ~~HTTPS to `.test` sites through the Devid CA~~ done 2026-11-02 for PHP clients (browser trust is a Phase 2 helper task);
 - ~~pinning a stable Xdebug~~ done 2026-11-02 (3.5.3).
 
 ## D-009: supported PHP versions (accepted 2026-11-02)

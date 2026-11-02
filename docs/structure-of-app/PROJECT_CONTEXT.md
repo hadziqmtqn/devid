@@ -92,10 +92,22 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - **erdbpro-saas:** static 8.4.27 passes 532/532 tests (173 s). It cannot run on any PHP 8.3, because its locked dependencies require PHP >= 8.4.1 even though `composer.json` says `^8.3`. This is a constraint issue in that project, not a Devid issue.
 - **PHP 8.3:** a fresh Laravel 13.39 app created with static 8.3 resolves to Symfony 7.4, migrates on SQLite and passes its 2/2 tests.
 
+**2026-11-02: HTTPS through a Devid CA, and two PHP versions side by side** (`spike/multi/setup.sh` and `test.sh`, state in the gitignored `spike/runtime/multi/`). No sudo and no system trust; `*.test` is pinned to 127.0.0.1 with `--resolve`, because `/etc/resolver` is not set up yet.
+
+- **Setup:**
+  - An EC P-256 root CA signs one leaf certificate per site (SAN, `serverAuth`, 825 days).
+  - Caddy serves `https://blog.test:8443` through php-fpm **8.5** and `https://api.test:8443` through php-fpm **8.4**, each master with `pm = ondemand`.
+- **8/8 checks pass:**
+  - Both sites return 200 over HTTP/2, and `X-Powered-By` shows the expected PHP version for each site.
+  - curl without the Devid CA is rejected (exit 60), so verification is real.
+  - PHP 8.5 calls `api.test` over HTTPS and gets 200 from PHP 8.4, using only `curl.cainfo` from the Devid php.ini (system bundle plus the Devid CA). With `curl.cainfo` cleared the same call fails with error 60. HTTPS to public hosts still works.
+  - Risk 3 is passed for PHP; browser trust needs the helper (Phase 2).
+- **Idle cost with two versions:** php-fpm 8.5 master 15.4 MB, php-fpm 8.4 master 14.8 MB, Caddy 32.7 MB, about 63 MB in total with 0 workers. Each extra PHP version costs about 15 MB idle. The daemon could start a version's master only when a site on that version gets its first request; this is a Phase 2 design option, not decided.
+
 **Phase 1 is done when** all of these work on the owner's Mac:
 - ✅ (2026-11-02) `php -m` shows the full extension list for 8.3, 8.4 and 8.5.
 - `xdebug.so` loads.
-- HTTPS calls from PHP succeed.
+- ✅ (2026-11-02) HTTPS calls from PHP succeed, including site-to-site through the Devid CA.
 - erdbpro-saas loads through the static php-fpm.
 
 ## Machine state (before migration)
