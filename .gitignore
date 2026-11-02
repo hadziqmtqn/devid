@@ -16,3 +16,7 @@ spike/runtime/bin83/
 spike/results-erdbpro/
 # spike CA private keys, certs and generated configs
 spike/runtime/multi/
+
+# web server spike build cache and runtime
+spike/webservers/*
+!spike/webservers/*.sh

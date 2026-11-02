@@ -12,7 +12,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-002 | 2026-11-01 | accepted (`gui` crate dropped by D-012) | Rust workspace: `daemon`, `cli`, `helper`, `gui` |
 | D-003 | 2026-11-01 | superseded by D-012 | GUI: Tauri v2 + React + Tailwind + shadcn/ui, menu bar first |
 | D-004 | 2026-11-01 | accepted (version range superseded by D-009) | PHP 8.1 to latest from static-php-cli builds, php-fpm with `pm = ondemand` |
-| D-005 | 2026-11-01 | accepted | One global web server: Caddy (default), nginx, Apache |
+| D-005 | 2026-11-01 | accepted (default changed to nginx by D-015) | One global web server: Caddy (default), nginx, Apache |
 | D-006 | 2026-11-01 | accepted | Databases are out of scope (DBngin is used) |
 | D-007 | 2026-11-01 | accepted (applies to the TUI page structure, D-012) | UI follows macOS System Settings, per the approved prototype |
 | D-008 | 2026-11-02 | accepted | How to ship static PHP binaries (details below) |
@@ -22,6 +22,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-012 | 2026-11-02 | accepted | v1 is CLI + TUI; GUI deferred; all logic in the daemon |
 | D-013 | 2026-11-02 | accepted | v1 is macOS only; OS-specific code isolated in a `platform` module |
 | D-014 | 2026-11-02 | accepted | Install with `install.sh` plus `devid setup`/`doctor`/`uninstall`; no Node |
+| D-015 | 2026-11-02 | accepted | nginx is the default web server; Caddy and Apache stay selectable |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -127,3 +128,14 @@ See ARCHITECTURE, "PHP runtime".
 - **Context:** the CLI, TUI, Caddy and static-php-cli are cross-platform. DNS, CA trust, privileged ports, background services and php-fpm differ per OS; for example, Windows has no php-fpm.
 - **Decision:** v1 targets macOS only. All OS-specific code (resolver, CA trust, port binding, service install, shims) lives in a `platform` module and in the `helper` crate. The rest of the daemon must not call macOS APIs directly.
 - **Later:** Linux means a second `platform` implementation. Test it on GitHub Actions Ubuntu runners and a small VPS (1 vCPU / 1 GB is enough to run Devid, but not to build PHP), never in a local VM on the owner's laptop. Windows is a much larger effort and is not planned.
+
+## D-015: nginx as the default web server (accepted 2026-11-02)
+
+- **Context:** the web server spike (PROJECT_CONTEXT, 2026-11-02) served erdbpro-saas identically on all three servers. At idle the web server alone uses Caddy 33.9 MB, nginx 7.8 MB and Apache 8.2 MB. Caddy's main advantage, automatic HTTPS, is unused because Devid manages its own CA and certificates.
+- **Decision:**
+  - `devid setup` activates **nginx** by default. It is our own static build, about 6 MB and about 2 min to build (`spike/webservers/build-nginx.sh`).
+  - **Caddy** (official binary) and **Apache** (macOS `/usr/sbin/httpd`) remain selectable at any time, for example `devid server use caddy` or the TUI Server page.
+  - Only one is active at a time (D-005), with the same site configuration rendered for each.
+- **Consequences:**
+  - The nginx adapter must include the Laravel FastCGI buffer settings (`fastcgi_buffer_size 32k; fastcgi_buffers 16 16k;`).
+  - The nginx build joins the CI pipeline and is subject to the same no-`/usr/local` link check.

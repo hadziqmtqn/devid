@@ -25,7 +25,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 **In scope (planned):**
 - PHP 8.3, 8.4 and 8.5 (D-009), multiple versions side by side, with a per-site version.
 - `.test` DNS, a local CA and HTTPS.
-- One global web server: Caddy (default), nginx or Apache.
+- One global web server: nginx (default, D-015), Caddy or Apache.
 - A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012).
 
 **Non-goals:**
@@ -104,11 +104,24 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
   - Risk 3 is passed for PHP; browser trust needs the helper (Phase 2).
 - **Idle cost with two versions:** php-fpm 8.5 master 15.4 MB, php-fpm 8.4 master 14.8 MB, Caddy 32.7 MB, about 63 MB in total with 0 workers. Each extra PHP version costs about 15 MB idle. The daemon could start a version's master only when a site on that version gets its first request; this is a Phase 2 design option, not decided.
 
+**2026-11-02: erdbpro-saas served through Caddy, nginx and Apache** (`spike/webservers/`, state in the gitignored `spike/webservers/run/`). Risks 4, 5 and 6 are answered.
+
+- **Setup:** one php-fpm 8.4 pool (`pm = ondemand`) behind all three servers, each with a Devid-CA certificate for `erdbpro-saas.test`: Caddy on :9443, nginx on :9444, Apache on :9445. GET requests only.
+- **Identical results on all three:** `/` returns 200 (23,360 B), `/login` returns 200 (20,764 B) with the Inertia `data-page`, the Vite JS asset and `favicon.ico` return 200, an unknown path returns Laravel's 404, and every response is HTTP/2. `/.env` is never served (nginx 403 by a deny rule; Caddy and Apache return Laravel's 404).
+- **nginx (risk 4):**
+  - nginx 1.30.6 (stable) builds in about 2 min, statically linked with our OpenSSL 3.6.5, zlib and PCRE2. The result is 6.0 MB and links only `libSystem`.
+  - Two pitfalls were found and fixed in `build-nginx.sh`:
+    - When `-lssl` is not found, nginx's configure falls back to a hard-coded `-L/usr/local/lib`, which pulled in Homebrew's OpenSSL 4 even with `SDKROOT` set. The fix passes `-L<buildroot>/lib -lz` (our libcrypto needs zlib), and the script now fails the build on any `/usr/local` link.
+    - The Laravel adapter needs `fastcgi_buffer_size 32k; fastcgi_buffers 16 16k;`. Without them, erdbpro's response headers (cookies, Vite preload links) give a 502 "upstream sent too big header".
+- **Apache (risk 4):** macOS ships Apache 2.4.67 at `/usr/sbin/httpd` (Apple-signed) with `mod_proxy_fcgi`, `mod_ssl`, `mod_http2` and `mod_rewrite`. It runs as the user with a Devid-owned config (never `/etc/apache2`), and Laravel's `.htaccess` works. No Apache build is needed. Unknown: whether future macOS releases keep `httpd`.
+- **Idle RAM of the web server alone:** Caddy 33.9 MB, nginx 7.8 MB (master + 1 worker), Apache 8.2 MB (2 processes). nginx and Apache are about 4x lighter than Caddy at idle.
+- **CI (risk 6):** the GitHub-hosted image list (actions/runner-images README, 2026-11-02) offers x64 macOS as `macos-15-intel` and `macos-26-intel`; macOS 14 images are deprecated. Unverified: whether these labels count as standard (free-quota) runners or as paid larger runners.
+
 **Phase 1 is done when** all of these work on the owner's Mac:
 - ✅ (2026-11-02) `php -m` shows the full extension list for 8.3, 8.4 and 8.5.
 - `xdebug.so` loads.
 - ✅ (2026-11-02) HTTPS calls from PHP succeed, including site-to-site through the Devid CA.
-- erdbpro-saas loads through the static php-fpm.
+- ✅ (2026-11-02) erdbpro-saas loads through the static php-fpm on Caddy, nginx and Apache.
 
 ## Machine state (before migration)
 
