@@ -156,16 +156,33 @@ pub fn load_agent(paths: &Paths) -> io::Result<()> {
     fs::create_dir_all(paths.log_dir())?;
     fs::write(&plist, agent_plist(paths))?;
     unload_agent();
-    let out = Command::new("/bin/launchctl").arg("bootstrap").arg(gui_domain()).arg(&plist).output()?;
-    if !out.status.success() {
-        return Err(err(format!("launchctl bootstrap failed: {}", String::from_utf8_lossy(&out.stderr).trim())));
+    // Even after the old job is gone, launchd can briefly refuse the new one ("Bootstrap failed: 5:
+    // Input/output error"); retry instead of leaving the sites down.
+    let mut last = String::new();
+    for _ in 0..10 {
+        let out = Command::new("/bin/launchctl").arg("bootstrap").arg(gui_domain()).arg(&plist).output()?;
+        if out.status.success() {
+            return Ok(());
+        }
+        last = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    Ok(())
+    Err(err(format!(
+        "launchctl bootstrap failed: {last}; retry with `launchctl bootstrap {} {}`",
+        gui_domain(),
+        plist.display()
+    )))
 }
 
-/// Stop the agent (launchd sends SIGTERM; the daemon stops PHP and nginx cleanly).
+/// Stop the agent (launchd sends SIGTERM; the daemon stops PHP and nginx cleanly) and wait until
+/// launchd has really released it: `bootout` returns before teardown finishes, and a `bootstrap`
+/// right after it fails (this took the owner's sites down during the first upgrade).
 pub fn unload_agent() {
     let _ = Command::new("/bin/launchctl").arg("bootout").arg(format!("{}/{AGENT_LABEL}", gui_domain())).output();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while agent_loaded() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 pub fn agent_loaded() -> bool {
