@@ -195,6 +195,14 @@ pub fn spec(paths: &Paths, version: &str) -> Spec {
     }
 }
 
+/// Full version of an installed PHP (e.g. "8.4.27"), if it runs.
+pub fn full_version(paths: &Paths, version: &str) -> Option<String> {
+    let bin = dir(paths, version).join("bin/php");
+    let out = crate::webserver::probe(&bin, &["-n", "-r", "echo PHP_VERSION;"]).ok()?;
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !v.is_empty()).then_some(v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

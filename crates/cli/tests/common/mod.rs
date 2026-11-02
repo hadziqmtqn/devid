@@ -115,6 +115,11 @@ pub fn free_udp_port() -> u16 {
 }
 
 pub fn start_daemon(home: &Path) -> Daemon {
+    start_daemon_env(home, &[])
+}
+
+/// Like `start_daemon`, with extra environment for the daemon (e.g. DEVID_MANIFEST_URL).
+pub fn start_daemon_env(home: &Path, env: &[(&str, &str)]) -> Daemon {
     let config = home.join("config.toml");
     if !config.exists() {
         fs::create_dir_all(home).unwrap();
@@ -124,7 +129,8 @@ pub fn start_daemon(home: &Path) -> Daemon {
         )
         .unwrap();
     }
-    let child = Command::new(BIN).args(["daemon", "run"]).env("DEVID_HOME", home).spawn().unwrap();
+    let child =
+        Command::new(BIN).args(["daemon", "run"]).env("DEVID_HOME", home).envs(env.iter().copied()).spawn().unwrap();
     let daemon = Daemon { home: home.to_path_buf(), child };
     wait_for("daemon", || devid(home, &["status"]).status.success());
     daemon

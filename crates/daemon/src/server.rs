@@ -7,6 +7,7 @@ use crate::{
     paths::Paths,
     php,
     protocol::Request,
+    releases,
     sites::{self, Site},
     supervisor::{ProcState, Spec, Supervisor},
     webserver,
@@ -302,12 +303,8 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         }
         Request::PhpList => Ok(json!({"ok": true, "php": php_list(state)})),
         Request::PhpInstall { version, from } => {
-            php::install(&state.paths, &version, Path::new(&from)).map_err(|e| e.to_string())?;
-            // A running master restarts on the new binaries; otherwise apply starts it if wanted.
-            state.supervisor.restart(&php_service(&version));
-            let config = state.config.lock().unwrap();
-            state.apply(&config)?;
-            Ok(json!({"ok": true, "installed": version}))
+            let installed = install_php(state, &version, from, None)?;
+            Ok(json!({"ok": true, "installed": version, "version": installed}))
         }
         Request::PhpUse { version } => {
             php::check_supported(&version).map_err(|e| e.to_string())?;
@@ -321,12 +318,35 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         }
         Request::ServerInstall { server, from } => {
             webserver::check(&server)?;
-            webserver::install(&state.paths, &server, from.as_deref().map(Path::new)).map_err(|e| e.to_string())?;
-            // If it is the active server, restart it on the new binary; otherwise this is a no-op.
-            state.supervisor.restart(&server);
-            let config = state.config.lock().unwrap();
-            state.apply(&config)?;
+            install_server(state, &server, from, None)?;
             Ok(json!({"ok": true, "installed": server}))
+        }
+        Request::Update { check } => {
+            let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
+            let mut changes = Vec::new();
+            for version in php::installed(&state.paths) {
+                let current = php::full_version(&state.paths, &version).unwrap_or_default();
+                if let Some(a) = releases::artifact(&manifest, "php", Some(&version))
+                    && releases::newer(&a.version, &current)
+                {
+                    changes.push(json!({"what": format!("php {version}"), "from": current, "to": a.version}));
+                    if !check {
+                        install_php(state, &version, None, Some(&manifest))?;
+                    }
+                }
+            }
+            for server in ["nginx", "caddy"] {
+                let Some(current) = webserver::installed_version(&state.paths, server) else { continue };
+                if let Some(a) = releases::artifact(&manifest, server, None)
+                    && releases::newer(&a.version, &current)
+                {
+                    changes.push(json!({"what": server, "from": current, "to": a.version}));
+                    if !check {
+                        install_server(state, server, None, Some(&manifest))?;
+                    }
+                }
+            }
+            Ok(json!({"ok": true, "changes": changes, "applied": !check, "release": manifest["tag"]}))
         }
         Request::ServerUse { server } => {
             webserver::check(&server)?;
@@ -468,4 +488,69 @@ fn standard_ports(config: &Config, paths: &Paths) -> bool {
         ca_cert: ca::ca_cert(paths),
     };
     fs::read_to_string(helper::PF_FILE).is_ok_and(|c| c == helper::pf_rules(&plan))
+}
+
+/// Install PHP `version` from `from` (a build folder) or else from the release manifest
+/// (downloaded, SHA-256-verified, unpacked). Restarts that version if it runs. Returns the full version.
+fn install_php(state: &State, version: &str, from: Option<String>, manifest: Option<&Value>) -> Result<String, String> {
+    php::check_supported(version).map_err(|e| e.to_string())?;
+    let downloaded = from.is_none();
+    let dir = match from {
+        Some(from) => std::path::PathBuf::from(from),
+        None => {
+            let fetched;
+            let manifest = match manifest {
+                Some(m) => m,
+                None => {
+                    fetched = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
+                    &fetched
+                }
+            };
+            let artifact = releases::artifact(manifest, "php", Some(version))
+                .ok_or(format!("the release has no PHP {version} for this Mac"))?;
+            releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?
+        }
+    };
+    let result = php::install(&state.paths, version, &dir).map_err(|e| e.to_string());
+    if downloaded {
+        // The files are copied into ~/.devid/php/<ver>; the unpacked download (~130 MB) is not needed.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    result?;
+    // A running master restarts on the new binaries; otherwise apply starts it if wanted.
+    state.supervisor.restart(&php_service(version));
+    let config = state.config.lock().unwrap();
+    state.apply(&config)?;
+    Ok(php::full_version(&state.paths, version).unwrap_or_default())
+}
+
+/// Install a web server from `from` or else from the release manifest (Apache: the system httpd).
+fn install_server(state: &State, server: &str, from: Option<String>, manifest: Option<&Value>) -> Result<(), String> {
+    let downloaded = from.is_none() && server != "apache";
+    let bin = match (from, server) {
+        (Some(from), _) => Some(std::path::PathBuf::from(from)),
+        (None, "apache") => None,
+        (None, _) => {
+            let fetched;
+            let manifest = match manifest {
+                Some(m) => m,
+                None => {
+                    fetched = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
+                    &fetched
+                }
+            };
+            let artifact = releases::artifact(manifest, server, None)
+                .ok_or(format!("the release has no {server} for this Mac"))?;
+            Some(releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?.join(server))
+        }
+    };
+    let result = webserver::install(&state.paths, server, bin.as_deref()).map_err(|e| e.to_string());
+    if let Some(unpacked) = bin.as_deref().filter(|_| downloaded).and_then(std::path::Path::parent) {
+        let _ = std::fs::remove_dir_all(unpacked);
+    }
+    result?;
+    // If it is the active server, restart it on the new binary; otherwise this is a no-op.
+    state.supervisor.restart(server);
+    let config = state.config.lock().unwrap();
+    state.apply(&config)
 }

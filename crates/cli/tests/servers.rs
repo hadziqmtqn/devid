@@ -26,14 +26,17 @@ fn switch_between_nginx_caddy_and_apache() {
     let (nginx, caddy, httpd) = (fake_nginx(&root, &home), fake_caddy(&root), fake_httpd(&root, &home));
     let php = fake_build(&root, "8.5");
 
-    let daemon = start_daemon(&home);
+    // No network in tests: point the manifest at a local file that does not exist.
+    let manifest = format!("file://{}/no-release/manifest.json", root.display());
+    let daemon = start_daemon_env(&home, &[("DEVID_MANIFEST_URL", &manifest)]);
     assert!(devid(&home, &["php", "install", "8.5", "--from", &s(&php)]).status.success());
     assert!(devid(&home, &["park", &s(&root.join("projects"))]).status.success());
 
     // Validation before anything is installed.
     assert!(stderr(&devid(&home, &["server", "use", "caddy"])).contains("not installed"));
     assert!(stderr(&devid(&home, &["server", "use", "iis"])).contains("unknown web server"));
-    assert!(stderr(&devid(&home, &["server", "install", "caddy"])).contains("needs --from"));
+    // Without --from, install downloads from the release manifest (unreachable here).
+    assert!(stderr(&devid(&home, &["server", "install", "caddy"])).contains("download failed"));
 
     for (name, bin) in [("nginx", &nginx), ("caddy", &caddy), ("apache", &httpd)] {
         let out = devid(&home, &["server", "install", name, "--from", &s(bin)]);

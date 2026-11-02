@@ -11,6 +11,7 @@ pub mod nginx;
 pub mod paths;
 pub mod php;
 pub mod protocol;
+pub mod releases;
 pub mod server;
 pub mod sites;
 pub mod supervisor;

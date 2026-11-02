@@ -11,5 +11,7 @@ serde_json.workspace = true
 toml.workspace = true
 libc = "0.2"
 # ring backend: aws-lc-rs (the default) needs a cmake C build on every machine and in CI.
+# SHA-256 for downloads; already in the tree through rcgen.
+ring = "0.17"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 time = "0.3"

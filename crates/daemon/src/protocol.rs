@@ -10,9 +10,10 @@ pub enum Request {
     Status,
     Stop,
     PhpList,
+    /// Install a PHP version from a build folder, or from the release manifest when `from` is None.
     PhpInstall {
         version: String,
-        from: String,
+        from: Option<String>,
     },
     PhpUse {
         version: String,
@@ -27,6 +28,10 @@ pub enum Request {
         server: String,
     },
     ServerList,
+    /// Compare installed PHP/nginx/Caddy with the release manifest; install newer ones unless `check`.
+    Update {
+        check: bool,
+    },
     Sites,
     /// Serve `path` as `<name>.<tld>`; the name defaults to the folder name.
     Link {

@@ -58,6 +58,12 @@ enum Command {
         #[command(subcommand)]
         action: HelperAction,
     },
+    /// Update installed PHP, nginx and Caddy to the newest versions in Devid's releases
+    Update {
+        /// Only show what would be updated
+        #[arg(long)]
+        check: bool,
+    },
     /// Manage the web server binary
     Server {
         #[command(subcommand)]
@@ -129,7 +135,7 @@ enum HelperAction {
 
 #[derive(Subcommand)]
 enum ServerAction {
-    /// Install a web server: nginx or caddy (--from <binary>), or apache (default: /usr/sbin/httpd)
+    /// Install a web server: nginx or caddy (from Devid's releases, or --from <binary>), or apache (/usr/sbin/httpd)
     Install {
         server: String,
         #[arg(long)]
@@ -145,11 +151,11 @@ enum ServerAction {
 enum PhpAction {
     /// List installed versions and whether their php-fpm runs
     List,
-    /// Install a version from a build folder containing php, php-fpm and modules/
+    /// Install a version from Devid's releases (or --from a build folder with php, php-fpm, modules/)
     Install {
         version: String,
         #[arg(long)]
-        from: PathBuf,
+        from: Option<PathBuf>,
     },
     /// Make a version the default
     Use { version: String },
@@ -196,9 +202,36 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Status { json } => send(Request::Status).map(|v| print_status(&v, json)),
         Command::Php { action: PhpAction::List } => send(Request::PhpList).map(|v| print_php(&v["php"])),
         Command::Php { action: PhpAction::Install { version, from } } => {
-            send(Request::PhpInstall { version: version.clone(), from: abs(Some(from))? })
-                .map(|_| println!("PHP {version} installed"))
+            let from = match from {
+                Some(f) => Some(abs(Some(f))?),
+                None => {
+                    println!("downloading PHP {version} from Devid's releases (sha256-checked)…");
+                    None
+                }
+            };
+            send(Request::PhpInstall { version: version.clone(), from }).map(|v| {
+                println!("PHP {} installed", v["version"].as_str().filter(|s| !s.is_empty()).unwrap_or(&version))
+            })
         }
+        Command::Update { check } => send(Request::Update { check }).map(|v| {
+            let changes = v["changes"].as_array().map(Vec::as_slice).unwrap_or_default();
+            let release = v["release"].as_str().unwrap_or("?");
+            if changes.is_empty() {
+                println!("everything is up to date (release {release})");
+            }
+            for c in changes {
+                let verb = if check { "available" } else { "updated" };
+                println!(
+                    "{verb}: {} {} -> {}",
+                    c["what"].as_str().unwrap_or("?"),
+                    c["from"].as_str().unwrap_or("?"),
+                    c["to"].as_str().unwrap_or("?")
+                );
+            }
+            if check && !changes.is_empty() {
+                println!("run `devid update` to install");
+            }
+        }),
         Command::Php { action: PhpAction::Use { version } } => {
             send(Request::PhpUse { version: version.clone() }).map(|_| println!("default PHP is now {version}"))
         }

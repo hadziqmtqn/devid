@@ -2,7 +2,7 @@
 
 > Scope: building and shipping Devid's binaries, and how an installed Devid gets updates
 > Verified against: 2026-11-02
-> Status: proposed (milestones); D-016 accepted
+> Status: R1 done (first release 2026.11.02-2), R2 in review, R3 done in code; D-016 accepted
 
 Today Devid installs PHP and nginx with `--from <spike folder>`, and an upgrade means `git pull && cargo build && ./target/release/devid setup`. Phase 5 replaces both with releases that the installed Devid downloads, verifies and updates by itself. `install.sh` (D-014) starts working at the end of this phase.
 
@@ -41,4 +41,4 @@ installed Devid ── reads manifest.json ── downloads + verifies sha256 �
 - **Owner actions needed:**
   - creating the public repository (R1, after approval);
   - creating one fine-grained token, limited to "Contents: write" on `devid-binaries`, and storing it as a secret in `devid` (R4).
-- **Open, verify in R1:** whether `macos-15-intel` runs as a free standard runner for public repositories.
+- **Verified in R1 (2026-11-02):** `macos-15-intel` runs free for the public repository. A first build without caches takes PHP 27–43 min per version in parallel and nginx 6 min. The first run failed on a `pipefail` + `grep -q` check bug (SIGPIPE), fixed in devid-binaries#1.
