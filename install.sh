@@ -2,14 +2,16 @@
 # Devid installer: fetches the devid binary and hands over to `devid setup` (D-014).
 # This script never uses sudo; system changes happen only inside `devid setup`, which lists them first.
 #
-#   sh install.sh                       latest release
-#   DEVID_VERSION=v0.1.0 sh install.sh  specific release
+#   curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
+#   DEVID_VERSION=0.1.0 sh install.sh   specific release
 #   DEVID_NO_SETUP=1 sh install.sh      install the binary only
 set -eu
 
-REPO="hadziqmtqn/devid"
+# Binaries live in the public devid-binaries repo (D-016); the source stays private.
+REPO="hadziqmtqn/devid-binaries"
 BIN_DIR="${DEVID_HOME:-$HOME/.devid}/bin"
 VERSION="${DEVID_VERSION:-latest}"
+BASE="${DEVID_RELEASE_BASE:-https://github.com/$REPO/releases/download}"
 
 say() { printf 'devid: %s\n' "$*"; }
 die() { printf 'devid: error: %s\n' "$*" >&2; exit 1; }
@@ -25,24 +27,18 @@ case "$arch" in
   *) die "unsupported CPU '$arch'" ;;
 esac
 asset="devid-$os-$arch"
+case "$VERSION" in
+  latest) tag="devid-latest" ;;
+  *) tag="devid-v${VERSION#v}" ;;
+esac
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-say "downloading $asset ($VERSION)"
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  # Private repo: release assets need an authenticated download.
-  tag=""
-  [ "$VERSION" = latest ] || tag="$VERSION"
-  gh release download $tag -R "$REPO" -p "$asset" -p checksums.txt -D "$tmp" \
-    || die "no release asset '$asset' found for $VERSION"
-else
-  # Public repo: plain HTTPS download.
-  if [ "$VERSION" = latest ]; then base="https://github.com/$REPO/releases/latest/download"
-  else base="https://github.com/$REPO/releases/download/$VERSION"; fi
-  curl -fsSL "$base/$asset" -o "$tmp/$asset" || die "download failed (private repo? install and log in to gh)"
-  curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt" || die "checksums.txt missing"
-fi
+say "downloading $asset ($tag)"
+curl -fsSL --proto '=https,file' -o "$tmp/$asset" "$BASE/$tag/$asset" \
+  || die "no $asset in release $tag (arm64 builds come later, see D-010)"
+curl -fsSL --proto '=https,file' -o "$tmp/checksums.txt" "$BASE/$tag/checksums.txt" || die "checksums.txt missing"
 
 expected=$(awk -v f="$asset" '$2 == f || $2 == "*"f {print $1}' "$tmp/checksums.txt")
 [ -n "$expected" ] || die "no checksum listed for $asset"
@@ -52,7 +48,7 @@ actual=$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')
 mkdir -p "$BIN_DIR"
 chmod +x "$tmp/$asset"
 mv -f "$tmp/$asset" "$BIN_DIR/devid"
-say "installed $BIN_DIR/devid"
+say "installed $BIN_DIR/devid ($("$BIN_DIR/devid" --version))"
 
 if [ -n "${DEVID_NO_SETUP:-}" ]; then
   say "skipping setup; run '$BIN_DIR/devid setup' when ready"

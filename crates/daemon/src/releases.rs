@@ -39,9 +39,20 @@ pub struct Artifact {
     pub sha256: String,
 }
 
-/// Download `url` to `dest` with curl, HTTPS only (file:// only when the manifest itself is local).
-fn fetch(url: &str, dest: &Path) -> io::Result<()> {
-    let proto = if url.starts_with("file://") && manifest_url().starts_with("file://") { "=file" } else { "=https" };
+/// Where `devid self-update` and install.sh find the devid binary; `DEVID_RELEASE_BASE` overrides it
+/// for tests (`file://`).
+pub fn release_base() -> String {
+    std::env::var("DEVID_RELEASE_BASE")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| "https://github.com/hadziqmtqn/devid-binaries/releases/download".into())
+}
+
+/// Download `url` to `dest` with curl, HTTPS only (file:// only when a test points Devid at a local
+/// release through DEVID_MANIFEST_URL or DEVID_RELEASE_BASE).
+pub fn fetch(url: &str, dest: &Path) -> io::Result<()> {
+    let local_release = manifest_url().starts_with("file://") || release_base().starts_with("file://");
+    let proto = if url.starts_with("file://") && local_release { "=file" } else { "=https" };
     let out = Command::new("curl")
         .args(["-fsSL", "--retry", "2", "--proto", proto, "-o"])
         .arg(dest)
@@ -85,7 +96,7 @@ pub fn artifact(manifest: &Value, tool: &str, minor: Option<&str>) -> Option<Art
     })
 }
 
-fn sha256_hex(path: &Path) -> io::Result<String> {
+pub fn sha256_hex(path: &Path) -> io::Result<String> {
     let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
     let mut file = fs::File::open(path)?;
     let mut buf = vec![0u8; 1 << 20];

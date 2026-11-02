@@ -10,3 +10,4 @@
 | 2026-11-02 | [M6: setup, doctor, uninstall, LaunchAgent and shims](2026-11-02-m6-setup.md) |
 | 2026-11-02 | [M7: Caddy and Apache adapters, `devid server use`](2026-11-02-m7-servers.md) |
 | 2026-11-02 | [Phase 5 R3: install and update from releases](2026-11-02-r3-release-downloads.md) |
+| 2026-11-02 | [Phase 5 R4: devid releases, install.sh and self-update](2026-11-02-r4-devid-release.md) |

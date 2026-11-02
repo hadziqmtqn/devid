@@ -2,7 +2,7 @@
 
 > Scope: building and shipping Devid's binaries, and how an installed Devid gets updates
 > Verified against: 2026-11-02
-> Status: R1 done (first release 2026.11.02-2), R2 in review, R3 done in code; D-016 accepted
+> Status: R1–R3 done (release 2026.11.02-3 with Caddy; the owner's Mac runs release binaries); R4 in review; D-016 accepted
 
 Today Devid installs PHP and nginx with `--from <spike folder>`, and an upgrade means `git pull && cargo build && ./target/release/devid setup`. Phase 5 replaces both with releases that the installed Devid downloads, verifies and updates by itself. `install.sh` (D-014) starts working at the end of this phase.
 
@@ -31,6 +31,17 @@ installed Devid ── reads manifest.json ── downloads + verifies sha256 �
 | R3 | `devid php install <ver>` and `devid server install <nginx\|caddy>` download from the manifest when `--from` is not given. `devid update` checks the manifest and installs newer PHP or nginx patch versions. Every download is SHA-256-checked; a mismatch aborts. | private | the owner's PHP and nginx come from a release, no spike folder |
 | R4 | A workflow in `devid` builds the `devid` binary on a version tag and uploads `devid-darwin-x86_64` plus `checksums.txt` to `devid-binaries` (D-014 contract). `install.sh` points at `devid-binaries`. `devid self-update` downloads, verifies and runs `setup` from the new binary. | both | `curl … install.sh \| sh` works on this Mac; `devid self-update` upgrades |
 | R5 | A weekly scheduled workflow compares php.net, nginx and Caddy release feeds with the manifest and builds whatever is new. | public | a new upstream patch appears in the manifest without a manual step |
+
+## R4 release layout (implemented)
+
+- **Trigger:** pushing a tag `v<version>` in `devid` (it must match `Cargo.toml`) runs `.github/workflows/release.yml` on `macos-15-intel`. The workflow tests, builds and ad-hoc signs the binary (macOS 12.0 target).
+- **Where it publishes:** into `devid-binaries`, with the `DEVID_BINARIES_TOKEN` secret, as two releases:
+  - `devid-v<version>`: one immutable release per version;
+  - `devid-latest`: a rolling release that `install.sh` and `devid self-update` read.
+  Both carry `devid-darwin-x86_64`, `install.sh`, `devid-version.txt` and `checksums.txt`.
+- **"Latest" stays the binaries release.** Both devid releases are created with `--latest=false`, and the PHP/nginx release is created with `--latest` (devid-binaries#4), so `releases/latest/download/manifest.json` always means the binaries release.
+- **Install:** `curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh`.
+- **`devid self-update [--check]`:** compares `devid-version.txt` with its own version, downloads the binary, verifies it against `checksums.txt`, and runs the new binary's `setup`.
 
 ## Decisions and constraints
 

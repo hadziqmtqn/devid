@@ -1,0 +1,71 @@
+name: Release devid
+
+# Build the devid binary and publish it to the public devid-binaries repo (D-016, Phase 5 R4):
+#   devid-v<version>  one immutable release per version
+#   devid-latest      a rolling release that install.sh and `devid self-update` read
+# Both are created with --latest=false so devid-binaries' "Latest" stays the PHP/nginx release
+# that manifest.json is read from.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-devid
+  cancel-in-progress: false
+
+env:
+  BINARIES_REPO: hadziqmtqn/devid-binaries
+
+jobs:
+  release:
+    # Private repo: macOS minutes count 10x, but this build takes only a few minutes.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Version must match the tag
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v$VERSION" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version $VERSION" >&2; exit 1
+          fi
+
+      - name: Build, check and package
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
+        run: |
+          cargo test --release
+          cargo build --release
+          mkdir -p dist
+          cp target/release/devid dist/devid-darwin-x86_64
+          codesign --force --sign - dist/devid-darwin-x86_64   # ad-hoc (D-010)
+          dist/devid-darwin-x86_64 --version
+          otool -L dist/devid-darwin-x86_64
+          cp install.sh dist/install.sh
+          echo "$VERSION" > dist/devid-version.txt
+          (cd dist && shasum -a 256 devid-darwin-x86_64 install.sh devid-version.txt > checksums.txt)
+          cat dist/checksums.txt
+
+      - name: Publish to devid-binaries
+        env:
+          GH_TOKEN: ${{ secrets.DEVID_BINARIES_TOKEN }}
+        run: |
+          ASSETS="dist/devid-darwin-x86_64 dist/install.sh dist/devid-version.txt dist/checksums.txt"
+          NOTES="devid $VERSION for macOS x86_64 (ad-hoc signed, not notarized). Install: curl -fsSL https://github.com/$BINARIES_REPO/releases/download/devid-latest/install.sh | sh"
+          if gh release view "devid-v$VERSION" -R "$BINARIES_REPO" >/dev/null 2>&1; then
+            gh release upload "devid-v$VERSION" $ASSETS -R "$BINARIES_REPO" --clobber
+          else
+            gh release create "devid-v$VERSION" $ASSETS -R "$BINARIES_REPO" --latest=false --title "devid $VERSION" --notes "$NOTES"
+          fi
+          if ! gh release view devid-latest -R "$BINARIES_REPO" >/dev/null 2>&1; then
+            gh release create devid-latest -R "$BINARIES_REPO" --latest=false --title "devid (latest)" --notes "Always the newest devid. $NOTES"
+          fi
+          gh release upload devid-latest $ASSETS -R "$BINARIES_REPO" --clobber

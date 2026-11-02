@@ -187,3 +187,47 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
     }
     Ok(())
 }
+
+/// `devid self-update`: download the newest devid from the `devid-latest` release, verify it against
+/// that release's checksums.txt, then run its `setup`, which installs it and restarts the daemon.
+pub fn self_update(paths: &Paths, check: bool) -> Result<(), String> {
+    use devid_daemon::releases;
+    let base = format!("{}/devid-latest", releases::release_base());
+    let dir = paths.home.join("downloads");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let get = |name: &str| -> Result<std::path::PathBuf, String> {
+        let dest = dir.join(format!("self-update-{name}"));
+        releases::fetch(&format!("{base}/{name}"), &dest).map_err(|e| e.to_string())?;
+        Ok(dest)
+    };
+
+    let latest = std::fs::read_to_string(get("devid-version.txt")?).map_err(|e| e.to_string())?.trim().to_string();
+    let current = devid_daemon::VERSION;
+    if !releases::newer(&latest, current) {
+        println!("devid {current} is the newest version");
+        return Ok(());
+    }
+    if check {
+        println!("devid {latest} is available (installed: {current}); run `devid self-update`");
+        return Ok(());
+    }
+
+    let asset = if cfg!(target_arch = "aarch64") { "devid-darwin-arm64" } else { "devid-darwin-x86_64" };
+    println!("downloading devid {latest} (sha256-checked)…");
+    let sums = std::fs::read_to_string(get("checksums.txt")?).map_err(|e| e.to_string())?;
+    let expected = sums
+        .lines()
+        .find_map(|l| l.split_once("  ").filter(|(_, f)| *f == asset).map(|(h, _)| h.to_string()))
+        .ok_or(format!("no checksum for {asset} in the release"))?;
+    let bin = get(asset)?;
+    let actual = releases::sha256_hex(&bin).map_err(|e| e.to_string())?;
+    if actual != expected {
+        let _ = std::fs::remove_file(&bin);
+        return Err(format!("checksum mismatch for {asset}; not installed"));
+    }
+    std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).map_err(|e| e.to_string())?;
+    // The new binary installs itself (copy to ~/.devid/bin, LaunchAgent reload); same steps as setup.
+    let status = std::process::Command::new(&bin).arg("setup").status().map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&bin);
+    if status.success() { Ok(()) } else { Err(format!("devid {latest} setup failed ({status})")) }
+}
