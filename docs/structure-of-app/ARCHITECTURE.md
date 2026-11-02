@@ -24,9 +24,9 @@ browser → foo.test
 
 There is exactly one active web server globally.
 
-## PHP runtime (proposed, see D-008)
+## PHP runtime (accepted, D-008)
 
-- **Binaries:** static php-fpm and php CLI from static-php-cli, built by us for x86_64 and arm64.
+- **Binaries:** static php-fpm and php CLI from static-php-cli, built by us for x86_64 (arm64 deferred, D-010).
 - **Install:** downloaded per version on demand from GitHub Releases into `~/Library/Application Support/Devid/php/<version>/`. The download is checked against a `manifest.json` (version, sha256).
 - **Configuration:** php-fpm and the CLI shims always start with `PHPRC` and `PHP_INI_SCAN_DIR` pointing at that version's folder. Compiled-in ini paths are never used.
 - **TLS:** the base ini sets `openssl.cafile` and `curl.cainfo` to a Devid `cacert.pem` (Mozilla bundle plus the Devid CA). The file is regenerated whenever the CA changes.
@@ -45,6 +45,5 @@ All behaviour lives in `daemon` and is reached through its socket API. `cli` and
 
 ## Unknowns
 
-- Whether static php-fpm can load shared extensions (Xdebug). This decides D-008.
 - The Apache source: our own build or `/usr/sbin/httpd`.
 - The daemon socket protocol and the on-disk config format are not designed yet.

@@ -14,3 +14,5 @@ spike/runtime/caddy/
 spike/runtime/bin/
 spike/runtime/bin83/
 spike/results-erdbpro/
+# spike CA private keys, certs and generated configs
+spike/runtime/multi/

@@ -15,7 +15,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-005 | 2026-11-01 | accepted | One global web server: Caddy (default), nginx, Apache |
 | D-006 | 2026-11-01 | accepted | Databases are out of scope (DBngin is used) |
 | D-007 | 2026-11-01 | accepted (applies to the TUI page structure, D-012) | UI follows macOS System Settings, per the approved prototype |
-| D-008 | 2026-11-02 | proposed | How to ship static PHP binaries (details below) |
+| D-008 | 2026-11-02 | accepted | How to ship static PHP binaries (details below) |
 | D-009 | 2026-11-02 | accepted | Supported PHP versions: 8.3, 8.4, 8.5; no 8.1 or 8.2 |
 | D-010 | 2026-11-02 | accepted | Personal use first; a public release needs a prominent notice |
 | D-011 | 2026-11-02 | accepted | v1 scope: sites, PHP versions, HTTPS, parked folders |
@@ -38,7 +38,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 
 - **Consequence:** there is no per-site server choice. The nginx static build and the Apache source are still open risks (see PROJECT_CONTEXT).
 
-## D-008: shipping static PHP binaries (proposed 2026-11-02, awaiting Phase 1)
+## D-008: shipping static PHP binaries (proposed 2026-11-02, accepted 2026-11-02)
 
 **Context:** static binaries cause seven problems:
 1. Extensions are fixed at build time.
@@ -62,11 +62,11 @@ See ARCHITECTURE, "PHP runtime".
 
 **Fallback:** if static php-fpm cannot load `xdebug.so`, switch to our own dynamic builds. The libraries are bundled in each version's folder and relinked to `@rpath`. This also enables `phpize` and pecl. Estimated cost: 1–2 extra weeks on the build pipeline.
 
-**Accept when:** Phase 1 confirms risks 1–3 in PROJECT_CONTEXT.
+**Accept when:** Phase 1 confirms risks 1–3 in PROJECT_CONTEXT. Met on 2026-11-02; the owner accepted the risks and the direction above. The fallback is not needed.
 
 **Evidence so far (2026-11-02):** on the owner's Mac, PHP 8.5.12 builds static, loads shared `xdebug.so` and `pcov.so`, serves Laravel through Caddy, and passes erdbpro-saas's 532 tests. The fallback is likely unnecessary. Still open:
 - ~~builds for 8.3 and 8.4~~ done 2026-11-02;
-- HTTPS to `.test` sites through the Devid CA;
+- ~~HTTPS to `.test` sites through the Devid CA~~ done 2026-11-02 for PHP clients (browser trust is a Phase 2 helper task);
 - ~~pinning a stable Xdebug~~ done 2026-11-02 (3.5.3).
 
 ## D-009: supported PHP versions (accepted 2026-11-02)
