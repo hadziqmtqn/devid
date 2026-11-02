@@ -9,6 +9,7 @@ spike/php/*
 spike/runtime/run/
 spike/runtime/log/
 spike/laravel/
+spike/laravel83/
 spike/runtime/caddy/
 spike/runtime/bin/
 spike/results-erdbpro/
