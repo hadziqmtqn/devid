@@ -41,8 +41,8 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 1 | Spike (~1 week): prove the risks below | done 2026-11-02 |
 | 2 | daemon + CLI with nginx (D-015), multi-PHP, `.test`, HTTPS; plan in `docs/roadmap/phase-2.md` | done 2026-11-02 (M1–M7) |
 | 3 | nginx and Apache adapters | done 2026-11-02 (folded into Phase 2 M7, with Caddy) |
-| 4 | TUI (ratatui) on top of the daemon API | not started |
-| 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | in progress (R1) |
+| 4 | TUI (ratatui) on top of the daemon API; colors per D-017 | next |
+| 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | in progress (R1–R4 done, R5 in review) |
 
 ## Open risks (Phase 1 must prove)
 
@@ -137,6 +137,11 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
   - launchd runs the daemon from `~/.devid/bin/devid` (LaunchAgent `dev.devid.daemon`; starts at login, restarts on a crash);
   - `~/.zshrc` line 153 puts `~/.devid/bin` before Homebrew's `php@8.4`, so new terminals get Devid's `php` (8.5.12 static) and `composer` (2.11.1);
   - `devid doctor` is all ok except that Valet still runs.
+- **Since Phase 5 (2026-11-02):** everything Devid runs comes from releases:
+  - PHP 8.4.27 / 8.5.12 and nginx 1.30.6 from `devid-binaries` release `2026.11.02-3`, installed with `devid php install` / `devid server install`;
+  - `devid` 0.1.0 itself, installed with `curl … install.sh | sh`.
+
+  Updates are `devid self-update` and `devid update`. The local `spike/` builds are no longer used at runtime.
 - Rollback: `devid uninstall` (restores Valet's resolver), then `valet start`.
 - Valet (root nginx, dnsmasq, php-fpm) still runs but no longer receives traffic; the owner stops it with `valet stop` when ready.
 
