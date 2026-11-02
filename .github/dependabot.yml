@@ -1,0 +1,31 @@
+# Version updates, weekly and grouped (one PR per ecosystem) to keep the noise low.
+# Security updates are enabled separately in the repo settings (Advanced Security).
+# Not covered here: the PHP/OpenSSL/nginx/Caddy binaries Devid builds and ships; the Phase 5
+# pipeline tracks those (D-008).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Jakarta
+    open-pull-requests-limit: 5
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Jakarta
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
