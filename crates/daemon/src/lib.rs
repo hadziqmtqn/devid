@@ -1,6 +1,8 @@
 //! Devid daemon: owns all state and behaviour; clients talk to it over a unix socket (D-012).
 
+pub mod apache;
 pub mod ca;
+pub mod caddy;
 pub mod config;
 pub mod dns;
 pub mod helper;
@@ -12,5 +14,6 @@ pub mod protocol;
 pub mod server;
 pub mod sites;
 pub mod supervisor;
+pub mod webserver;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -164,3 +164,39 @@ pub fn temp_root(name: &str) -> PathBuf {
     fs::create_dir_all(&root).unwrap();
     root.canonicalize().unwrap()
 }
+
+/// A fake Caddy: `version` says v2, `validate` rejects configs mentioning `reject.test`, and a
+/// running instance exits on SIGTERM (Caddy reloads by restart, so no reload signal).
+pub fn fake_caddy(root: &Path) -> PathBuf {
+    let path = root.join("fake-caddy");
+    let script = "#!/bin/sh\n\
+         case \"$1\" in\n\
+           version) echo 'v2.99.0 fake'; exit 0 ;;\n\
+           validate) grep -q reject.test \"$5\" && { echo 'Error: fake rejection' >&2; exit 1; }; exit 0 ;;\n\
+         esac\n\
+         trap 'exit 0' TERM\n\
+         while :; do sleep 0.1; done\n";
+    fs::write(&path, script).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+/// A fake httpd: `-v` says Apache/2.4, `-t` accepts, a running instance appends "reload" to
+/// `<home>/apache-reloads` on SIGUSR1 (graceful restart) and exits on SIGTERM.
+pub fn fake_httpd(root: &Path, home: &Path) -> PathBuf {
+    let path = root.join("fake-httpd");
+    let script = format!(
+        "#!/bin/sh\n\
+         case \"$1\" in\n\
+           -v) echo 'Server version: Apache/2.4.99 (Unix)'; exit 0 ;;\n\
+           -t) exit 0 ;;\n\
+         esac\n\
+         trap 'echo reload >> {reloads}' USR1\n\
+         trap 'exit 0' TERM\n\
+         while :; do sleep 0.1; done\n",
+        reloads = home.join("apache-reloads").display()
+    );
+    fs::write(&path, script).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}

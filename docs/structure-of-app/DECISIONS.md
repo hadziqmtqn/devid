@@ -12,7 +12,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-002 | 2026-11-01 | accepted (`gui` crate dropped by D-012) | Rust workspace: `daemon`, `cli`, `helper`, `gui` |
 | D-003 | 2026-11-01 | superseded by D-012 | GUI: Tauri v2 + React + Tailwind + shadcn/ui, menu bar first |
 | D-004 | 2026-11-01 | accepted (version range superseded by D-009) | PHP 8.1 to latest from static-php-cli builds, php-fpm with `pm = ondemand` |
-| D-005 | 2026-11-01 | accepted (default changed to nginx by D-015) | One global web server: Caddy (default), nginx, Apache |
+| D-005 | 2026-11-01 | accepted (default changed to nginx by D-015; all three implemented in M7) | One global web server: Caddy (default), nginx, Apache |
 | D-006 | 2026-11-01 | accepted | Databases are out of scope (DBngin is used) |
 | D-007 | 2026-11-01 | accepted (applies to the TUI page structure, D-012) | UI follows macOS System Settings, per the approved prototype |
 | D-008 | 2026-11-02 | accepted | How to ship static PHP binaries (details below) |

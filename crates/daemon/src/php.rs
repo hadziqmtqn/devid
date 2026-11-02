@@ -191,6 +191,7 @@ pub fn spec(paths: &Paths, version: &str) -> Spec {
         env: vec![("PHPRC".into(), etc.clone().into()), ("PHP_INI_SCAN_DIR".into(), etc.join("conf.d").into())],
         pid_file: pid_file(paths, version),
         comm: "php-fpm",
+        stop_signal: libc::SIGQUIT,
     }
 }
 

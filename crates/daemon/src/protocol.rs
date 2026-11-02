@@ -17,11 +17,16 @@ pub enum Request {
     PhpUse {
         version: String,
     },
-    /// Install a web server binary; M3 supports nginx only.
+    /// Install a web server binary (`from` optional for apache: the system httpd).
     ServerInstall {
         server: String,
-        from: String,
+        from: Option<String>,
     },
+    /// Make an installed web server the active one (D-005: one at a time).
+    ServerUse {
+        server: String,
+    },
+    ServerList,
     Sites,
     /// Serve `path` as `<name>.<tld>`; the name defaults to the folder name.
     Link {

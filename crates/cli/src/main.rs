@@ -129,12 +129,16 @@ enum HelperAction {
 
 #[derive(Subcommand)]
 enum ServerAction {
-    /// Install a web server binary (nginx for now)
+    /// Install a web server: nginx or caddy (--from <binary>), or apache (default: /usr/sbin/httpd)
     Install {
         server: String,
         #[arg(long)]
-        from: PathBuf,
+        from: Option<PathBuf>,
     },
+    /// Switch the active web server (only one runs at a time)
+    Use { server: String },
+    /// Show the web servers and which one is active
+    List,
 }
 
 #[derive(Subcommand)]
@@ -199,9 +203,21 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             send(Request::PhpUse { version: version.clone() }).map(|_| println!("default PHP is now {version}"))
         }
         Command::Server { action: ServerAction::Install { server, from } } => {
-            send(Request::ServerInstall { server: server.clone(), from: abs(Some(from))? })
-                .map(|_| println!("{server} installed"))
+            let from = match from {
+                Some(f) => Some(abs(Some(f))?),
+                None => None,
+            };
+            send(Request::ServerInstall { server: server.clone(), from }).map(|_| println!("{server} installed"))
         }
+        Command::Server { action: ServerAction::Use { server } } => {
+            send(Request::ServerUse { server: server.clone() }).map(|_| println!("now serving with {server}"))
+        }
+        Command::Server { action: ServerAction::List } => send(Request::ServerList).map(|v| {
+            for s in v["servers"].as_array().map(Vec::as_slice).unwrap_or_default() {
+                let mark = if s["active"] == true { "*" } else { " " };
+                println!("{mark} {:<7} {}", s["server"].as_str().unwrap_or("?"), s["status"].as_str().unwrap_or("?"));
+            }
+        }),
         Command::Helper { action } => helper(action, paths),
         Command::Setup { dry_run } => setup::setup(paths, dry_run),
         Command::Doctor => setup::doctor(paths),

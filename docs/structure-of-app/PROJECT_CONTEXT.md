@@ -39,8 +39,8 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | # | Phase | Status |
 |---|---|---|
 | 1 | Spike (~1 week): prove the risks below | done 2026-11-02 |
-| 2 | daemon + CLI with nginx (D-015), multi-PHP, `.test`, HTTPS; plan in `docs/roadmap/phase-2.md` | in progress (M1) |
-| 3 | nginx and Apache adapters | not started |
+| 2 | daemon + CLI with nginx (D-015), multi-PHP, `.test`, HTTPS; plan in `docs/roadmap/phase-2.md` | done 2026-11-02 (M1–M7) |
+| 3 | nginx and Apache adapters | done 2026-11-02 (folded into Phase 2 M7, with Caddy) |
 | 4 | TUI (ratatui) on top of the daemon API | not started |
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010) | not started |
 

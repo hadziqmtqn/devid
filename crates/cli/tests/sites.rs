@@ -30,7 +30,11 @@ fn park_link_isolate_and_nginx() {
     for (v, b) in [("8.4", &b84), ("8.5", &b85)] {
         assert!(devid(&home, &["php", "install", v, "--from", &s(b)]).status.success());
     }
-    assert!(devid(&home, &["server", "install", "caddy", "--from", &s(&nginx)]).status.code() == Some(1));
+    // A wrong binary (nginx passed as Caddy ignores `version` and keeps running) is rejected
+    // after the probe timeout instead of hanging the daemon.
+    let out = devid(&home, &["server", "install", "caddy", "--from", &s(&nginx)]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("did not finish in 5 s"), "{}", stderr(&out));
     assert!(devid(&home, &["server", "install", "nginx", "--from", &s(&nginx)]).status.success());
     wait_for("nginx running", || json(&home, &["status", "--json"])["server_status"] == "running");
 
