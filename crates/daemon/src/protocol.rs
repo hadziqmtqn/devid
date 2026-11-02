@@ -1,4 +1,5 @@
 //! Wire format: one JSON object per line in each direction.
+//! Requests are typed; replies are JSON objects with `ok: true` or `ok: false, error`.
 
 use serde::{Deserialize, Serialize};
 
@@ -7,30 +8,7 @@ use serde::{Deserialize, Serialize};
 pub enum Request {
     Status,
     Stop,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Response {
-    // Untagged: most specific variant first, or an error would parse as `Ok`.
-    Status(Status),
-    Error { ok: bool, error: String },
-    Ok { ok: bool },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Status {
-    pub ok: bool,
-    pub version: String,
-    pub pid: u32,
-    pub uptime_secs: u64,
-    pub home: String,
-    pub server: String,
-    pub default_php: String,
-}
-
-impl Response {
-    pub fn error(msg: impl Into<String>) -> Self {
-        Response::Error { ok: false, error: msg.into() }
-    }
+    PhpList,
+    PhpInstall { version: String, from: String },
+    PhpUse { version: String },
 }

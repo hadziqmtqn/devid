@@ -28,14 +28,21 @@ impl Config {
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display()))),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let config = Self::default();
-                if let Some(dir) = path.parent() {
-                    fs::create_dir_all(dir)?;
-                }
-                fs::write(path, toml::to_string_pretty(&config).expect("config serializes"))?;
+                config.save(path)?;
                 Ok(config)
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Write atomically (temp file + rename) so a crash never leaves a truncated config.
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("toml.tmp");
+        fs::write(&tmp, toml::to_string_pretty(self).expect("config serializes"))?;
+        fs::rename(tmp, path)
     }
 }
 

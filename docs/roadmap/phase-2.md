@@ -2,7 +2,7 @@
 
 > Scope: milestones and technical choices for Phase 2 (daemon, CLI, multi-PHP, `.test`, HTTPS)
 > Verified against: 2026-11-02
-> Status: proposed (milestones); M1 in progress
+> Status: proposed (milestones); M1 and M2 done
 
 Phase 2 delivers a working `devid` on the owner's Mac: sites served at `*.test` over HTTPS, a PHP version per site, nginx by default (D-015), without Valet or Homebrew. Each milestone is one worktree and one PR.
 

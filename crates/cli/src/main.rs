@@ -5,6 +5,7 @@ use devid_daemon::{paths::Paths, protocol::Request, server};
 use std::{
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
+    path::PathBuf,
     process::ExitCode,
 };
 
@@ -28,6 +29,25 @@ enum Command {
         #[command(subcommand)]
         action: DaemonAction,
     },
+    /// Manage PHP versions (8.3, 8.4, 8.5)
+    Php {
+        #[command(subcommand)]
+        action: PhpAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PhpAction {
+    /// List installed versions and whether their php-fpm runs
+    List,
+    /// Install a version from a build folder containing php, php-fpm and modules/
+    Install {
+        version: String,
+        #[arg(long)]
+        from: PathBuf,
+    },
+    /// Make a version the default
+    Use { version: String },
 }
 
 #[derive(Subcommand)]
@@ -44,6 +64,14 @@ fn main() -> ExitCode {
         Command::Daemon { action: DaemonAction::Run } => server::run(paths).map_err(|e| e.to_string()),
         Command::Daemon { action: DaemonAction::Stop } => request(&paths, &Request::Stop).map(|_| println!("daemon stopped")),
         Command::Status { json } => request(&paths, &Request::Status).map(|v| print_status(&v, json)),
+        Command::Php { action: PhpAction::List } => request(&paths, &Request::PhpList).map(|v| print_php(&v["php"])),
+        Command::Php { action: PhpAction::Install { version, from } } => std::path::absolute(&from)
+            .map_err(|e| e.to_string())
+            .and_then(|from| request(&paths, &Request::PhpInstall { version: version.clone(), from: from.display().to_string() }))
+            .map(|_| println!("PHP {version} installed")),
+        Command::Php { action: PhpAction::Use { version } } => {
+            request(&paths, &Request::PhpUse { version: version.clone() }).map(|_| println!("default PHP is now {version}"))
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -81,4 +109,17 @@ fn print_status(v: &serde_json::Value, json: bool) {
     println!("  home:        {}", v["home"].as_str().unwrap_or("?"));
     println!("  web server:  {}", v["server"].as_str().unwrap_or("?"));
     println!("  default PHP: {}", v["default_php"].as_str().unwrap_or("?"));
+    print_php(&v["php"]);
+}
+
+fn print_php(list: &serde_json::Value) {
+    let versions = list.as_array().map(Vec::as_slice).unwrap_or_default();
+    if versions.is_empty() {
+        println!("  no PHP installed; run `devid php install <version> --from <dir>`");
+    }
+    for p in versions {
+        let pid = p["pid"].as_u64().map(|pid| format!(" (pid {pid})")).unwrap_or_default();
+        let default = if p["default"] == true { "  default" } else { "" };
+        println!("  PHP {}  {}{pid}{default}", p["version"].as_str().unwrap_or("?"), p["status"].as_str().unwrap_or("?"));
+    }
 }
