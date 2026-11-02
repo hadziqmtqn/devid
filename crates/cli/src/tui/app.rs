@@ -45,6 +45,15 @@ pub enum Effect {
     OpenUrl(String),
     OpenTerminal(String),
     Copy(String),
+    /// Edit a file in $EDITOR (the TUI steps aside), then restart `service`.
+    EditThenRestart {
+        path: String,
+        service: String,
+    },
+    /// Check for (or install) newer PHP/nginx/Caddy from the release.
+    Update {
+        check: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -74,9 +83,9 @@ pub enum PickFor {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
     Normal,
-    /// Actions for one site: (key, label) pairs, selected index.
+    /// Actions for one row of the current page (a site or a PHP version): (key, label), selected.
     Menu {
-        site: usize,
+        row: usize,
         items: Vec<(char, String)>,
         index: usize,
     },
@@ -137,7 +146,7 @@ impl App {
     pub fn rows(&self) -> usize {
         match self.page {
             Page::Sites => self.sites.len(),
-            Page::Php => self.php_versions().len(),
+            Page::Php => devid_daemon::php::SUPPORTED.len(),
             Page::Server => 3,
             Page::Logs | Page::Settings => 0,
         }
@@ -151,6 +160,52 @@ impl App {
             .and_then(|st| st["php"].as_array())
             .map(|l| l.iter().map(|p| s(&p["version"])).collect())
             .unwrap_or_default()
+    }
+
+    /// The installed entry for a supported version, if installed.
+    pub fn php_entry(&self, version: &str) -> Option<&Value> {
+        self.status.as_ref().ok()?.get("php")?.as_array()?.iter().find(|p| p["version"] == version)
+    }
+
+    /// Actions for a PHP version row.
+    pub fn php_menu(entry: Option<&Value>, version: &str) -> Vec<(char, String)> {
+        let Some(p) = entry else { return vec![('i', format!("Install PHP {version} (download, sha256-checked)"))] };
+        let on = |e: &str| p["extensions"][e] == true;
+        let mut items = Vec::new();
+        if p["default"] != true {
+            items.push(('d', "Make default".to_string()));
+        }
+        items.push(('x', format!("Turn Xdebug {}", if on("xdebug") { "off" } else { "on" })));
+        items.push(('c', format!("Turn pcov {}", if on("pcov") { "off" } else { "on" })));
+        items.push(('e', "Edit php.ini (restarts php-fpm after)".to_string()));
+        items.push(('r', "Restart php-fpm".to_string()));
+        items
+    }
+
+    fn php_action(&mut self, row: usize, choice: char) -> Action {
+        let version = devid_daemon::php::SUPPORTED[row.min(devid_daemon::php::SUPPORTED.len() - 1)].to_string();
+        let entry = self.php_entry(&version).cloned();
+        let service = format!("php-{version}");
+        let daemon = |request, done: String| Action::Do(Effect::Daemon { request, done });
+        match (choice, entry) {
+            ('i', None) => {
+                daemon(Request::PhpInstall { version: version.clone(), from: None }, format!("PHP {version} installed"))
+            }
+            ('d', Some(_)) => {
+                daemon(Request::PhpUse { version: version.clone() }, format!("PHP {version} is now the default"))
+            }
+            (c @ ('x' | 'c'), Some(p)) => {
+                let ext = if c == 'x' { "xdebug" } else { "pcov" };
+                let enabled = p["extensions"][ext] != true;
+                daemon(
+                    Request::PhpExt { version: version.clone(), ext: ext.into(), enabled },
+                    format!("{ext} {} for PHP {version}", if enabled { "on" } else { "off" }),
+                )
+            }
+            ('e', Some(p)) => Action::Do(Effect::EditThenRestart { path: s(&p["ini"]), service }),
+            ('r', Some(_)) => daemon(Request::Restart { service: service.clone() }, format!("restarted {service}")),
+            _ => Action::None,
+        }
     }
 
     pub fn selected_site(&self) -> Option<&Value> {
@@ -192,7 +247,7 @@ impl App {
         }
         match std::mem::replace(&mut self.mode, Mode::Normal) {
             Mode::Normal => self.normal_key(key),
-            Mode::Menu { site, items, index } => self.menu_key(key, site, items, index),
+            Mode::Menu { row, items, index } => self.menu_key(key, row, items, index),
             Mode::Input { purpose, text } => self.input_key(key, purpose, text),
             Mode::Pick { purpose, options, index } => self.pick_key(key, purpose, options, index),
             Mode::Confirm { question, request, done } => match key.code {
@@ -227,8 +282,21 @@ impl App {
             KeyCode::Enter if self.page == Page::Sites && self.focus == Focus::Page => {
                 if let Some(site) = self.selected_site() {
                     let items = Self::site_menu(site);
-                    self.mode = Mode::Menu { site: self.row, items, index: 0 };
+                    self.mode = Mode::Menu { row: self.row, items, index: 0 };
                 }
+            }
+            KeyCode::Enter if self.page == Page::Php && self.focus == Focus::Page => {
+                let version = devid_daemon::php::SUPPORTED[self.row.min(devid_daemon::php::SUPPORTED.len() - 1)];
+                let items = Self::php_menu(self.php_entry(version), version);
+                self.mode = Mode::Menu { row: self.row, items, index: 0 };
+            }
+            KeyCode::Char('u') if self.page == Page::Php => return Action::Do(Effect::Update { check: true }),
+            KeyCode::Char('U') if self.page == Page::Php => {
+                self.mode = Mode::Confirm {
+                    question: "Download and install newer PHP/nginx/Caddy from Devid's release?".into(),
+                    request: Box::new(Request::Update { check: false }),
+                    done: "updated".into(),
+                };
             }
             KeyCode::Char('a') if self.page == Page::Sites => {
                 self.mode = Mode::Input { purpose: InputFor::Link, text: String::new() };
@@ -248,15 +316,15 @@ impl App {
         Action::None
     }
 
-    fn menu_key(&mut self, key: KeyEvent, site: usize, items: Vec<(char, String)>, index: usize) -> Action {
+    fn menu_key(&mut self, key: KeyEvent, row: usize, items: Vec<(char, String)>, index: usize) -> Action {
         let chosen = match key.code {
             KeyCode::Esc | KeyCode::Char('q') => return Action::None,
             KeyCode::Up | KeyCode::Char('k') => {
-                self.mode = Mode::Menu { site, index: index.saturating_sub(1), items };
+                self.mode = Mode::Menu { row, index: index.saturating_sub(1), items };
                 return Action::None;
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.mode = Mode::Menu { site, index: (index + 1).min(items.len() - 1), items };
+                self.mode = Mode::Menu { row, index: (index + 1).min(items.len() - 1), items };
                 return Action::None;
             }
             KeyCode::Enter => items.get(index).map(|(k, _)| *k),
@@ -264,10 +332,13 @@ impl App {
             _ => None,
         };
         let Some(choice) = chosen else {
-            self.mode = Mode::Menu { site, items, index };
+            self.mode = Mode::Menu { row, items, index };
             return Action::None;
         };
-        let Some(site) = self.sites.get(site).cloned() else { return Action::None };
+        if self.page == Page::Php {
+            return self.php_action(row, choice);
+        }
+        let Some(site) = self.sites.get(row).cloned() else { return Action::None };
         let (name, url, path) = (s(&site["name"]), s(&site["url"]), s(&site["path"]));
         match choice {
             'o' => Action::Do(Effect::OpenUrl(url)),
@@ -532,6 +603,57 @@ mod tests {
         app.parked.clear();
         app.handle_key(ch('U'));
         assert_eq!(app.message.as_ref().map(|m| m.1), Some(true), "nothing to unpark is reported");
+    }
+
+    #[test]
+    fn php_page_actions() {
+        let mut app = App::new(false);
+        app.status = Ok(json!({"php": [
+            {"version": "8.4", "default": false, "extensions": {"xdebug": false, "pcov": false}, "ini": "/h/php/8.4/etc/php.ini"},
+            {"version": "8.5", "default": true, "extensions": {"xdebug": true, "pcov": false}, "ini": "/h/php/8.5/etc/php.ini"}
+        ]}));
+        app.page = Page::Php;
+        app.focus = Focus::Page;
+        assert_eq!(app.rows(), 3, "8.3, 8.4, 8.5 (D-009)");
+
+        // 8.3 is not installed: the only action is install.
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(&app.mode, Mode::Menu { items, .. } if items.len() == 1 && items[0].0 == 'i'));
+        assert_eq!(daemon_json(app.handle_key(ch('i'))), json!({"cmd": "php_install", "version": "8.3", "from": null}));
+
+        // 8.4: make default, xdebug on.
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(daemon_json(app.handle_key(ch('d'))), json!({"cmd": "php_use", "version": "8.4"}));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            daemon_json(app.handle_key(ch('x'))),
+            json!({"cmd": "php_ext", "version": "8.4", "ext": "xdebug", "enabled": true})
+        );
+
+        // 8.5 is the default (no "make default"); xdebug is on, so the menu turns it off.
+        app.handle_key(key(KeyCode::Down));
+        let items = App::php_menu(app.php_entry("8.5"), "8.5");
+        assert!(!items.iter().any(|(k, _)| *k == 'd'));
+        assert!(items.iter().any(|(_, l)| l == "Turn Xdebug off"));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            daemon_json(app.handle_key(ch('x'))),
+            json!({"cmd": "php_ext", "version": "8.5", "ext": "xdebug", "enabled": false})
+        );
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(
+            app.handle_key(ch('e')),
+            Action::Do(Effect::EditThenRestart { path, service }) if path == "/h/php/8.5/etc/php.ini" && service == "php-8.5"
+        ));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(daemon_json(app.handle_key(ch('r'))), json!({"cmd": "restart", "service": "php-8.5"}));
+
+        // Updates: u checks, U asks first.
+        assert!(matches!(app.handle_key(ch('u')), Action::Do(Effect::Update { check: true })));
+        app.handle_key(ch('U'));
+        assert!(matches!(app.mode, Mode::Confirm { .. }));
+        assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "update", "check": false}));
     }
 
     #[test]

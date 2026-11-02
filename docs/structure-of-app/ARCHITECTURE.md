@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-03 (Phase 4 T2: Sites actions)
+> Verified against: 2026-11-03 (Phase 4 T3: PHP page, extensions, restart)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -139,3 +139,9 @@ All behaviour lives in `daemon` and is reached through its socket API. `cli` and
 - `mod.rs` runs the loop. `ratatui::init()` sets up the alternate screen and a panic hook that restores the terminal. The loop polls `status` + `sites` every 2 s (or on `r`), checks keys every 250 ms, and stops polling when the TUI closes.
 - `devid` with no command opens the TUI only when stdout is a terminal; scripts and pipes get the help text. `devid tui` opens it explicitly.
 - **Actions (T2).** Keys produce an `Effect` instead of doing anything themselves: a daemon request, open a URL (`open`), open a folder in Terminal (`open -a Terminal`), or copy (`pbcopy`). Overlays (`Mode`) handle a site's action menu, path input (`~` expanded), a pick list (PHP version, parked folder) and a y/n confirmation for destructive actions. The result appears as ✓/✗ in the footer, and state refreshes right away. The daemon's `sites` reply includes the `parked` folders for unpark.
+
+Implemented in T3:
+- **Extensions (D-008):** `php_ext` writes `php/<ver>/etc/conf.d/devid-xdebug.ini` (`zend_extension`, `xdebug.mode=debug,develop`, `start_with_request=trigger`, port 9003) or `devid-pcov.ini` (`extension`, `pcov.enabled=1`), or removes it, then restarts that version's php-fpm. The CLI shim reads the same scan dir, so `php` on the command line follows the toggle. The `php` list in `status` reports each version's `extensions` and `ini` path.
+- **`restart`** restarts one supervised service (`php-8.4`, `nginx`, …).
+- CLI: `devid php ext <ver> <xdebug|pcov> <on|off>`, `devid restart <service>`.
+- TUI PHP page: every supported version (D-009), with install for missing ones, make default, Xdebug/pcov toggles, edit `php.ini` (the TUI steps aside for `$VISUAL`/`$EDITOR`, then restarts php-fpm), restart, `u` check for updates and `U` update (confirmed). Slow actions show "⏳ working…" first.

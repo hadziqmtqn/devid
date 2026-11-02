@@ -306,6 +306,23 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             let installed = install_php(state, &version, from, None)?;
             Ok(json!({"ok": true, "installed": version, "version": installed}))
         }
+        Request::PhpExt { version, ext, enabled } => {
+            php::check_supported(&version).map_err(|e| e.to_string())?;
+            if !php::installed(&state.paths).contains(&version) {
+                return Err(format!("PHP {version} is not installed"));
+            }
+            php::set_extension(&state.paths, &version, &ext, enabled).map_err(|e| e.to_string())?;
+            state.supervisor.restart(&php_service(&version));
+            Ok(json!({"ok": true, "version": version, "ext": ext, "enabled": enabled}))
+        }
+        Request::Restart { service } => {
+            if !state.supervisor.state().contains_key(&service) {
+                let running: Vec<String> = state.supervisor.state().into_keys().collect();
+                return Err(format!("{service} is not running (running: {})", running.join(", ")));
+            }
+            state.supervisor.restart(&service);
+            Ok(json!({"ok": true, "restarted": service}))
+        }
         Request::PhpUse { version } => {
             php::check_supported(&version).map_err(|e| e.to_string())?;
             if !php::installed(&state.paths).contains(&version) {
@@ -471,8 +488,14 @@ fn php_list(state: &State) -> Value {
                 Some(ProcState::Failed) => ("failed", None),
                 None => ("stopped", None),
             };
+            let extensions: serde_json::Map<String, Value> = php::EXTENSIONS
+                .iter()
+                .map(|e| (e.to_string(), json!(php::extension_enabled(&state.paths, &v, e))))
+                .collect();
             json!({"version": v, "default": v == default, "status": status, "pid": pid,
-                   "socket": php::socket(&state.paths, &v).display().to_string()})
+                   "socket": php::socket(&state.paths, &v).display().to_string(),
+                   "extensions": extensions,
+                   "ini": php::etc(&state.paths, &v).join("php.ini").display().to_string()})
         })
         .collect();
     json!(versions)

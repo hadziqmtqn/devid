@@ -102,3 +102,48 @@ fn sigterm_stops_daemon_and_php() {
     assert!(!home.join("run/devid.sock").exists(), "socket removed");
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// T3: xdebug/pcov toggles write or remove conf.d/devid-<ext>.ini and restart php-fpm; `restart`.
+#[test]
+fn extensions_and_restart() {
+    let root = temp_root("devid-php-ext-it");
+    let home = root.join("home");
+    let build = fake_build(&root, "8.5");
+    fs::write(build.join("modules/pcov.so"), b"").unwrap();
+    let daemon = start_daemon(&home);
+    assert!(devid(&home, &["php", "install", "8.5", "--from", build.to_str().unwrap()]).status.success());
+    wait_for("8.5 running", || proc_of(&json(&home, &["status", "--json"]), "8.5").0 == "running");
+    let ext = |s: &serde_json::Value, e: &str| s["php"][0]["extensions"][e].as_bool().unwrap();
+    assert!(!ext(&json(&home, &["status", "--json"]), "xdebug"), "off by default (D-008)");
+
+    let (_, pid) = proc_of(&json(&home, &["status", "--json"]), "8.5");
+    let o = devid(&home, &["php", "ext", "8.5", "xdebug", "on"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let ini = fs::read_to_string(home.join("php/8.5/etc/conf.d/devid-xdebug.ini")).unwrap();
+    assert!(ini.contains(&format!("zend_extension={}", home.join("php/8.5/modules/xdebug.so").display())));
+    assert!(ini.contains("xdebug.start_with_request=trigger"));
+    wait_for("8.5 restarted", || {
+        let (s, p) = proc_of(&json(&home, &["status", "--json"]), "8.5");
+        s == "running" && p != pid
+    });
+    assert!(ext(&json(&home, &["status", "--json"]), "xdebug"));
+    assert!(devid(&home, &["php", "ext", "8.5", "pcov", "on"]).status.success());
+    assert!(fs::read_to_string(home.join("php/8.5/etc/conf.d/devid-pcov.ini")).unwrap().contains("pcov.so"));
+
+    assert!(devid(&home, &["php", "ext", "8.5", "xdebug", "off"]).status.success());
+    assert!(!home.join("php/8.5/etc/conf.d/devid-xdebug.ini").exists());
+    assert!(devid(&home, &["php", "ext", "8.5", "xdebug", "off"]).status.success(), "off twice is fine");
+    assert!(stderr(&devid(&home, &["php", "ext", "8.5", "opcache", "on"])).contains("unknown extension"));
+    assert!(stderr(&devid(&home, &["php", "ext", "8.4", "xdebug", "on"])).contains("not installed"));
+
+    let (_, pid) = proc_of(&json(&home, &["status", "--json"]), "8.5");
+    assert!(devid(&home, &["restart", "php-8.5"]).status.success());
+    wait_for("restarted", || {
+        let (s, p) = proc_of(&json(&home, &["status", "--json"]), "8.5");
+        s == "running" && p != pid
+    });
+    assert!(stderr(&devid(&home, &["restart", "php-7.4"])).contains("is not running"));
+
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}
