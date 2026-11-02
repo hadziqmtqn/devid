@@ -1,8 +1,8 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (Phase 2 M3: sites and nginx)
-> Status: partial (M1–M3 implemented; the rest proposed)
+> Verified against: 2026-11-02 (Phase 2 M5: DNS responder and helper)
+> Status: partial (M1–M5 implemented; the rest proposed)
 
 ## Components (Rust Cargo workspace)
 
@@ -31,6 +31,30 @@ Implemented in M3:
 - Every site-changing command goes through `State::mutate`: apply the new config, and save `config.toml` only if nginx accepted it; otherwise roll back.
 - Running PHP masters = the default version plus every version a site uses, if installed.
 - CLI: `devid sites`, `link`, `unlink`, `park`, `unpark`, `isolate <ver>`, `unisolate` and `server install nginx --from <file>`. `isolate` and `unisolate` default to the site that contains the current folder.
+
+Implemented in M4:
+- `daemon::ca` (rcgen with the ring backend):
+  - The Devid Local CA is an ECDSA P-256 key created on the first daemon start: `~/.devid/ca/devid-ca.key` (0600) and `devid-ca.crt`, valid for 10 years with `pathlen=0`. **Name constraints** limit it to `<tld>` (`.test`), so even a trusted, leaked CA key cannot impersonate a real domain. A TLD change replaces the CA. The CA is rebuilt from the stored key and a fixed DN, so no X.509 parser is needed.
+  - Per-site leaves in `~/.devid/certs/<host>.{crt,key}` carry a SAN, the `serverAuth` EKU and an AKI, and are valid for 397 days counted from `not_before`. They are reissued 30 days before expiry; the expiry is recorded at issue time.
+  - Creating a new CA removes the old leaves.
+- `~/.devid/ca/cacert.pem` = the system bundle plus the Devid CA, rewritten only when it changes. It is set as `curl.cainfo`/`openssl.cafile` in php.ini (D-008).
+- nginx: every site also listens on `127.0.0.1:<https_port>` (default 8443) with `ssl` and `http2`. The HTTPS default server uses `ssl_reject_handshake`, so unknown hosts get no certificate.
+- The CA is **not** trusted system-wide until the M5 helper adds it to the keychain; browsers warn until then.
+
+Implemented in M5:
+- `daemon::dns`: a UDP responder on `127.0.0.1:<dns_port>` (default 53535).
+  - `<anything>.<tld>` A → 127.0.0.1; other types → no data, so clients use IPv4; names outside the TLD → REFUSED.
+  - Questions are bounds-checked, compression pointers in a question are rejected, and responses are never answered (no reflection).
+- `daemon::helper` (macOS-only, D-013) is the only code that runs as root, via `sudo devid helper apply …`, with every value passed explicitly and validated:
+  - the TLD is a DNS label;
+  - the target ports are at least 1024;
+  - the CA path is a regular file ending in `ca/devid-ca.crt`.
+- `devid helper install` (and `uninstall`, `status`, `--dry-run`) does the following, and uninstall reverses it:
+  - `/etc/resolver/<tld>` → `nameserver 127.0.0.1` / `port <dns_port>`. A foreign file (Valet's) is backed up once to `<file>.devid-backup` and restored on uninstall.
+  - The pf anchor `com.apple/devid` (`/etc/pf.anchors/dev.devid`) holds `rdr pass on lo0` 127.0.0.1:80 → `http_port` and :443 → `https_port`. pf is enabled with `pfctl -E`. The LaunchDaemon `dev.devid.pf` reloads the rules at boot.
+  - The Devid CA is trusted for SSL only in the System keychain; it is name-constrained to `.<tld>`.
+  - The DNS cache is flushed.
+- Once the pf rules are in place, `devid sites` shows URLs without a port (`standard_ports` in status).
 
 `helper` is created in M5. The table below is the target layout.
 

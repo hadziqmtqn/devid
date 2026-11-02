@@ -34,6 +34,11 @@ enum Command {
         #[command(subcommand)]
         action: PhpAction,
     },
+    /// One-time system setup that needs your password (.test DNS, ports 80/443, CA trust)
+    Helper {
+        #[command(subcommand)]
+        action: HelperAction,
+    },
     /// Manage the web server binary
     Server {
         #[command(subcommand)]
@@ -68,6 +73,38 @@ enum Command {
     Unisolate {
         #[arg(long)]
         site: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HelperAction {
+    /// Set up .test DNS, ports 80/443 and CA trust (asks for your password once)
+    Install {
+        /// Only print what would change
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Undo everything `helper install` did
+    Uninstall {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show which system pieces are in place
+    Status,
+    /// Internal: runs as root via sudo
+    #[command(hide = true)]
+    Apply {
+        mode: String,
+        #[arg(long)]
+        tld: String,
+        #[arg(long)]
+        dns_port: u16,
+        #[arg(long)]
+        http_port: u16,
+        #[arg(long)]
+        https_port: u16,
+        #[arg(long)]
+        ca: PathBuf,
     },
 }
 
@@ -143,6 +180,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             send(Request::ServerInstall { server: server.clone(), from: abs(Some(from))? })
                 .map(|_| println!("{server} installed"))
         }
+        Command::Helper { action } => helper(action, paths),
         Command::Sites { json } => send(Request::Sites).map(|v| print_sites(&v["sites"], json)),
         Command::Link { name, path } => send(Request::Link { name, path: abs(path)? })
             .map(|v| println!("linked {}", v["site"].as_str().unwrap_or("?"))),
@@ -191,11 +229,13 @@ fn print_status(v: &serde_json::Value, json: bool) {
     );
     println!("  home:        {}", v["home"].as_str().unwrap_or("?"));
     println!(
-        "  web server:  {} {} (port {})",
+        "  web server:  {} {} (http {}, https {})",
         v["server"].as_str().unwrap_or("?"),
         v["server_status"].as_str().unwrap_or("?"),
-        v["http_port"]
+        v["http_port"],
+        v["https_port"]
     );
+    println!("  CA:          {}", v["ca"].as_str().unwrap_or("?"));
     println!("  sites:       {}", v["sites"]);
     println!("  default PHP: {}", v["default_php"].as_str().unwrap_or("?"));
     print_php(&v["php"]);
@@ -234,5 +274,74 @@ fn print_php(list: &serde_json::Value) {
             p["version"].as_str().unwrap_or("?"),
             p["status"].as_str().unwrap_or("?")
         );
+    }
+}
+
+/// The helper plan from config.toml, so it works even when the daemon is not running.
+fn helper_plan(paths: &Paths) -> Result<devid_daemon::helper::Plan, String> {
+    let config = devid_daemon::config::Config::load_or_create(&paths.config()).map_err(|e| e.to_string())?;
+    Ok(devid_daemon::helper::Plan {
+        tld: config.tld,
+        dns_port: config.dns_port,
+        http_port: config.http_port,
+        https_port: config.https_port,
+        ca_cert: devid_daemon::ca::ca_cert(paths),
+    })
+}
+
+fn helper(action: HelperAction, paths: &Paths) -> Result<(), String> {
+    use devid_daemon::helper::{self as h, Plan};
+    match action {
+        HelperAction::Status => {
+            for (name, ok) in h::status(&helper_plan(paths)?) {
+                println!("{} {name}", if ok { "ok     " } else { "missing" });
+            }
+            Ok(())
+        }
+        HelperAction::Install { dry_run } | HelperAction::Uninstall { dry_run } => {
+            let install = matches!(action, HelperAction::Install { .. });
+            let plan = helper_plan(paths)?;
+            if install && !plan.ca_cert.is_file() {
+                return Err("no Devid CA yet; start the daemon once (`devid daemon run`) to create it".into());
+            }
+            let actions = if install { h::install_actions(&plan) } else { h::uninstall_actions(&plan) };
+            println!("devid helper will (as root):");
+            for a in &actions {
+                println!("  - {}", a.describe());
+            }
+            if dry_run {
+                println!("dry run: nothing changed");
+                return Ok(());
+            }
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let status = std::process::Command::new("sudo")
+                .arg(exe)
+                .args(["helper", "apply", if install { "install" } else { "uninstall" }])
+                .args(["--tld", &plan.tld])
+                .args(["--dns-port", &plan.dns_port.to_string()])
+                .args(["--http-port", &plan.http_port.to_string()])
+                .args(["--https-port", &plan.https_port.to_string()])
+                .arg("--ca")
+                .arg(&plan.ca_cert)
+                .status()
+                .map_err(|e| format!("could not run sudo: {e}"))?;
+            if status.success() { Ok(()) } else { Err(format!("helper failed ({status})")) }
+        }
+        HelperAction::Apply { mode, tld, dns_port, http_port, https_port, ca } => {
+            // SAFETY: geteuid has no preconditions.
+            if unsafe { libc::geteuid() } != 0 {
+                return Err("`helper apply` must run as root; use `devid helper install`".into());
+            }
+            let plan = Plan { tld, dns_port, http_port, https_port, ca_cert: ca };
+            h::validate(&plan).map_err(|e| e.to_string())?;
+            let actions = match mode.as_str() {
+                "install" => h::install_actions(&plan),
+                "uninstall" => h::uninstall_actions(&plan),
+                other => return Err(format!("unknown helper mode {other:?}")),
+            };
+            h::apply(&actions, |step| println!("  {step}")).map_err(|e| e.to_string())?;
+            println!("helper {mode} done");
+            Ok(())
+        }
     }
 }

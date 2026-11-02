@@ -1,6 +1,9 @@
 //! Devid daemon: owns all state and behaviour; clients talk to it over a unix socket (D-012).
 
+pub mod ca;
 pub mod config;
+pub mod dns;
+pub mod helper;
 pub mod nginx;
 pub mod paths;
 pub mod php;

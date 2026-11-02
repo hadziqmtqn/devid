@@ -39,7 +39,14 @@ fn park_link_isolate_and_nginx() {
     assert!(devid(&home, &["link", "--path", &s(&root.join("elsewhere/shop"))]).status.success());
     let sites = json(&home, &["sites", "--json"]);
     assert_eq!(sites.as_array().unwrap().len(), 3);
-    assert_eq!(site(&sites, "blog")["url"], "http://blog.test:8088");
+    assert_eq!(site(&sites, "blog")["url"], "https://blog.test:8443");
+    assert_eq!(site(&sites, "blog")["http_url"], "http://blog.test:8088");
+    // Every site has a certificate from the Devid CA, and PHP trusts that CA.
+    for host in ["blog.test", "api.test", "shop.test"] {
+        assert!(home.join(format!("certs/{host}.crt")).exists(), "{host} certificate");
+    }
+    let ca = fs::read_to_string(home.join("ca/devid-ca.crt")).unwrap();
+    assert!(fs::read_to_string(home.join("ca/cacert.pem")).unwrap().ends_with(&ca));
     assert_eq!(site(&sites, "blog")["docroot"], s(&projects.join("blog/public")));
     assert_eq!(site(&sites, "shop")["linked"], true);
     let conf = fs::read_to_string(home.join("nginx/conf/nginx.conf")).unwrap();
