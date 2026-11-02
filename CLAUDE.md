@@ -10,7 +10,7 @@ Native local PHP development app for macOS (Herd-like, no Homebrew, no VM). Rust
 
 ## Current stage
 
-Phase 1 (spike) is done. Phase 2 (daemon + CLI) is in progress; the milestones are in `docs/roadmap/phase-2.md`. Rust code lives in `crates/` (`cargo test`, `cargo clippy --all-targets -- -D warnings`). Spike scripts stay in `spike/`.
+Phase 1 (spike) is done. Phase 2 (daemon + CLI) is in progress; the milestones are in `docs/roadmap/phase-2.md`. Rust code lives in `crates/`. Before pushing, run `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test`; CI (`.github/workflows/ci.yml`, Ubuntu) runs the same checks on every PR. Spike scripts stay in `spike/`.
 
 ## Hard constraints
 

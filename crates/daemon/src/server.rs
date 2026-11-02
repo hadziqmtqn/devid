@@ -2,21 +2,23 @@
 
 use crate::{
     config::Config,
+    nginx,
     paths::Paths,
     php,
     protocol::Request,
-    supervisor::{ProcState, Supervisor},
+    sites::{self, Site},
+    supervisor::{ProcState, Spec, Supervisor},
 };
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{self, BufRead, BufReader, Write},
     os::unix::{
         fs::PermissionsExt,
         net::{UnixListener, UnixStream},
     },
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -32,15 +34,63 @@ struct State {
     stopping: AtomicBool,
 }
 
+fn php_service(version: &str) -> String {
+    format!("php-{version}")
+}
+
 impl State {
-    /// M2: only the default version runs. M3 adds the versions that sites use.
-    fn wanted(&self) -> BTreeSet<String> {
-        let default = self.config.lock().unwrap().default_php.clone();
-        php::installed(&self.paths).into_iter().filter(|v| *v == default).collect()
+    /// Bring every service in line with `config`: php-fpm for the default version and every
+    /// version a site uses (if installed), and nginx with a freshly rendered config.
+    /// Fails without changing anything if nginx rejects the new config.
+    fn apply(&self, config: &Config) -> Result<(), String> {
+        let sites = sites::resolve(config);
+        let installed = php::installed(&self.paths);
+        let versions: BTreeSet<&str> =
+            sites.iter().map(|s| s.php.as_str()).chain([config.default_php.as_str()]).collect();
+        let mut wanted: BTreeMap<String, Spec> = versions
+            .into_iter()
+            .filter(|v| installed.iter().any(|i| i == v))
+            .map(|v| (php_service(v), php::spec(&self.paths, v)))
+            .collect();
+
+        let mut reload = false;
+        if config.server == "nginx" && nginx::installed(&self.paths) {
+            let changed = nginx::write_checked(&self.paths, &nginx::render(&self.paths, config, &sites))
+                .map_err(|e| e.to_string())?;
+            let running = matches!(self.supervisor.state().get("nginx"), Some(ProcState::Running(_)));
+            // SIGHUP only an nginx that is already up; a fresh one reads the new config anyway.
+            reload = changed && running;
+            wanted.insert("nginx".into(), nginx::spec(&self.paths));
+        }
+        self.supervisor.reconcile(&wanted);
+        // A just-started php-fpm needs a moment to create its socket; reloading nginx or replying
+        // before that gives the first request a 502.
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        for name in wanted.keys().filter_map(|n| n.strip_prefix("php-")) {
+            let sock = php::socket(&self.paths, name);
+            while !sock.exists() && Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+        if reload {
+            self.supervisor.signal("nginx", libc::SIGHUP);
+        }
+        Ok(())
     }
 
-    fn reconcile(&self) {
-        self.supervisor.reconcile(&self.wanted());
+    /// Change the config, apply it, and save it only if applying worked.
+    fn mutate(&self, change: impl FnOnce(&mut Config, &[Site]) -> Result<Value, String>) -> Result<Value, String> {
+        let mut current = self.config.lock().unwrap();
+        let mut next = current.clone();
+        let reply = change(&mut next, &sites::resolve(&current))?;
+        if let Err(e) = self.apply(&next) {
+            // Put services back in line with the config that stays in force.
+            let _ = self.apply(&current);
+            return Err(e);
+        }
+        next.save(&self.paths.config()).map_err(|e| e.to_string())?;
+        *current = next;
+        Ok(reply)
     }
 }
 
@@ -52,13 +102,16 @@ pub fn run(paths: Paths) -> io::Result<()> {
     php::ensure_cacert(&paths)?;
 
     let state = Arc::new(State {
-        supervisor: Supervisor::new(paths.clone()),
+        supervisor: Supervisor::new(),
         paths,
-        config: Mutex::new(config),
+        config: Mutex::new(config.clone()),
         started: Instant::now(),
         stopping: AtomicBool::new(false),
     });
-    state.reconcile();
+    if let Err(e) = state.apply(&config) {
+        // Keep the daemon reachable so `devid status` can show the problem.
+        eprintln!("devid: {e}");
+    }
 
     for stream in listener.incoming() {
         if state.stopping.load(Ordering::SeqCst) {
@@ -76,7 +129,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
             Err(e) => eprintln!("devid: accept failed: {e}"),
         }
     }
-    // shortcut: only a `stop` request shuts PHP down cleanly; SIGTERM handling comes with the LaunchAgent (M6).
+    // shortcut: only a `stop` request shuts services down cleanly; SIGTERM handling comes with the LaunchAgent (M6).
     state.supervisor.stop_all();
     let _ = fs::remove_file(state.paths.socket());
     Ok(())
@@ -85,6 +138,13 @@ pub fn run(paths: Paths) -> io::Result<()> {
 /// Bind the socket, refusing to start twice and cleaning up a stale socket file.
 fn bind(paths: &Paths) -> io::Result<UnixListener> {
     let sock = paths.socket();
+    // macOS limits unix socket paths to 104 bytes (sun_path); say so instead of "SUN_LEN".
+    if sock.as_os_str().len() >= 104 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("socket path {} is too long for a unix socket; use a shorter DEVID_HOME", sock.display()),
+        ));
+    }
     if sock.exists() {
         if UnixStream::connect(&sock).is_ok() {
             return Err(io::Error::new(io::ErrorKind::AddrInUse, "devid daemon is already running"));
@@ -114,6 +174,29 @@ fn handle(stream: UnixStream, state: &State) -> io::Result<()> {
     Ok(())
 }
 
+fn existing_dir(path: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err(format!("{} is not an absolute path", path.display()));
+    }
+    if !path.is_dir() {
+        return Err(format!("{} is not a folder", path.display()));
+    }
+    Ok(path)
+}
+
+/// The site named `name`, or else the one containing `cwd`.
+fn pick_site(sites: &[Site], name: Option<String>, cwd: &str) -> Result<String, String> {
+    match name {
+        Some(name) => {
+            sites.iter().find(|s| s.name == name).map(|s| s.name.clone()).ok_or(format!("no site named {name}"))
+        }
+        None => sites::find_by_dir(sites, Path::new(cwd))
+            .map(|s| s.name.clone())
+            .ok_or(format!("{cwd} is not inside a site; pass --site <name>")),
+    }
+}
+
 fn dispatch(req: Request, state: &State) -> Result<Value, String> {
     match req {
         Request::Status => {
@@ -125,6 +208,9 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "uptime_secs": state.started.elapsed().as_secs(),
                 "home": state.paths.home.display().to_string(),
                 "server": config.server,
+                "server_status": service_status(state, "nginx", nginx::installed(&state.paths)),
+                "http_port": config.http_port,
+                "sites": sites::resolve(&config).len(),
                 "default_php": config.default_php,
                 "php": php_list(state),
             }))
@@ -138,11 +224,10 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         Request::PhpList => Ok(json!({"ok": true, "php": php_list(state)})),
         Request::PhpInstall { version, from } => {
             php::install(&state.paths, &version, Path::new(&from)).map_err(|e| e.to_string())?;
-            // A reinstalled version restarts on the new binaries.
-            let mut without = state.wanted();
-            without.remove(&version);
-            state.supervisor.reconcile(&without);
-            state.reconcile();
+            // A running master restarts on the new binaries; otherwise apply starts it if wanted.
+            state.supervisor.restart(&php_service(&version));
+            let config = state.config.lock().unwrap();
+            state.apply(&config)?;
             Ok(json!({"ok": true, "installed": version}))
         }
         Request::PhpUse { version } => {
@@ -150,14 +235,102 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             if !php::installed(&state.paths).contains(&version) {
                 return Err(format!("PHP {version} is not installed; run `devid php install {version} --from <dir>`"));
             }
-            {
-                let mut config = state.config.lock().unwrap();
-                config.default_php = version.clone();
-                config.save(&state.paths.config()).map_err(|e| e.to_string())?;
-            }
-            state.reconcile();
-            Ok(json!({"ok": true, "default_php": version}))
+            state.mutate(|c, _| {
+                c.default_php = version.clone();
+                Ok(json!({"ok": true, "default_php": version}))
+            })
         }
+        Request::ServerInstall { server, from } => {
+            if server != "nginx" {
+                return Err(format!("{server} is not supported yet; M3 supports nginx (Caddy and Apache come in M7)"));
+            }
+            nginx::install(&state.paths, Path::new(&from)).map_err(|e| e.to_string())?;
+            state.supervisor.restart("nginx");
+            let config = state.config.lock().unwrap();
+            state.apply(&config)?;
+            Ok(json!({"ok": true, "installed": server}))
+        }
+        Request::Sites => {
+            let config = state.config.lock().unwrap().clone();
+            let installed = php::installed(&state.paths);
+            let list: Vec<Value> = sites::resolve(&config)
+                .into_iter()
+                .map(|s| {
+                    json!({
+                        "name": s.name,
+                        "url": format!("http://{}:{}", s.host, config.http_port),
+                        "path": s.path.display().to_string(),
+                        "docroot": s.docroot.display().to_string(),
+                        "php": s.php,
+                        "php_installed": installed.contains(&s.php),
+                        "isolated": s.isolated,
+                        "linked": s.linked,
+                    })
+                })
+                .collect();
+            Ok(json!({"ok": true, "sites": list}))
+        }
+        Request::Link { name, path } => {
+            let path = existing_dir(&path)?;
+            let folder = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = match name {
+                Some(n) if sites::valid_name(&n) => n,
+                Some(n) => return Err(format!("{n:?} is not a valid site name (a-z, 0-9, -)")),
+                None => sites::name_from_folder(&folder)
+                    .ok_or(format!("cannot derive a site name from {folder:?}; pass a name"))?,
+            };
+            state.mutate(|c, _| {
+                c.links.insert(name.clone(), path.display().to_string());
+                Ok(json!({"ok": true, "site": name}))
+            })
+        }
+        Request::Unlink { name } => state.mutate(|c, _| {
+            c.links.remove(&name).ok_or(format!("{name} is not a linked site"))?;
+            Ok(json!({"ok": true}))
+        }),
+        Request::Park { path } => {
+            let path = existing_dir(&path)?.display().to_string();
+            state.mutate(|c, _| {
+                if !c.parked.contains(&path) {
+                    c.parked.push(path.clone());
+                }
+                Ok(json!({"ok": true, "parked": path}))
+            })
+        }
+        Request::Unpark { path } => state.mutate(|c, _| {
+            let before = c.parked.len();
+            c.parked.retain(|p| *p != path);
+            if c.parked.len() == before {
+                return Err(format!("{path} is not parked"));
+            }
+            Ok(json!({"ok": true}))
+        }),
+        Request::Isolate { version, site, cwd } => {
+            php::check_supported(&version).map_err(|e| e.to_string())?;
+            if !php::installed(&state.paths).contains(&version) {
+                return Err(format!("PHP {version} is not installed; run `devid php install {version} --from <dir>`"));
+            }
+            state.mutate(|c, sites| {
+                let name = pick_site(sites, site, &cwd)?;
+                c.isolated.insert(name.clone(), version.clone());
+                Ok(json!({"ok": true, "site": name, "php": version}))
+            })
+        }
+        Request::Unisolate { site, cwd } => state.mutate(|c, sites| {
+            let name = pick_site(sites, site, &cwd)?;
+            c.isolated.remove(&name);
+            Ok(json!({"ok": true, "site": name}))
+        }),
+    }
+}
+
+fn service_status(state: &State, name: &str, installed: bool) -> &'static str {
+    match state.supervisor.state().get(name) {
+        Some(ProcState::Running(_)) => "running",
+        Some(ProcState::Starting) => "starting",
+        Some(ProcState::Failed) => "failed",
+        None if installed => "stopped",
+        None => "not installed",
     }
 }
 
@@ -167,7 +340,7 @@ fn php_list(state: &State) -> Value {
     let versions: Vec<Value> = php::installed(&state.paths)
         .into_iter()
         .map(|v| {
-            let (status, pid) = match procs.get(&v) {
+            let (status, pid) = match procs.get(&php_service(&v)) {
                 Some(ProcState::Running(pid)) => ("running", Some(*pid)),
                 Some(ProcState::Starting) => ("starting", None),
                 Some(ProcState::Failed) => ("failed", None),
