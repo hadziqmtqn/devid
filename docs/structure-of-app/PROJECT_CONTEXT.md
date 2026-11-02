@@ -23,15 +23,16 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 ## Scope
 
 **In scope (planned):**
-- PHP 8.1 to latest, multiple versions side by side, with a per-site version.
+- PHP 8.3, 8.4 and 8.5 (D-009), multiple versions side by side, with a per-site version.
 - `.test` DNS, a local CA and HTTPS.
 - One global web server: Caddy (default), nginx or Apache.
-- A menu-bar GUI, a CLI, and `php`/`composer` shims.
+- A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012).
 
 **Non-goals:**
 - Databases. The owner uses DBngin for PostgreSQL and MySQL.
 - Per-site web server choice.
 - Arbitrary extra PHP extensions in v1 (see D-008).
+- In v1: mail catcher, dump viewer, log viewer, share/tunnel (deferred, D-011).
 
 ## Phases (estimate 2–2.5 months)
 
@@ -40,12 +41,12 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 1 | Spike (~1 week): prove the risks below | not started |
 | 2 | daemon + CLI with Caddy, multi-PHP, `.test`, HTTPS | not started |
 | 3 | nginx and Apache adapters | not started |
-| 4 | Tauri GUI with menu bar | not started |
-| 5 | Signing, notarization, auto-update, PHP build pipeline | not started |
+| 4 | TUI (ratatui) on top of the daemon API | not started |
+| 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010) | not started |
 
 ## Open risks (Phase 1 must prove)
 
-1. static-php-cli can build php-fpm 8.1, 8.4 and 8.5 for darwin-x64 with `pdo_pgsql`, `pdo_mysql`, `intl`, `gd`, `zip`, `bcmath`, `redis` and `sodium`.
+1. static-php-cli can build php-fpm 8.3, 8.4 and 8.5 for darwin-x64 with `pdo_pgsql`, `pdo_mysql`, `intl`, `gd`, `zip`, `bcmath`, `redis` and `sodium`.
 2. The static php-fpm can load `xdebug.so` (and pcov) built for the same version. **Unknown.** If it fails, the fallback in D-008 applies.
 3. HTTPS from PHP (`curl`, `file_get_contents`) works with a Devid-generated `cacert.pem`, both to public hosts and to other `.test` sites.
 4. nginx can be built as a static binary for macOS. Apache: build it ourselves or use `/usr/sbin/httpd` (undecided).
@@ -79,8 +80,20 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - **Caveat:** spc fetched **Xdebug 3.6.0alpha1**. Pin a stable release before shipping.
 - **erdbpro-saas test suite (Pest):** static PHP 8.5.12 passes 532/532 tests (11,753 assertions) in 175 s. Homebrew PHP 8.4 passes the same 532/532 in 183 s. The run left the project's git status clean.
 
+**2026-11-02: PHP 8.3 and 8.4, and Xdebug pinned** (`PHP_VER=<x.y> spike/php/build.sh`, output in `out/<x.y>/`). Risk 1 is now proven for all D-009 versions.
+
+| Version | Build (libraries cached) | Binary | Xdebug 3.5.3 in cli + fpm | pcov | Links to `/usr/local` |
+|---|---|---|---|---|---|
+| 8.5.12 | 15.8 min | 68 MB | yes | yes | none |
+| 8.4.27 | 14.2 min | 65 MB | yes | yes | none |
+| 8.3.36 | 12.7 min | 62 MB | yes | yes | none |
+
+- **Xdebug pin:** `build.sh` now downloads Xdebug 3.5.3 (stable) from PECL instead of spc's 3.6.0alpha1.
+- **erdbpro-saas:** static 8.4.27 passes 532/532 tests (173 s). It cannot run on any PHP 8.3, because its locked dependencies require PHP >= 8.4.1 even though `composer.json` says `^8.3`. This is a constraint issue in that project, not a Devid issue.
+- **PHP 8.3:** a fresh Laravel 13.39 app created with static 8.3 resolves to Symfony 7.4, migrates on SQLite and passes its 2/2 tests.
+
 **Phase 1 is done when** all of these work on the owner's Mac:
-- `php -m` shows the full extension list for 8.1, 8.4 and 8.5.
+- ✅ (2026-11-02) `php -m` shows the full extension list for 8.3, 8.4 and 8.5.
 - `xdebug.so` loads.
 - HTTPS calls from PHP succeed.
 - erdbpro-saas loads through the static php-fpm.

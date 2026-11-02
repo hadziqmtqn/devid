@@ -1,6 +1,6 @@
 # Devid
 
-Native local PHP development app for macOS (Herd-like, no Homebrew, no VM). Rust workspace (`daemon`, `cli`, `helper`, `gui`) with a Tauri v2 menu-bar GUI.
+Native local PHP development app for macOS (Herd-like, no Homebrew, no VM). Rust workspace (`daemon`, `cli`, `helper`). v1 has a CLI and a TUI, with no GUI (D-012).
 
 ## Read first
 
@@ -16,7 +16,7 @@ Planning. No code exists yet. The next step is the Phase 1 spike; its risks and 
 
 - Target machine: Intel Mac, 2 cores, 16 GB RAM, macOS 14.8. Idle RAM, CPU and battery cost matter in every design choice.
 - No Homebrew and no VM dependency at runtime.
-- PHP 8.1 to latest, static builds, php-fpm with `pm = ondemand`.
+- PHP 8.3, 8.4 and 8.5 (see D-009), static builds, php-fpm with `pm = ondemand`.
 - One global web server: Caddy by default, nginx or Apache as alternatives.
 - Databases are out of scope (the owner uses DBngin).
 
