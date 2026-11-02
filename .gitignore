@@ -1,0 +1,14 @@
+.claude/settings.local.json
+
+# spike build artifacts
+spike/php/*
+!spike/php/README.md
+!spike/php/build.sh
+
+# spike runtime state and test apps
+spike/runtime/run/
+spike/runtime/log/
+spike/laravel/
+spike/runtime/caddy/
+spike/runtime/bin/
+spike/results-erdbpro/

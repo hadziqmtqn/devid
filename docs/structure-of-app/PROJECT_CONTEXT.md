@@ -1,0 +1,100 @@
+# Project Context
+
+> Scope: purpose, scope, constraints, plan and environment of Devid
+> Verified against: 2026-11-02 (no code yet; sourced from owner decisions of 2026-11-01/02)
+> Status: current (all capabilities are planned, none implemented)
+
+## Purpose
+
+Devid serves local PHP sites at `*.test` with HTTPS and per-site PHP versions on macOS, like Laravel Herd. It uses no Homebrew and no VM.
+
+The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 16 GB RAM, macOS 14.8). Low idle RAM, CPU and battery use is the primary constraint.
+
+## Alternatives rejected
+
+| Option | Why rejected |
+|---|---|
+| Lerd + Podman | Needs a Podman VM (3–4 GB reserved) |
+| Yerd, EnvKit | Apple Silicon builds only |
+| Laravel Herd | Owner does not want it |
+| zerobrew | Only a faster Homebrew client |
+| php.new | One PHP version, no `.test` domains |
+
+## Scope
+
+**In scope (planned):**
+- PHP 8.1 to latest, multiple versions side by side, with a per-site version.
+- `.test` DNS, a local CA and HTTPS.
+- One global web server: Caddy (default), nginx or Apache.
+- A menu-bar GUI, a CLI, and `php`/`composer` shims.
+
+**Non-goals:**
+- Databases. The owner uses DBngin for PostgreSQL and MySQL.
+- Per-site web server choice.
+- Arbitrary extra PHP extensions in v1 (see D-008).
+
+## Phases (estimate 2–2.5 months)
+
+| # | Phase | Status |
+|---|---|---|
+| 1 | Spike (~1 week): prove the risks below | not started |
+| 2 | daemon + CLI with Caddy, multi-PHP, `.test`, HTTPS | not started |
+| 3 | nginx and Apache adapters | not started |
+| 4 | Tauri GUI with menu bar | not started |
+| 5 | Signing, notarization, auto-update, PHP build pipeline | not started |
+
+## Open risks (Phase 1 must prove)
+
+1. static-php-cli can build php-fpm 8.1, 8.4 and 8.5 for darwin-x64 with `pdo_pgsql`, `pdo_mysql`, `intl`, `gd`, `zip`, `bcmath`, `redis` and `sodium`.
+2. The static php-fpm can load `xdebug.so` (and pcov) built for the same version. **Unknown.** If it fails, the fallback in D-008 applies.
+3. HTTPS from PHP (`curl`, `file_get_contents`) works with a Devid-generated `cacert.pem`, both to public hosts and to other `.test` sites.
+4. nginx can be built as a static binary for macOS. Apache: build it ourselves or use `/usr/sbin/httpd` (undecided).
+5. erdbpro-saas (Laravel 13, PHP ^8.3, PostgreSQL) runs on Caddy and on nginx.
+6. GitHub Actions still offers an Intel macOS runner. If not, build x64 locally. **Unverified as of 2026-11-02.**
+
+### Spike results so far
+
+**2026-11-02: PHP 8.5.12 static build on the owner's Mac** (spc 2.8.5; script `spike/php/build.sh`). Risk 1 passed for 8.5. Versions 8.1 and 8.4 are not built yet.
+
+- **Time:** 3.5 min to download sources (656 MB), 45 min for a clean build. OpenSSL takes about 7 min, ICU about 6 min, PostgreSQL about 5 min, and PHP itself about 18 min (cli + fpm).
+- **Resources:** peak RAM about 500 MB. Disk use is about 2.6 GB for `source/` and 321 MB for `buildroot/`.
+- **Output:** `php` and `php-fpm` are 67 MB each (23 MB gzipped). They link only `/usr/lib` and `/System` libraries, and the minimum macOS is 12.0.
+- **Extensions:** all 31 requested extensions load, including `pdo_pgsql`.
+- **TLS:** HTTPS from `file_get_contents` and `curl` works with no extra config, because the OpenSSL default cert file is `/etc/ssl/cert.pem`. This does not include the Devid CA, so D-008's `cacert.pem` is still needed.
+- **Homebrew contamination:** the first attempt failed at link. clang searched `/usr/local/include` and picked up Homebrew's openssl@4 headers. Fix: `export SDKROOT=$(xcrun --show-sdk-path)` and a clean rebuild. Every build must set `SDKROOT` or run on a Homebrew-free machine.
+- **Compiled-in ini paths:** the spc default `/usr/local/etc/php` collides with Homebrew PHP. The build now uses `/opt/devid/etc/php`.
+
+**2026-11-02: fresh Laravel 13.39 app on the static PHP 8.5.12** (`spike/laravel`, runtime config in `spike/runtime/`):
+
+- **Stack:** Caddy 2.11.7 on `http://127.0.0.1:8085`, `php_fastcgi` to a unix socket, and php-fpm with `pm = ondemand`. PostgreSQL 17 (DBngin) uses database `devid_spike`, with session, cache and queue drivers set to database (same as erdbpro-saas). `composer create-project`, `migrate` and page requests all work. Requests return 200: about 0.58 s cold, about 0.03 s warm. Sessions are written to PostgreSQL.
+- **erdbpro-saas:** `composer check-platform-reqs` passes with this binary.
+- **Missing extension:** `pdo_sqlite` and `sqlite3` were not in the list. The default Laravel skeleton and erdbpro-saas's `phpunit.xml` (`:memory:`) need them. They are added to `build.sh` but not rebuilt yet.
+- **Idle RAM:** php-fpm master 15.2 MB with 0 workers (a worker of about 29 MB exits 10 s after the last request), Caddy 30.2 MB, CPU 0%. That is about 45 MB in total.
+- **For comparison:** the running Valet stack (Homebrew php-fpm 8.4 with 3 idle workers, nginx, dnsmasq) shows about 41 MB RSS. Its processes are days old, so macOS memory compression may understate it. Devid with Caddy is therefore not lighter than Valet at idle. The gain over Valet is no Homebrew and per-site PHP versions, not RAM. Against Lerd + Podman (a 3–4 GB VM) the difference is large.
+
+**2026-11-02: rebuild with SQLite and shared Xdebug/pcov** (`--build-shared=xdebug,pcov`):
+
+- **Rebuild:** 16 min (libraries reused). `pdo_sqlite` and `sqlite3` are now compiled in, which resolves the gap above. The binaries still link only system libraries.
+- **Risk 2 passed.** `xdebug.so` (581 KB) and `pcov.so` (34 KB) load into the static `php` and `php-fpm` via `zend_extension`/`extension`. Xdebug step debugging sent a DBGp `init` packet to a test listener.
+- **Caveat:** spc fetched **Xdebug 3.6.0alpha1**. Pin a stable release before shipping.
+- **erdbpro-saas test suite (Pest):** static PHP 8.5.12 passes 532/532 tests (11,753 assertions) in 175 s. Homebrew PHP 8.4 passes the same 532/532 in 183 s. The run left the project's git status clean.
+
+**Phase 1 is done when** all of these work on the owner's Mac:
+- `php -m` shows the full extension list for 8.1, 8.4 and 8.5.
+- `xdebug.so` loads.
+- HTTPS calls from PHP succeed.
+- erdbpro-saas loads through the static php-fpm.
+
+## Machine state (before migration)
+
+- Laravel Valet serves 9 `.test` sites. It uses Homebrew `php@8.4`, `nginx` and `dnsmasq`, which run as root LaunchDaemons. Devid conflicts with it on ports 80/443 until Valet is stopped.
+- The cloudflared tunnel runs as the system daemon `com.cloudflare.cloudflared` from `/usr/local/bin/cloudflared`, which is a symlink into Homebrew. Before Homebrew is removed, replace it with the official binary at the same path. The tunnel must keep working.
+- The Homebrew agent `sh.brew.cloudflared` runs no tunnel and can be removed.
+- Node comes from nvm. PostgreSQL comes from DBngin (PG 17 on port 5432).
+- Homebrew removal has not started. First run `brew bundle dump --file=~/Brewfile-backup`.
+
+## Working rules
+
+- Reply to the owner in Bahasa Indonesia.
+- Commit and push only on request. Do not add a "Generated with Claude Code" line to PR or issue text.
+- Ask before any installer or system-level change: sudo, LaunchDaemons, `/etc/resolver`, CA trust.

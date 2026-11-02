@@ -1,0 +1,15 @@
+{
+	admin off
+	auto_https off
+	storage file_system /Users/meowpush/Projects/devid/spike/runtime/run/caddy-data
+}
+
+http://127.0.0.1:8085 {
+	root * /Users/meowpush/Projects/devid/spike/laravel/public
+	encode
+	php_fastcgi unix//Users/meowpush/Projects/devid/spike/runtime/run/php85.sock
+	file_server
+	log {
+		output file /Users/meowpush/Projects/devid/spike/runtime/log/caddy-access.log
+	}
+}
