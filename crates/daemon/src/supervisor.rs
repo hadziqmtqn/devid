@@ -169,10 +169,22 @@ fn watch(name: &str, slot: &Slot) {
 }
 
 fn start(spec: &Spec) -> std::io::Result<Child> {
+    use std::os::unix::process::CommandExt;
     let mut cmd = Command::new(&spec.program);
     cmd.args(&spec.args).stdin(Stdio::null());
     for (key, value) in &spec.env {
         cmd.env(key, value);
+    }
+    // The daemon blocks its stop signals (server.rs) and children inherit the mask; without this
+    // nginx would never see SIGHUP (reload) and php-fpm/nginx would ignore launchd's SIGTERM.
+    // SAFETY: runs between fork and exec; sigemptyset/pthread_sigmask are async-signal-safe.
+    unsafe {
+        cmd.pre_exec(|| {
+            let mut empty: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut empty);
+            libc::pthread_sigmask(libc::SIG_SETMASK, &empty, std::ptr::null_mut());
+            Ok(())
+        });
     }
     cmd.spawn()
 }

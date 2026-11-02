@@ -1,8 +1,8 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (Phase 2 M5: DNS responder and helper)
-> Status: partial (M1–M5 implemented; the rest proposed)
+> Verified against: 2026-11-02 (Phase 2 M6: setup, LaunchAgent, shims)
+> Status: partial (M1–M6 implemented; M7 and the GUI proposed)
 
 ## Components (Rust Cargo workspace)
 
@@ -55,6 +55,16 @@ Implemented in M5:
   - The Devid CA is trusted for SSL only in the System keychain; it is name-constrained to `.<tld>`.
   - The DNS cache is flushed.
 - Once the pf rules are in place, `devid sites` shows URLs without a port (`standard_ports` in status).
+
+Implemented in M6:
+- **Signals.** The daemon blocks SIGTERM/SIGINT/SIGHUP before starting any thread. A `sigwait` thread turns them into the same clean stop as `devid daemon stop`. The supervisor clears the inherited mask in children (`pre_exec`), so nginx still gets SIGHUP for reloads.
+- **`daemon::install`** (user level, no root):
+  - copies the binary to `~/.devid/bin/devid`, with `php` and `composer` symlinks to it;
+  - adds a marked PATH line to `~/.zshrc` (or `~/.bash_profile`), appended so Devid's `php` wins over Homebrew;
+  - installs the LaunchAgent `dev.devid.daemon` (`RunAtLoad`, restart only on a crash, log in `~/.devid/log/daemon.log`) through `launchctl bootstrap gui/<uid>`;
+  - downloads `composer.phar` with its published sha256.
+- **Shims** (argv[0] dispatch in the CLI): `php` runs the version of the site that contains the current folder (isolated or default), with Devid's `PHPRC`/`PHP_INI_SCAN_DIR`. `composer` runs `composer.phar` with that PHP. Both read `config.toml` directly and work without the daemon.
+- **`devid setup [--dry-run]`** runs the user steps, then `devid helper install` (sudo) only if the system pieces are missing. **`devid doctor`** is a read-only check with a fix per problem, including Homebrew `php` shadowing the shim and Valet still running. **`devid uninstall [--dry-run] [--purge]`** reverses setup and keeps `~/.devid` data unless `--purge`.
 
 `helper` is created in M5. The table below is the target layout.
 

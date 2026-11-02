@@ -83,3 +83,22 @@ fn stop_during_php_startup_does_not_hang() {
 
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// launchd stops the LaunchAgent with SIGTERM: the daemon must stop PHP and clean up like `stop`.
+#[test]
+fn sigterm_stops_daemon_and_php() {
+    let root = temp_root("devid-sigterm-it");
+    let home = root.join("home");
+    let build = fake_build(&root, "8.5");
+    let mut daemon = start_daemon(&home);
+    assert!(devid(&home, &["php", "install", "8.5", "--from", build.to_str().unwrap()]).status.success());
+    wait_for("8.5 running", || proc_of(&json(&home, &["status", "--json"]), "8.5").0 == "running");
+    let status = json(&home, &["status", "--json"]);
+    let (daemon_pid, php_pid) = (status["pid"].as_u64().unwrap(), proc_of(&status, "8.5").1.unwrap());
+
+    Command::new("kill").args(["-TERM", &daemon_pid.to_string()]).status().unwrap();
+    wait_for("daemon exit", || daemon.exited());
+    assert!(!alive(php_pid), "php-fpm stopped with the daemon");
+    assert!(!home.join("run/devid.sock").exists(), "socket removed");
+    fs::remove_dir_all(&root).unwrap();
+}

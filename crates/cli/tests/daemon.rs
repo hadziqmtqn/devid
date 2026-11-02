@@ -26,6 +26,10 @@ fn daemon_lifecycle() {
     let home = std::env::temp_dir().join(format!("devid-it-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     let sock = home.join("run/devid.sock");
+    // Its own DNS port, so a Devid running on this machine cannot interfere.
+    let dns = std::net::UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("config.toml"), format!("dns_port = {dns}\n")).unwrap();
 
     // Without a daemon, status fails with a helpful message.
     let out = devid(&home, &["status"]);

@@ -102,8 +102,49 @@ impl State {
     }
 }
 
-/// Run the daemon until a `stop` request arrives.
+/// SIGTERM (launchd stopping the agent), SIGINT (Ctrl+C) and SIGHUP all mean "shut down cleanly".
+const STOP_SIGNALS: [libc::c_int; 3] = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP];
+
+fn stop_signal_set() -> libc::sigset_t {
+    // SAFETY: sigemptyset/sigaddset only write to the set we own.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        for sig in STOP_SIGNALS {
+            libc::sigaddset(&mut set, sig);
+        }
+        set
+    }
+}
+
+/// Block the stop signals in this thread before any other thread exists, so every thread inherits
+/// the mask and only the dedicated `sigwait` thread receives them. Child processes would inherit
+/// it too; the supervisor clears it before exec (supervisor::start).
+fn block_stop_signals() {
+    let set = stop_signal_set();
+    // SAFETY: valid set; a null old-set pointer is allowed.
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+}
+
+/// Wait for a stop signal, then stop the daemon the same way a `stop` request does.
+fn spawn_signal_thread(state: Arc<State>) {
+    std::thread::spawn(move || {
+        let set = stop_signal_set();
+        let mut sig: libc::c_int = 0;
+        // SAFETY: valid set and out pointer.
+        if unsafe { libc::sigwait(&set, &mut sig) } == 0 {
+            eprintln!("devid: received signal {sig}; stopping");
+            state.stopping.store(true, Ordering::SeqCst);
+            let _ = UnixStream::connect(state.paths.socket());
+        }
+    });
+}
+
+/// Run the daemon until a `stop` request or a stop signal arrives.
 pub fn run(paths: Paths) -> io::Result<()> {
+    block_stop_signals();
     let config = Config::load_or_create(&paths.config())?;
     fs::create_dir_all(paths.run_dir())?;
     let listener = bind(&paths)?;
@@ -127,6 +168,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         started: Instant::now(),
         stopping: AtomicBool::new(false),
     });
+    spawn_signal_thread(Arc::clone(&state));
     if let Err(e) = state.apply(&config) {
         // Keep the daemon reachable so `devid status` can show the problem.
         eprintln!("devid: {e}");
@@ -148,7 +190,6 @@ pub fn run(paths: Paths) -> io::Result<()> {
             Err(e) => eprintln!("devid: accept failed: {e}"),
         }
     }
-    // shortcut: only a `stop` request shuts services down cleanly; SIGTERM handling comes with the LaunchAgent (M6).
     state.supervisor.stop_all();
     let _ = fs::remove_file(state.paths.socket());
     Ok(())
@@ -189,6 +230,11 @@ fn handle(stream: UnixStream, state: &State) -> io::Result<()> {
         };
         serde_json::to_writer(&mut writer, &reply)?;
         writer.write_all(b"\n")?;
+        if state.stopping.load(Ordering::SeqCst) {
+            // Reply sent; now wake the accept loop so it sees the flag and shuts down.
+            let _ = UnixStream::connect(state.paths.socket());
+            break;
+        }
     }
     Ok(())
 }
@@ -241,9 +287,9 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             }))
         }
         Request::Stop => {
+            // handle() wakes the accept loop only after this reply is written; waking it here let
+            // the daemon exit before replying, so `devid daemon stop` sometimes reported failure.
             state.stopping.store(true, Ordering::SeqCst);
-            // Wake the accept loop so it sees the flag.
-            let _ = UnixStream::connect(state.paths.socket());
             Ok(json!({"ok": true}))
         }
         Request::PhpList => Ok(json!({"ok": true, "php": php_list(state)})),

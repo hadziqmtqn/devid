@@ -105,7 +105,25 @@ pub struct Daemon {
     child: std::process::Child,
 }
 
+/// Ports for test daemons: never the real ones (8088/8443/53535), so a Devid running on this Mac
+/// (or its pf redirect) cannot interfere.
+pub const TEST_HTTP_PORT: u16 = 18088;
+pub const TEST_HTTPS_PORT: u16 = 18443;
+
+pub fn free_udp_port() -> u16 {
+    std::net::UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
+
 pub fn start_daemon(home: &Path) -> Daemon {
+    let config = home.join("config.toml");
+    if !config.exists() {
+        fs::create_dir_all(home).unwrap();
+        fs::write(
+            &config,
+            format!("http_port = {TEST_HTTP_PORT}\nhttps_port = {TEST_HTTPS_PORT}\ndns_port = {}\n", free_udp_port()),
+        )
+        .unwrap();
+    }
     let child = Command::new(BIN).args(["daemon", "run"]).env("DEVID_HOME", home).spawn().unwrap();
     let daemon = Daemon { home: home.to_path_buf(), child };
     wait_for("daemon", || devid(home, &["status"]).status.success());
