@@ -24,6 +24,10 @@ impl Paths {
         self.run_dir().join("devid.sock")
     }
 
+    pub fn log_dir(&self) -> PathBuf {
+        self.home.join("log")
+    }
+
     pub fn config(&self) -> PathBuf {
         self.home.join("config.toml")
     }

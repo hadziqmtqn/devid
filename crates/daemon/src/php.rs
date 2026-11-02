@@ -1,0 +1,203 @@
+//! PHP versions under `~/.devid/php/<ver>/`: install, list, and the files php-fpm runs with (D-008, D-009).
+
+use crate::paths::Paths;
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+/// D-009: the only versions Devid manages.
+pub const SUPPORTED: [&str; 3] = ["8.3", "8.4", "8.5"];
+
+fn err(msg: impl Into<String>) -> io::Error {
+    io::Error::other(msg.into())
+}
+
+pub fn check_supported(version: &str) -> io::Result<()> {
+    if SUPPORTED.contains(&version) {
+        Ok(())
+    } else {
+        Err(err(format!("PHP {version} is not supported; choose one of {}", SUPPORTED.join(", "))))
+    }
+}
+
+/// "8.4" -> "84", used in socket, pid and log file names.
+pub fn tag(version: &str) -> String {
+    version.replace('.', "")
+}
+
+pub fn dir(paths: &Paths, version: &str) -> PathBuf {
+    paths.home.join("php").join(version)
+}
+
+pub fn fpm_bin(paths: &Paths, version: &str) -> PathBuf {
+    dir(paths, version).join("bin/php-fpm")
+}
+
+pub fn etc(paths: &Paths, version: &str) -> PathBuf {
+    dir(paths, version).join("etc")
+}
+
+pub fn socket(paths: &Paths, version: &str) -> PathBuf {
+    paths.run_dir().join(format!("php{}.sock", tag(version)))
+}
+
+pub fn pid_file(paths: &Paths, version: &str) -> PathBuf {
+    paths.run_dir().join(format!("php{}-fpm.pid", tag(version)))
+}
+
+pub fn cacert(paths: &Paths) -> PathBuf {
+    paths.home.join("ca/cacert.pem")
+}
+
+/// Installed versions, sorted, newest last.
+pub fn installed(paths: &Paths) -> Vec<String> {
+    let mut found: Vec<String> = SUPPORTED.iter().filter(|v| fpm_bin(paths, v).is_file()).map(|v| v.to_string()).collect();
+    found.sort();
+    found
+}
+
+/// Install `php`, `php-fpm` and `modules/*.so` from a build folder (spike/php/out/<ver>).
+// shortcut: installs from a local folder only; downloading release assets comes with the Phase 5 pipeline.
+pub fn install(paths: &Paths, version: &str, from: &Path) -> io::Result<()> {
+    check_supported(version)?;
+    for bin in ["php", "php-fpm"] {
+        if !from.join(bin).is_file() {
+            return Err(err(format!("{} not found", from.join(bin).display())));
+        }
+    }
+    let reported = php_version(&from.join("php"))?;
+    if reported != version {
+        return Err(err(format!("{} is PHP {reported}, not {version}", from.display())));
+    }
+
+    // Copy into a temp dir and rename, so a failed copy never leaves a half-installed version.
+    let target = dir(paths, version);
+    let tmp = paths.home.join("php").join(format!(".install-{version}"));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(tmp.join("bin"))?;
+    fs::create_dir_all(tmp.join("modules"))?;
+    for bin in ["php", "php-fpm"] {
+        fs::copy(from.join(bin), tmp.join("bin").join(bin))?;
+    }
+    if let Ok(entries) = fs::read_dir(from.join("modules")) {
+        for entry in entries.flatten() {
+            if entry.path().extension().is_some_and(|e| e == "so") {
+                fs::copy(entry.path(), tmp.join("modules").join(entry.file_name()))?;
+            }
+        }
+    }
+    // Keep the owner's edited ini files across a reinstall.
+    if target.join("etc").is_dir() {
+        copy_dir(&target.join("etc"), &tmp.join("etc"))?;
+    }
+    if target.exists() {
+        fs::remove_dir_all(&target)?;
+    }
+    fs::rename(&tmp, &target)?;
+    write_config(paths, version)
+}
+
+/// `php -r` reports "major.minor" of a binary, ignoring any ini.
+fn php_version(php: &Path) -> io::Result<String> {
+    let out = Command::new(php).args(["-n", "-r", "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"]).output()?;
+    if !out.status.success() {
+        return Err(err(format!("{} -r failed: {}", php.display(), String::from_utf8_lossy(&out.stderr).trim())));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let dest = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &dest)?;
+        } else {
+            fs::copy(entry.path(), dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// Write php.ini (only if missing; it is the owner's to edit) and php-fpm.conf (always; Devid owns it).
+pub fn write_config(paths: &Paths, version: &str) -> io::Result<()> {
+    let etc = etc(paths, version);
+    fs::create_dir_all(etc.join("conf.d"))?;
+    fs::create_dir_all(paths.run_dir())?;
+    fs::create_dir_all(paths.log_dir())?;
+
+    let ini = etc.join("php.ini");
+    if !ini.exists() {
+        let ca = cacert(paths);
+        fs::write(
+            &ini,
+            format!(
+                "; Devid base php.ini for PHP {version}. Edit freely; Devid never overwrites this file.\n\
+                 memory_limit = 512M\n\
+                 upload_max_filesize = 64M\n\
+                 post_max_size = 64M\n\
+                 display_errors = On\n\
+                 error_reporting = E_ALL\n\
+                 opcache.enable = 1\n\
+                 ; JIT off (D-008). `off` would parse as an empty boolean, so use `disable` plus a zero buffer.\n\
+                 opcache.jit = disable\n\
+                 opcache.jit_buffer_size = 0\n\
+                 opcache.validate_timestamps = 1\n\
+                 opcache.revalidate_freq = 0\n\
+                 openssl.cafile = {ca}\n\
+                 curl.cainfo = {ca}\n",
+                ca = ca.display()
+            ),
+        )?;
+    }
+
+    let t = tag(version);
+    fs::write(
+        etc.join("php-fpm.conf"),
+        format!(
+            "; Generated by Devid; changes are overwritten.\n\
+             [global]\n\
+             pid = {pid}\n\
+             error_log = {log}\n\
+             daemonize = no\n\
+             \n\
+             [devid-{t}]\n\
+             listen = {sock}\n\
+             listen.mode = 0600\n\
+             pm = ondemand\n\
+             pm.max_children = 4\n\
+             pm.process_idle_timeout = 10s\n\
+             catch_workers_output = yes\n",
+            pid = pid_file(paths, version).display(),
+            log = paths.log_dir().join(format!("php{t}-fpm.log")).display(),
+            sock = socket(paths, version).display(),
+        ),
+    )
+}
+
+/// D-008: PHP trusts the system bundle (plus the Devid CA once M4 adds it).
+pub fn ensure_cacert(paths: &Paths) -> io::Result<()> {
+    let target = cacert(paths);
+    if target.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(target.parent().expect("cacert has a parent"))?;
+    fs::copy("/etc/ssl/cert.pem", &target)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_versions_and_tags() {
+        assert!(check_supported("8.4").is_ok());
+        assert!(check_supported("8.1").is_err());
+        assert!(check_supported("8.4; rm -rf /").is_err());
+        assert_eq!(tag("8.5"), "85");
+    }
+}
