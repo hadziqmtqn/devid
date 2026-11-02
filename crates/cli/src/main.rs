@@ -62,6 +62,8 @@ enum Command {
         #[command(subcommand)]
         action: HelperAction,
     },
+    /// Restart a service: php-8.4, nginx, caddy or apache
+    Restart { service: String },
     /// Update devid itself to the newest release
     SelfUpdate {
         /// Only show whether a newer devid exists
@@ -169,6 +171,13 @@ enum PhpAction {
     },
     /// Make a version the default
     Use { version: String },
+    /// Turn xdebug or pcov on/off for a version: `devid php ext 8.5 xdebug on`
+    Ext {
+        version: String,
+        ext: String,
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -232,6 +241,13 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             send(Request::PhpInstall { version: version.clone(), from }).map(|v| {
                 println!("PHP {} installed", v["version"].as_str().filter(|s| !s.is_empty()).unwrap_or(&version))
             })
+        }
+        Command::Php { action: PhpAction::Ext { version, ext, state } } => {
+            send(Request::PhpExt { version: version.clone(), ext: ext.clone(), enabled: state == "on" })
+                .map(|_| println!("{ext} {state} for PHP {version} (php-fpm restarted)"))
+        }
+        Command::Restart { service } => {
+            send(Request::Restart { service: service.clone() }).map(|_| println!("restarted {service}"))
         }
         Command::Update { check } => send(Request::Update { check }).map(|v| {
             let changes = v["changes"].as_array().map(Vec::as_slice).unwrap_or_default();

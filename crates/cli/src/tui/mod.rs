@@ -48,6 +48,35 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
         Effect::OpenTerminal(path) => {
             run(Command::new("open").args(["-a", "Terminal"]).arg(&path), format!("opened {path} in Terminal"))
         }
+        Effect::Update { check } => match request(paths, &Request::Update { check }) {
+            Ok(v) => {
+                let changes: Vec<String> = v["changes"]
+                    .as_array()
+                    .map(|l| {
+                        l.iter()
+                            .map(|c| {
+                                format!(
+                                    "{} {}→{}",
+                                    c["what"].as_str().unwrap_or("?"),
+                                    c["from"].as_str().unwrap_or("?"),
+                                    c["to"].as_str().unwrap_or("?")
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                match (changes.is_empty(), check) {
+                    (true, _) => {
+                        (format!("everything is up to date (release {})", v["release"].as_str().unwrap_or("?")), false)
+                    }
+                    (false, true) => (format!("available: {} — press U to update", changes.join(", ")), false),
+                    (false, false) => (format!("updated: {}", changes.join(", ")), false),
+                }
+            }
+            Err(e) => (e, true),
+        },
+        // Handled in the loop, which owns the terminal.
+        Effect::EditThenRestart { .. } => ("internal: edit handled by the loop".into(), true),
         Effect::Copy(text) => {
             let copied = Command::new("pbcopy").stdin(Stdio::piped()).spawn().and_then(|mut child| {
                 std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes())?;
@@ -81,7 +110,32 @@ pub fn run(paths: &Paths) -> Result<(), String> {
                 match app.handle_key(key) {
                     Action::Quit => return Ok(()),
                     Action::Refresh => last = None,
+                    Action::Do(Effect::EditThenRestart { path, service }) => {
+                        // Step aside for the editor, then come back and apply the change.
+                        ratatui::restore();
+                        let edited = std::process::Command::new("sh")
+                            .args(["-c", "${VISUAL:-${EDITOR:-vi}} \"$1\"", "devid-edit"])
+                            .arg(&path)
+                            .status();
+                        terminal = ratatui::init();
+                        app.message = Some(match edited {
+                            Ok(s) if s.success() => {
+                                match request(paths, &Request::Restart { service: service.clone() }) {
+                                    Ok(_) => (format!("saved {path}; {service} restarted"), false),
+                                    Err(e) => (e, true),
+                                }
+                            }
+                            Ok(s) => (format!("editor exited with {s}; nothing restarted"), true),
+                            Err(e) => (format!("could not start the editor: {e}"), true),
+                        });
+                        last = None;
+                    }
                     Action::Do(effect) => {
+                        // Downloads take seconds; say so before blocking.
+                        if matches!(effect, Effect::Daemon { .. } | Effect::Update { .. }) {
+                            app.message = Some(("⏳ working…".into(), false));
+                            terminal.draw(|frame| ui::draw(frame, &app))?;
+                        }
                         app.message = Some(perform(effect, paths));
                         last = None; // show the change right away
                     }
@@ -181,7 +235,7 @@ mod tests {
         use super::app::{InputFor, Mode, PickFor};
         let mut a = app(false);
         a.focus = Focus::Page;
-        a.mode = Mode::Menu { site: 0, items: App::site_menu(&a.sites[0]), index: 0 };
+        a.mode = Mode::Menu { row: 0, items: App::site_menu(&a.sites[0]), index: 0 };
         let (text, _) = render(&a);
         assert!(text.contains("erdbpro-saas") && text.contains("o  Open in browser") && text.contains("c  Copy URL"));
         a.mode = Mode::Input { purpose: InputFor::Link, text: "~/code".into() };

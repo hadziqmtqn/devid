@@ -18,6 +18,16 @@ pub enum Request {
     PhpUse {
         version: String,
     },
+    /// Turn xdebug or pcov on or off for a PHP version (restarts that version's php-fpm).
+    PhpExt {
+        version: String,
+        ext: String,
+        enabled: bool,
+    },
+    /// Restart one service: "php-8.4", "nginx", "caddy" or "apache".
+    Restart {
+        service: String,
+    },
     /// Install a web server binary (`from` optional for apache: the system httpd).
     ServerInstall {
         server: String,

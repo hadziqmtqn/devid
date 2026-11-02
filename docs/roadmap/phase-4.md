@@ -2,7 +2,7 @@
 
 > Scope: the terminal UI that `devid` opens with no arguments (D-012), and the daemon features the approved prototype needs
 > Verified against: 2026-11-02
-> Status: T1 done (#21); T2 done in code (Sites actions); T3–T5 proposed
+> Status: T1–T2 done (#21, #22); T3 done in code (PHP page, extensions, restart); T4–T5 proposed
 
 Phase 4 gives Devid the interface from the approved prototype (`devid-prototype/index.html`) as a TUI. It takes the prototype's structure and flows, not its look (D-017).
 
@@ -33,7 +33,7 @@ The prototype's menu-bar items (Start All, Stop All, Open Devid) appear as globa
 | T1 | **Shell:** `devid` with no arguments (and `devid tui`) opens the TUI. It has a header (daemon status, active server, default PHP), the sidebar with five pages, a page area and a footer with keys; a help overlay; a "daemon is not running" screen with the fix; `NO_COLOR`; resize handling; a clean exit that restores the terminal. | the TUI opens, navigates and exits cleanly; render tests pass with ratatui's `TestBackend` |
 | T2 | **Sites page:** list and every per-site action from the table above, the link/park path input and confirmations. | all site actions work from the TUI on the owner's Mac |
 | T3 | **PHP page and extensions:** daemon API + CLI `devid php ext <ver> <xdebug\|pcov> on\|off` (writes `conf.d/devid-<ext>.ini` and restarts that version, D-008); the PHP page with install, default, update, extensions and php.ini. | Xdebug can be turned on from the TUI and `php -v` shows it |
-| T4 | **Server and Logs:** daemon API + CLI `devid service <name> restart\|stop\|start`, `devid stop-all` / `start-all`, and `devid logs [name] [--follow] [--clear]`; the Server page and the Logs page. | a service restart and a log tail work from the TUI |
+| T4 | **Server and Logs:** daemon API + CLI `devid stop <name>` / `devid start <name>` (`devid restart <name>` already landed in T3), `devid stop-all` / `start-all`, and `devid logs [name] [--follow] [--clear]`; the Server page and the Logs page. | a service restart and a log tail work from the TUI |
 | T5 | **Settings and polish:** the Settings page (updates, doctor, setup/uninstall handover); confirmations everywhere something is destructive; the empty and error states from the prototype; README/docs; a release (`v0.2.0`). | `devid self-update` on the owner's Mac brings the TUI |
 
 Each milestone is one worktree and one PR, opened after the previous one is merged (no stacked PRs).

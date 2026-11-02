@@ -169,24 +169,43 @@ fn draw_sites(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(table, area);
 }
 
-fn draw_php(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
-    let versions = status["php"].as_array().map(Vec::as_slice).unwrap_or_default();
-    if versions.is_empty() {
-        frame.render_widget(Paragraph::new("No PHP installed. Install one with `devid php install 8.5`."), area);
-        return;
-    }
-    let rows = versions.iter().enumerate().map(|(i, p)| {
-        let pid = p["pid"].as_u64().map(|pid| format!("pid {pid}")).unwrap_or_default();
-        Row::new(vec![
-            Cell::from(format!("PHP {}", s(&p["version"]))),
-            Cell::from(state(app, s(&p["status"]))),
-            Cell::from(pid),
-            Cell::from(if p["default"] == true { "default" } else { "" }),
-        ])
-        .style(row_style(app, i))
+fn draw_php(frame: &mut Frame, app: &App, _status: &Value, area: Rect) {
+    let on_off = |p: &Value, e: &str| {
+        let on = p["extensions"][e] == true;
+        Span::styled(format!("{e} {}", if on { "●" } else { "○" }), if on { ok(app) } else { Style::default() })
+    };
+    let rows = devid_daemon::php::SUPPORTED.iter().enumerate().map(|(i, v)| {
+        let cells = match app.php_entry(v) {
+            Some(p) => vec![
+                Cell::from(format!("PHP {v}")),
+                Cell::from(state(app, s(&p["status"]))),
+                Cell::from(if p["default"] == true { "default" } else { "" }),
+                Cell::from(Line::from(vec![on_off(p, "xdebug"), Span::raw("  "), on_off(p, "pcov")])),
+                Cell::from(p["pid"].as_u64().map(|pid| format!("pid {pid}")).unwrap_or_default()),
+            ],
+            None => vec![
+                Cell::from(format!("PHP {v}")),
+                Cell::from(Span::raw("○ not installed")),
+                Cell::from(""),
+                Cell::from(Span::styled("enter to install", Style::default().add_modifier(Modifier::DIM))),
+                Cell::from(""),
+            ],
+        };
+        Row::new(cells).style(row_style(app, i))
     });
-    let table =
-        Table::new(rows, [Constraint::Length(10), Constraint::Length(16), Constraint::Length(12), Constraint::Min(8)]);
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(9),
+            Constraint::Length(16),
+            Constraint::Length(8),
+            Constraint::Length(20),
+            Constraint::Min(8),
+        ],
+    )
+    .header(
+        Row::new(["Version", "php-fpm", "", "Extensions", ""]).style(Style::default().add_modifier(Modifier::BOLD)),
+    );
     frame.render_widget(table, area);
 }
 
@@ -235,6 +254,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 (Page::Sites, Focus::Page) => {
                     " enter actions · a link folder · p park folder · U unpark · tab sidebar · ? help · q quit"
                 }
+                (Page::Php, _) => {
+                    " enter actions (default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
+                }
                 (Page::Sites, Focus::Sidebar) => {
                     " ↑↓ pages · enter open · a link folder · p park folder · U unpark · ? help · q quit"
                 }
@@ -263,8 +285,11 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
     let hint = |t: &str| Line::styled(t.to_string(), Style::default().add_modifier(Modifier::DIM));
     match &app.mode {
         Mode::Normal => {}
-        Mode::Menu { site, items, index } => {
-            let name = app.sites.get(*site).map(|s| s["name"].as_str().unwrap_or("?").to_string()).unwrap_or_default();
+        Mode::Menu { row, items, index } => {
+            let name = match app.page {
+                Page::Php => format!("PHP {}", devid_daemon::php::SUPPORTED[(*row).min(2)]),
+                _ => app.sites.get(*row).map(|s| s["name"].as_str().unwrap_or("?").to_string()).unwrap_or_default(),
+            };
             let mut lines: Vec<Line> = items
                 .iter()
                 .enumerate()
@@ -275,7 +300,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
                 .collect();
             lines.push(Line::raw(""));
             lines.push(hint(" ↑↓ enter, or the letter · esc close"));
-            popup(frame, 44, items.len() as u16 + 4, &name, lines);
+            popup(frame, 52, items.len() as u16 + 4, &name, lines);
         }
         Mode::Input { purpose, text } => {
             let title = match purpose {
@@ -321,7 +346,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
 fn draw_help(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let w = area.width.min(58);
-    let h = area.height.min(16);
+    let h = area.height.min(17);
     let popup = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     let lines = vec![
         Line::raw("↑ ↓  or  j k     move"),
@@ -333,6 +358,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw(""),
         Line::raw("Sites: enter = actions (open, Terminal, copy, PHP, unlink)"),
         Line::raw("       a link · p park · U unpark"),
+        Line::raw("PHP:   enter = actions · u check updates · U update"),
         Line::raw("Every action is also a command: `devid --help`."),
         Line::raw(if app.no_color { "NO_COLOR is set: monochrome." } else { "Set NO_COLOR=1 for a monochrome UI." }),
         Line::styled("press any key to close", Style::default().add_modifier(Modifier::DIM)),
