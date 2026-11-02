@@ -23,6 +23,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-013 | 2026-11-02 | accepted | v1 is macOS only; OS-specific code isolated in a `platform` module |
 | D-014 | 2026-11-02 | accepted | Install with `install.sh` plus `devid setup`/`doctor`/`uninstall`; no Node |
 | D-015 | 2026-11-02 | accepted | nginx is the default web server; Caddy and Apache stay selectable |
+| D-016 | 2026-11-02 | accepted | Binaries are built and released from a separate public repo, `devid-binaries`; the code stays private |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -139,3 +140,21 @@ See ARCHITECTURE, "PHP runtime".
 - **Consequences:**
   - The nginx adapter must include the Laravel FastCGI buffer settings (`fastcgi_buffer_size 32k; fastcgi_buffers 16 16k;`).
   - The nginx build joins the CI pipeline and is subject to the same no-`/usr/local` link check.
+
+## D-016: binaries in a separate public repository (accepted 2026-11-02)
+
+- **Context:**
+  - Phase 5 needs CI builds and downloadable releases.
+  - The `devid` repo is private: GitHub-hosted macOS minutes count 10x against a private quota (a full PHP build is roughly 500–800 quota minutes), and assets in a private release need a GitHub token to download, which the daemon should not need.
+- **Options considered:**
+  - make `devid` public: needs the D-010 notice and a license now;
+  - keep everything private with frugal CI: quota risk, and the daemon needs a `gh` token;
+  - build on the owner's Mac: heavy on the 2-core laptop, and the release step is manual.
+- **Decision:** a public repository, `hadziqmtqn/devid-binaries`, holds the PHP and nginx build scripts, their CI and all releases. The private `devid` repo builds only the `devid` binary and uploads it there with a fine-grained token limited to that repository.
+- **Consequences:**
+  - CI for the heavy builds is free.
+  - Installed Devid downloads without a token.
+  - `install.sh` can use plain `curl`.
+  - Anyone can see the build scripts and download the binaries, which are open-source software plus the compiled `devid`; the Devid source stays private.
+  - `install.sh`'s `REPO` changes to `devid-binaries` in R4.
+- **Plan:** `docs/roadmap/phase-5.md`.
