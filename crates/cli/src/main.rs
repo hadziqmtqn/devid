@@ -58,6 +58,12 @@ enum Command {
         #[command(subcommand)]
         action: HelperAction,
     },
+    /// Update devid itself to the newest release
+    SelfUpdate {
+        /// Only show whether a newer devid exists
+        #[arg(long)]
+        check: bool,
+    },
     /// Update installed PHP, nginx and Caddy to the newest versions in Devid's releases
     Update {
         /// Only show what would be updated
@@ -254,6 +260,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Helper { action } => helper(action, paths),
         Command::Setup { dry_run } => setup::setup(paths, dry_run),
         Command::Doctor => setup::doctor(paths),
+        Command::SelfUpdate { check } => setup::self_update(paths, check),
         Command::Uninstall { dry_run, purge } => setup::uninstall(paths, dry_run, purge),
         Command::Sites { json } => send(Request::Sites).map(|v| print_sites(&v["sites"], json)),
         Command::Link { name, path } => send(Request::Link { name, path: abs(path)? })
