@@ -3,7 +3,7 @@
 use crate::{
     ca,
     config::Config,
-    nginx,
+    dns, helper, nginx,
     paths::Paths,
     php,
     protocol::Request,
@@ -28,6 +28,8 @@ use std::{
 };
 
 struct State {
+    /// "listening on …" or the bind error, shown by `devid status`.
+    dns: String,
     paths: Paths,
     config: Mutex<Config>,
     supervisor: Supervisor,
@@ -110,7 +112,15 @@ pub fn run(paths: Paths) -> io::Result<()> {
     }
     ca::write_cacert(&paths)?;
 
+    let dns = match dns::spawn(config.dns_port, config.tld.clone()) {
+        Ok(()) => format!("listening on 127.0.0.1:{}", config.dns_port),
+        Err(e) => {
+            eprintln!("devid: DNS on 127.0.0.1:{} failed: {e}", config.dns_port);
+            format!("failed: {e}")
+        }
+    };
     let state = Arc::new(State {
+        dns,
         supervisor: Supervisor::new(),
         paths,
         config: Mutex::new(config.clone()),
@@ -220,6 +230,10 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "server_status": service_status(state, "nginx", nginx::installed(&state.paths)),
                 "http_port": config.http_port,
                 "https_port": config.https_port,
+                "dns_port": config.dns_port,
+                "dns": state.dns,
+                "tld": config.tld,
+                "standard_ports": standard_ports(&config, &state.paths),
                 "ca": ca::ca_cert(&state.paths).display().to_string(),
                 "sites": sites::resolve(&config).len(),
                 "default_php": config.default_php,
@@ -269,7 +283,11 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 .map(|s| {
                     json!({
                         "name": s.name,
-                        "url": format!("https://{}:{}", s.host, config.https_port),
+                        "url": if standard_ports(&config, &state.paths) {
+                            format!("https://{}", s.host)
+                        } else {
+                            format!("https://{}:{}", s.host, config.https_port)
+                        },
                         "http_url": format!("http://{}:{}", s.host, config.http_port),
                         "path": s.path.display().to_string(),
                         "docroot": s.docroot.display().to_string(),
@@ -363,4 +381,16 @@ fn php_list(state: &State) -> Value {
         })
         .collect();
     json!(versions)
+}
+
+/// True when the helper's pf redirect for these ports is installed, so URLs need no port.
+fn standard_ports(config: &Config, paths: &Paths) -> bool {
+    let plan = helper::Plan {
+        tld: config.tld.clone(),
+        dns_port: config.dns_port,
+        http_port: config.http_port,
+        https_port: config.https_port,
+        ca_cert: ca::ca_cert(paths),
+    };
+    fs::read_to_string(helper::PF_FILE).is_ok_and(|c| c == helper::pf_rules(&plan))
 }

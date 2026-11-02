@@ -123,7 +123,20 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - ✅ (2026-11-02) HTTPS calls from PHP succeed, including site-to-site through the Devid CA.
 - ✅ (2026-11-02) erdbpro-saas loads through the static php-fpm on Caddy, nginx and Apache.
 
-## Machine state (before migration)
+## Machine state
+
+**2026-11-02: `.test` switched from Valet to Devid** (owner ran `devid helper install`).
+
+- Devid's daemon (home `~/.devid`) serves `~/Projects` (parked) on nginx with static PHP 8.5, the same version Valet used for every site.
+- `/etc/resolver/test` points to Devid's DNS (127.0.0.1:53535). Valet's file is kept as `/etc/resolver/test.devid-backup`.
+- The pf anchor `com.apple/devid` redirects 127.0.0.1:80/443 to 8088/8443, and the LaunchDaemon `dev.devid.pf` reloads it at boot.
+- The Devid CA is trusted (SSL only, name-constrained to `.test`) in the System keychain. Brave shows `https://erdbpro-saas.test` as secure, issued by "Devid Local CA".
+- Only `erdbpro-saas` and `phpmyadmin` still exist among Valet's 9 secured sites. The other 7 were leftover configs for deleted folders.
+- The cloudflared tunnel targets `127.0.0.1:8000` and ports 3xxx, so the switch does not touch it; `:8000` was verified 200 afterwards.
+- **Until M6:** the daemon runs from a worktree build in the foreground, not from a LaunchAgent. If it stops, `.test` sites are down. Either restart it (`devid daemon run`) or roll back with `devid helper uninstall`, which restores Valet's resolver and removes the redirect.
+- Valet (root nginx, dnsmasq, php-fpm) still runs but no longer receives traffic. Stop it (`valet stop`) once M6 is in place.
+
+### Before the switch (2026-11-01)
 
 - Laravel Valet serves 9 `.test` sites. It uses Homebrew `php@8.4`, `nginx` and `dnsmasq`, which run as root LaunchDaemons. Devid conflicts with it on ports 80/443 until Valet is stopped.
 - The cloudflared tunnel runs as the system daemon `com.cloudflare.cloudflared` from `/usr/local/bin/cloudflared`, which is a symlink into Homebrew. Before Homebrew is removed, replace it with the official binary at the same path. The tunnel must keep working.

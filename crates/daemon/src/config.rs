@@ -17,6 +17,8 @@ pub struct Config {
     pub http_port: u16,
     /// HTTPS port (127.0.0.1 only), with certificates from the Devid CA.
     pub https_port: u16,
+    /// UDP port of the daemon's DNS responder for `.<tld>` (127.0.0.1 only).
+    pub dns_port: u16,
     /// Folders whose subfolders each become `<name>.<tld>` (D-011).
     pub parked: Vec<String>,
     /// Explicit sites: name -> folder. A link wins over a parked folder of the same name.
@@ -33,6 +35,7 @@ impl Default for Config {
             default_php: "8.5".into(),
             http_port: 8088,
             https_port: 8443,
+            dns_port: 53535,
             parked: Vec::new(),
             links: BTreeMap::new(),
             isolated: BTreeMap::new(),

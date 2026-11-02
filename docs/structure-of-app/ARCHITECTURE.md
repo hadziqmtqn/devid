@@ -1,8 +1,8 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (Phase 2 M4: local CA and HTTPS)
-> Status: partial (M1–M4 implemented; the rest proposed)
+> Verified against: 2026-11-02 (Phase 2 M5: DNS responder and helper)
+> Status: partial (M1–M5 implemented; the rest proposed)
 
 ## Components (Rust Cargo workspace)
 
@@ -39,7 +39,22 @@ Implemented in M4:
   - Creating a new CA removes the old leaves.
 - `~/.devid/ca/cacert.pem` = the system bundle plus the Devid CA, rewritten only when it changes. It is set as `curl.cainfo`/`openssl.cafile` in php.ini (D-008).
 - nginx: every site also listens on `127.0.0.1:<https_port>` (default 8443) with `ssl` and `http2`. The HTTPS default server uses `ssl_reject_handshake`, so unknown hosts get no certificate.
-- The CA is **not** trusted system-wide yet; browsers warn until the M5 helper (or the owner) adds it to the keychain.
+- The CA is **not** trusted system-wide until the M5 helper adds it to the keychain; browsers warn until then.
+
+Implemented in M5:
+- `daemon::dns`: a UDP responder on `127.0.0.1:<dns_port>` (default 53535).
+  - `<anything>.<tld>` A → 127.0.0.1; other types → no data, so clients use IPv4; names outside the TLD → REFUSED.
+  - Questions are bounds-checked, compression pointers in a question are rejected, and responses are never answered (no reflection).
+- `daemon::helper` (macOS-only, D-013) is the only code that runs as root, via `sudo devid helper apply …`, with every value passed explicitly and validated:
+  - the TLD is a DNS label;
+  - the target ports are at least 1024;
+  - the CA path is a regular file ending in `ca/devid-ca.crt`.
+- `devid helper install` (and `uninstall`, `status`, `--dry-run`) does the following, and uninstall reverses it:
+  - `/etc/resolver/<tld>` → `nameserver 127.0.0.1` / `port <dns_port>`. A foreign file (Valet's) is backed up once to `<file>.devid-backup` and restored on uninstall.
+  - The pf anchor `com.apple/devid` (`/etc/pf.anchors/dev.devid`) holds `rdr pass on lo0` 127.0.0.1:80 → `http_port` and :443 → `https_port`. pf is enabled with `pfctl -E`. The LaunchDaemon `dev.devid.pf` reloads the rules at boot.
+  - The Devid CA is trusted for SSL only in the System keychain; it is name-constrained to `.<tld>`.
+  - The DNS cache is flushed.
+- Once the pf rules are in place, `devid sites` shows URLs without a port (`standard_ports` in status).
 
 `helper` is created in M5. The table below is the target layout.
 

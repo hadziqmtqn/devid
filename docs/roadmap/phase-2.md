@@ -2,7 +2,7 @@
 
 > Scope: milestones and technical choices for Phase 2 (daemon, CLI, multi-PHP, `.test`, HTTPS)
 > Verified against: 2026-11-02
-> Status: proposed (milestones); M1–M4 done
+> Status: proposed (milestones); M1–M4 done; M5 code done (system switch-over pending)
 
 Phase 2 delivers a working `devid` on the owner's Mac: sites served at `*.test` over HTTPS, a PHP version per site, nginx by default (D-015), without Valet or Homebrew. Each milestone is one worktree and one PR.
 
@@ -28,4 +28,4 @@ Migration off Valet happens after M6 and is run by the owner (see PROJECT_CONTEX
 - **Threads, not async.** A blocking socket server with one thread per connection and child process supervision with `std::process`. There is no tokio, which keeps the binary small and idle CPU at zero.
 - **Few dependencies:** `serde`/`serde_json`, `toml` and `clap`. Later milestones add `rcgen` (M4) and `ratatui` (Phase 4). Each new dependency is justified in its PR.
 - **DNS (M5):** the daemon answers `*.test` → 127.0.0.1 on an unprivileged port (for example 127.0.0.1:53535), and `/etc/resolver/test` points there (`nameserver 127.0.0.1`, `port 53535`). dnsmasq is not needed.
-- **Ports 80/443 (M5), open:** the choice is between a pf `rdr` anchor on `lo0` (80/443 → 8080/8443; no root process stays running) and a root LaunchDaemon that binds the ports and hands them over. Decide with a small spike in M5.
+- **Ports 80/443 (M5), decided 2026-11-02 (owner): pf `rdr` on `lo0`** in the `com.apple/devid` anchor (no edit to `/etc/pf.conf`). It redirects 127.0.0.1:80/443 to nginx's 8088/8443, and a one-shot LaunchDaemon reloads it at boot. A test on this Mac showed that a non-root process may bind 80/443 on 0.0.0.0 but not on 127.0.0.1. Binding 0.0.0.0 would expose the sites to the LAN, so it was rejected.
