@@ -191,11 +191,13 @@ fn print_status(v: &serde_json::Value, json: bool) {
     );
     println!("  home:        {}", v["home"].as_str().unwrap_or("?"));
     println!(
-        "  web server:  {} {} (port {})",
+        "  web server:  {} {} (http {}, https {})",
         v["server"].as_str().unwrap_or("?"),
         v["server_status"].as_str().unwrap_or("?"),
-        v["http_port"]
+        v["http_port"],
+        v["https_port"]
     );
+    println!("  CA:          {}", v["ca"].as_str().unwrap_or("?"));
     println!("  sites:       {}", v["sites"]);
     println!("  default PHP: {}", v["default_php"].as_str().unwrap_or("?"));
     print_php(&v["php"]);

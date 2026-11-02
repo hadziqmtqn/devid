@@ -47,10 +47,6 @@ pub fn pid_file(paths: &Paths, version: &str) -> PathBuf {
     paths.run_dir().join(format!("php{}-fpm.pid", tag(version)))
 }
 
-pub fn cacert(paths: &Paths) -> PathBuf {
-    paths.home.join("ca/cacert.pem")
-}
-
 /// Installed versions, sorted, newest last.
 pub fn installed(paths: &Paths) -> Vec<String> {
     let mut found: Vec<String> =
@@ -132,7 +128,7 @@ pub fn write_config(paths: &Paths, version: &str) -> io::Result<()> {
 
     let ini = etc.join("php.ini");
     if !ini.exists() {
-        let ca = cacert(paths);
+        let ca = crate::ca::cacert(paths);
         fs::write(
             &ini,
             format!(
@@ -196,22 +192,6 @@ pub fn spec(paths: &Paths, version: &str) -> Spec {
         pid_file: pid_file(paths, version),
         comm: "php-fpm",
     }
-}
-
-/// System CA bundles: macOS first; the Linux path keeps the test suite runnable in CI.
-const SYSTEM_BUNDLES: [&str; 2] = ["/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt"];
-
-/// D-008: PHP trusts the system bundle (plus the Devid CA once M4 adds it).
-pub fn ensure_cacert(paths: &Paths) -> io::Result<()> {
-    let target = cacert(paths);
-    if target.exists() {
-        return Ok(());
-    }
-    let source =
-        SYSTEM_BUNDLES.iter().find(|p| Path::new(p).is_file()).ok_or_else(|| err("no system CA bundle found"))?;
-    fs::create_dir_all(target.parent().expect("cacert has a parent"))?;
-    fs::copy(source, &target)?;
-    Ok(())
 }
 
 #[cfg(test)]

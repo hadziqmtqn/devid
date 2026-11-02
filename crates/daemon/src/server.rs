@@ -1,6 +1,7 @@
 //! The daemon process: a blocking unix socket server, one thread per connection.
 
 use crate::{
+    ca,
     config::Config,
     nginx,
     paths::Paths,
@@ -53,6 +54,11 @@ impl State {
             .map(|v| (php_service(v), php::spec(&self.paths, v)))
             .collect();
 
+        // Every site gets a certificate from the Devid CA (issued once, renewed before expiry).
+        for site in &sites {
+            ca::ensure_site_cert(&self.paths, &site.host).map_err(|e| format!("certificate for {}: {e}", site.host))?;
+        }
+
         let mut reload = false;
         if config.server == "nginx" && nginx::installed(&self.paths) {
             let changed = nginx::write_checked(&self.paths, &nginx::render(&self.paths, config, &sites))
@@ -99,7 +105,10 @@ pub fn run(paths: Paths) -> io::Result<()> {
     let config = Config::load_or_create(&paths.config())?;
     fs::create_dir_all(paths.run_dir())?;
     let listener = bind(&paths)?;
-    php::ensure_cacert(&paths)?;
+    if ca::ensure_ca(&paths, &config.tld)? {
+        eprintln!("devid: created the Devid CA at {}", ca::ca_cert(&paths).display());
+    }
+    ca::write_cacert(&paths)?;
 
     let state = Arc::new(State {
         supervisor: Supervisor::new(),
@@ -210,6 +219,8 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "server": config.server,
                 "server_status": service_status(state, "nginx", nginx::installed(&state.paths)),
                 "http_port": config.http_port,
+                "https_port": config.https_port,
+                "ca": ca::ca_cert(&state.paths).display().to_string(),
                 "sites": sites::resolve(&config).len(),
                 "default_php": config.default_php,
                 "php": php_list(state),
@@ -258,7 +269,8 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 .map(|s| {
                     json!({
                         "name": s.name,
-                        "url": format!("http://{}:{}", s.host, config.http_port),
+                        "url": format!("https://{}:{}", s.host, config.https_port),
+                        "http_url": format!("http://{}:{}", s.host, config.http_port),
                         "path": s.path.display().to_string(),
                         "docroot": s.docroot.display().to_string(),
                         "php": s.php,

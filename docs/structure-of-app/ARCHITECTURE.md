@@ -1,8 +1,8 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (Phase 2 M3: sites and nginx)
-> Status: partial (M1–M3 implemented; the rest proposed)
+> Verified against: 2026-11-02 (Phase 2 M4: local CA and HTTPS)
+> Status: partial (M1–M4 implemented; the rest proposed)
 
 ## Components (Rust Cargo workspace)
 
@@ -31,6 +31,15 @@ Implemented in M3:
 - Every site-changing command goes through `State::mutate`: apply the new config, and save `config.toml` only if nginx accepted it; otherwise roll back.
 - Running PHP masters = the default version plus every version a site uses, if installed.
 - CLI: `devid sites`, `link`, `unlink`, `park`, `unpark`, `isolate <ver>`, `unisolate` and `server install nginx --from <file>`. `isolate` and `unisolate` default to the site that contains the current folder.
+
+Implemented in M4:
+- `daemon::ca` (rcgen with the ring backend):
+  - The Devid Local CA is an ECDSA P-256 key created on the first daemon start: `~/.devid/ca/devid-ca.key` (0600) and `devid-ca.crt`, valid for 10 years with `pathlen=0`. **Name constraints** limit it to `<tld>` (`.test`), so even a trusted, leaked CA key cannot impersonate a real domain. A TLD change replaces the CA. The CA is rebuilt from the stored key and a fixed DN, so no X.509 parser is needed.
+  - Per-site leaves in `~/.devid/certs/<host>.{crt,key}` carry a SAN, the `serverAuth` EKU and an AKI, and are valid for 397 days counted from `not_before`. They are reissued 30 days before expiry; the expiry is recorded at issue time.
+  - Creating a new CA removes the old leaves.
+- `~/.devid/ca/cacert.pem` = the system bundle plus the Devid CA, rewritten only when it changes. It is set as `curl.cainfo`/`openssl.cafile` in php.ini (D-008).
+- nginx: every site also listens on `127.0.0.1:<https_port>` (default 8443) with `ssl` and `http2`. The HTTPS default server uses `ssl_reject_handshake`, so unknown hosts get no certificate.
+- The CA is **not** trusted system-wide yet; browsers warn until the M5 helper (or the owner) adds it to the keychain.
 
 `helper` is created in M5. The table below is the target layout.
 
