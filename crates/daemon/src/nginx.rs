@@ -44,7 +44,7 @@ pub fn installed(paths: &Paths) -> bool {
 /// Install an nginx binary (e.g. spike/webservers/out/nginx/nginx).
 // shortcut: installs from a local file only; downloading release assets comes with the Phase 5 pipeline.
 pub fn install(paths: &Paths, from: &Path) -> io::Result<()> {
-    let out = Command::new(from).arg("-v").output().map_err(|e| err(format!("{}: {e}", from.display())))?;
+    let out = crate::webserver::probe(from, &["-v"])?;
     // nginx prints its version on stderr.
     if !String::from_utf8_lossy(&out.stderr).contains("nginx/") {
         return Err(err(format!("{} does not look like nginx", from.display())));
@@ -58,9 +58,15 @@ pub fn install(paths: &Paths, from: &Path) -> io::Result<()> {
 
 /// Text that is safe inside a double-quoted nginx string: no quote, backslash, `$` (variable
 /// expansion) or control characters. Paths that fail this are left out of the config.
-fn quotable(path: &Path) -> Option<String> {
+pub(crate) fn quotable(path: &Path) -> Option<String> {
+    quotable_without(path, &[])
+}
+
+/// Like `quotable`, also rejecting `extra` characters (e.g. `{`/`}`, Caddyfile placeholders).
+pub(crate) fn quotable_without(path: &Path, extra: &[char]) -> Option<String> {
     let s = path.to_str()?;
-    (!s.chars().any(|c| matches!(c, '"' | '\\' | '$') || c.is_control())).then(|| format!("\"{s}\""))
+    let bad = |c: char| matches!(c, '"' | '\\' | '$') || c.is_control() || extra.contains(&c);
+    (!s.chars().any(bad)).then(|| format!("\"{s}\""))
 }
 
 /// The full nginx.conf for these sites. Sites whose paths cannot be quoted safely are skipped
@@ -192,6 +198,7 @@ pub fn spec(paths: &Paths) -> Spec {
         env: Vec::new(),
         pid_file: pid_file(paths),
         comm: "nginx",
+        stop_signal: libc::SIGQUIT,
     }
 }
 

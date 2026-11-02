@@ -18,7 +18,7 @@ use std::{
 const MAX_CRASHES: usize = 5;
 const CRASH_WINDOW: Duration = Duration::from_secs(60);
 
-/// How to run one service in the foreground. Both php-fpm and nginx stop gracefully on SIGQUIT.
+/// How to run one service in the foreground.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spec {
     pub program: PathBuf,
@@ -28,6 +28,9 @@ pub struct Spec {
     pub pid_file: PathBuf,
     /// Process name that must match before an orphan is signalled (pids get reused).
     pub comm: &'static str,
+    /// Graceful stop: SIGQUIT for php-fpm and nginx, SIGTERM for Caddy and Apache
+    /// (SIGQUIT makes Caddy quit abruptly and is not handled by Apache).
+    pub stop_signal: libc::c_int,
 }
 
 struct Slot {
@@ -197,7 +200,7 @@ fn kill_orphan(spec: &Spec) {
     // Only signal it if that pid still runs the expected program; pids get reused.
     let comm = Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output();
     if comm.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(spec.comm)) {
-        signal(pid, libc::SIGQUIT);
+        signal(pid, spec.stop_signal);
         let deadline = Instant::now() + Duration::from_secs(5);
         while alive(pid) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(50));
@@ -206,9 +209,9 @@ fn kill_orphan(spec: &Spec) {
     let _ = fs::remove_file(&spec.pid_file);
 }
 
-/// Stop a service without ever hanging the daemon. SIGQUIT lets it finish in-flight requests,
-/// but php-fpm drops signals that arrive while it is still starting up, so repeat it every second
-/// and fall back to SIGKILL after `STOP_TIMEOUT`.
+/// Stop a service without ever hanging the daemon. Its stop signal lets it finish in-flight
+/// requests, but php-fpm drops signals that arrive while it is still starting up, so repeat it
+/// every second and fall back to SIGKILL after `STOP_TIMEOUT`.
 fn stop_slot(slot: &Slot) {
     const STOP_TIMEOUT: Duration = Duration::from_secs(10);
     slot.stop.store(true, Ordering::SeqCst);
@@ -219,10 +222,10 @@ fn stop_slot(slot: &Slot) {
         let pid = slot.pid.load(Ordering::SeqCst) as i32;
         if pid != 0 {
             if start.elapsed() >= STOP_TIMEOUT {
-                eprintln!("devid: pid {pid} ignored SIGQUIT for {STOP_TIMEOUT:?}; killing it");
+                eprintln!("devid: pid {pid} ignored its stop signal for {STOP_TIMEOUT:?}; killing it");
                 signal(pid, libc::SIGKILL);
             } else if last_quit.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
-                signal(pid, libc::SIGQUIT);
+                signal(pid, slot.spec.stop_signal);
                 last_quit = Some(Instant::now());
             }
         }

@@ -2,7 +2,7 @@
 
 > Scope: milestones and technical choices for Phase 2 (daemon, CLI, multi-PHP, `.test`, HTTPS)
 > Verified against: 2026-11-02
-> Status: M1–M6 done in code; M7 next
+> Status: done (M1–M7, 2026-11-02)
 
 Phase 2 delivers a working `devid` on the owner's Mac: sites served at `*.test` over HTTPS, a PHP version per site, nginx by default (D-015), without Valet or Homebrew. Each milestone is one worktree and one PR.
 
@@ -16,7 +16,7 @@ Phase 2 delivers a working `devid` on the owner's Mac: sites served at `*.test` 
 | M4 | Local CA and per-site certificates in Rust; `cacert.pem` regenerated on change; nginx HTTPS listener on a high port | no | HTTPS works; PHP site-to-site works ✅ |
 | M5 | DNS responder for `*.test` in the daemon; helper (sudo, once): `/etc/resolver/test`, CA trust, ports 80/443 | **yes** | `https://erdbpro-saas.test` opens in the browser without warnings |
 | M6 | `devid setup`, `doctor`, `uninstall`; LaunchAgent; `php`/`composer` shims | yes (via M5 helper) | fresh install on this Mac from `install.sh` works end to end |
-| M7 | Caddy and Apache adapters (D-015 alternatives); `devid server use` | no | switching servers keeps every site working |
+| M7 | Caddy and Apache adapters (D-015 alternatives); `devid server use` | no | switching servers keeps every site working ✅ |
 
 Migration off Valet happens after M6 and is run by the owner (see PROJECT_CONTEXT, machine state).
 

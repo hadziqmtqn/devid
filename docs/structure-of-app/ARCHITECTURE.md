@@ -1,8 +1,8 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (Phase 2 M6: setup, LaunchAgent, shims)
-> Status: partial (M1–M6 implemented; M7 and the GUI proposed)
+> Verified against: 2026-11-02 (Phase 2 M7: Caddy and Apache adapters)
+> Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
 
@@ -65,6 +65,22 @@ Implemented in M6:
   - downloads `composer.phar` with its published sha256.
 - **Shims** (argv[0] dispatch in the CLI): `php` runs the version of the site that contains the current folder (isolated or default), with Devid's `PHPRC`/`PHP_INI_SCAN_DIR`. `composer` runs `composer.phar` with that PHP. Both read `config.toml` directly and work without the daemon.
 - **`devid setup [--dry-run]`** runs the user steps, then `devid helper install` (sudo) only if the system pieces are missing. **`devid doctor`** is a read-only check with a fix per problem, including Homebrew `php` shadowing the shim and Valet still running. **`devid uninstall [--dry-run] [--purge]`** reverses setup and keeps `~/.devid` data unless `--purge`.
+
+Implemented in M7:
+- **`daemon::webserver`** puts the three adapters behind one interface (install, render + validate, spec, reload). Only `config.server` is wanted by the supervisor, so `devid server use <name>` stops the old server and starts the new one (D-005). The switch goes through `State::mutate`: if the new server rejects its config, the old one keeps serving.
+- **nginx** (default, D-015): as in M3/M4.
+- **Caddy** (`devid server install caddy --from <binary>`):
+  - the Caddyfile turns off the admin API and auto-HTTPS and uses Devid's certificates;
+  - each site gets an HTTPS block and an HTTP block, because Caddy rejects `tls` in a block that also listens on HTTP;
+  - unknown hosts get 404 on HTTP and no handshake on HTTPS;
+  - it is validated with `caddy validate`, restarted on change (no signal reload while the admin API is off), and stopped with SIGTERM;
+  - paths containing `{`/`}` (placeholders) are rejected.
+- **Apache** (`devid server install apache`, by default a symlink to `/usr/sbin/httpd`):
+  - its own `httpd.conf` (never `/etc/apache2`) with the module list from the spike, `127.0.0.1` listeners, and a 404 default vhost for HTTP;
+  - it is validated with `httpd -t`, reloaded gracefully with SIGUSR1, and stopped with SIGTERM.
+  - `shortcut:` the first HTTPS vhost also answers unknown hosts.
+- **`Spec.stop_signal`:** the supervisor stops each service with its own graceful signal: SIGQUIT for php-fpm and nginx, SIGTERM for Caddy and Apache.
+- **Version probes** for `server install` time out after 5 s, so a wrong binary cannot hang the daemon.
 
 `helper` is created in M5. The table below is the target layout.
 

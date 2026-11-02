@@ -3,12 +3,13 @@
 use crate::{
     ca,
     config::Config,
-    dns, helper, nginx,
+    dns, helper,
     paths::Paths,
     php,
     protocol::Request,
     sites::{self, Site},
     supervisor::{ProcState, Spec, Supervisor},
+    webserver,
 };
 use serde_json::{Value, json};
 use std::{
@@ -61,14 +62,17 @@ impl State {
             ca::ensure_site_cert(&self.paths, &site.host).map_err(|e| format!("certificate for {}: {e}", site.host))?;
         }
 
-        let mut reload = false;
-        if config.server == "nginx" && nginx::installed(&self.paths) {
-            let changed = nginx::write_checked(&self.paths, &nginx::render(&self.paths, config, &sites))
-                .map_err(|e| e.to_string())?;
-            let running = matches!(self.supervisor.state().get("nginx"), Some(ProcState::Running(_)));
-            // SIGHUP only an nginx that is already up; a fresh one reads the new config anyway.
-            reload = changed && running;
-            wanted.insert("nginx".into(), nginx::spec(&self.paths));
+        // Only the active server is wanted, so switching servers stops the old one (D-005).
+        let server = config.server.as_str();
+        let mut reload = None;
+        if webserver::installed(&self.paths, server) {
+            let changed = webserver::write_config(&self.paths, server, config, &sites).map_err(|e| e.to_string())?;
+            let running = matches!(self.supervisor.state().get(server), Some(ProcState::Running(_)));
+            // Reload only a server that is already up; a fresh one reads the new config anyway.
+            if changed && running {
+                reload = Some(webserver::reload(server));
+            }
+            wanted.insert(server.into(), webserver::spec(&self.paths, server));
         }
         self.supervisor.reconcile(&wanted);
         // A just-started php-fpm needs a moment to create its socket; reloading nginx or replying
@@ -80,8 +84,12 @@ impl State {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
         }
-        if reload {
-            self.supervisor.signal("nginx", libc::SIGHUP);
+        match reload {
+            Some(webserver::Reload::Signal(sig)) => {
+                self.supervisor.signal(server, sig);
+            }
+            Some(webserver::Reload::Restart) => self.supervisor.restart(server),
+            None => {}
         }
         Ok(())
     }
@@ -273,7 +281,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "uptime_secs": state.started.elapsed().as_secs(),
                 "home": state.paths.home.display().to_string(),
                 "server": config.server,
-                "server_status": service_status(state, "nginx", nginx::installed(&state.paths)),
+                "server_status": service_status(state, &config.server, webserver::installed(&state.paths, &config.server)),
                 "http_port": config.http_port,
                 "https_port": config.https_port,
                 "dns_port": config.dns_port,
@@ -312,14 +320,35 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             })
         }
         Request::ServerInstall { server, from } => {
-            if server != "nginx" {
-                return Err(format!("{server} is not supported yet; M3 supports nginx (Caddy and Apache come in M7)"));
-            }
-            nginx::install(&state.paths, Path::new(&from)).map_err(|e| e.to_string())?;
-            state.supervisor.restart("nginx");
+            webserver::check(&server)?;
+            webserver::install(&state.paths, &server, from.as_deref().map(Path::new)).map_err(|e| e.to_string())?;
+            // If it is the active server, restart it on the new binary; otherwise this is a no-op.
+            state.supervisor.restart(&server);
             let config = state.config.lock().unwrap();
             state.apply(&config)?;
             Ok(json!({"ok": true, "installed": server}))
+        }
+        Request::ServerUse { server } => {
+            webserver::check(&server)?;
+            if !webserver::installed(&state.paths, &server) {
+                return Err(format!("{server} is not installed; run `devid server install {server}`"));
+            }
+            state.mutate(|c, _| {
+                c.server = server.clone();
+                Ok(json!({"ok": true, "server": server}))
+            })
+        }
+        Request::ServerList => {
+            let config = state.config.lock().unwrap().clone();
+            let list: Vec<Value> = webserver::SERVERS
+                .iter()
+                .map(|s| {
+                    let installed = webserver::installed(&state.paths, s);
+                    json!({"server": s, "installed": installed, "active": *s == config.server,
+                           "status": if *s == config.server { service_status(state, s, installed) } else if installed { "stopped" } else { "not installed" }})
+                })
+                .collect();
+            Ok(json!({"ok": true, "servers": list}))
         }
         Request::Sites => {
             let config = state.config.lock().unwrap().clone();

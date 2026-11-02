@@ -8,3 +8,4 @@
 | 2026-11-02 | [M4: local CA and HTTPS](2026-11-02-m4-https.md) |
 | 2026-11-02 | [M5: DNS responder and system helper](2026-11-02-m5-dns-helper.md) |
 | 2026-11-02 | [M6: setup, doctor, uninstall, LaunchAgent and shims](2026-11-02-m6-setup.md) |
+| 2026-11-02 | [M7: Caddy and Apache adapters, `devid server use`](2026-11-02-m7-servers.md) |
