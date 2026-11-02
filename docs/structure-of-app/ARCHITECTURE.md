@@ -45,5 +45,5 @@ All behaviour lives in `daemon` and is reached through its socket API. `cli` and
 
 ## Unknowns
 
-- The Apache source: our own build or `/usr/sbin/httpd`.
+- Whether future macOS releases keep `/usr/sbin/httpd` (used for the Apache adapter; see PROJECT_CONTEXT spike results).
 - The daemon socket protocol and the on-disk config format are not designed yet.

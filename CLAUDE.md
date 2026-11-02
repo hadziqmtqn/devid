@@ -17,7 +17,7 @@ Planning. No code exists yet. The next step is the Phase 1 spike; its risks and 
 - Target machine: Intel Mac, 2 cores, 16 GB RAM, macOS 14.8. Idle RAM, CPU and battery cost matter in every design choice.
 - No Homebrew and no VM dependency at runtime.
 - PHP 8.3, 8.4 and 8.5 (see D-009), static builds, php-fpm with `pm = ondemand`.
-- One global web server: Caddy by default, nginx or Apache as alternatives.
+- One global web server: nginx by default, Caddy or Apache as alternatives (D-015).
 - Databases are out of scope (the owner uses DBngin).
 
 ## Working rules
