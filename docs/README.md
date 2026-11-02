@@ -12,6 +12,11 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 2. [Architecture](structure-of-app/ARCHITECTURE.md): planned components and runtime flow (proposed, nothing built).
 3. [Decisions](structure-of-app/DECISIONS.md): accepted and proposed decisions with rationale.
 
+## Plans and records
+
+- [Phase 2 plan](roadmap/phase-2.md): milestones M1–M7 and technical choices.
+- [Implementation timeline](implementation-timeline/README.md): one record per merged milestone.
+
 ## External sources
 
 - UI prototype (approved): `/Users/meowpush/Projects/devid-prototype/index.html`. Lives outside this repo.
@@ -21,4 +26,4 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 
 - Label every claim as implemented, accepted, proposed or unknown. Until code lands, nothing is "implemented".
 - Update `DECISIONS.md` when a decision is made or reversed. Never delete an entry; mark it superseded instead.
-- When the first code lands, add `implementation-timeline/` for change records and update the "Verified against" headers.
+- Add a record under `implementation-timeline/` for each merged milestone, and update the "Verified against" headers that the change touches.

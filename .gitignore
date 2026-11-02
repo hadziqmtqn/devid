@@ -20,3 +20,6 @@ spike/runtime/multi/
 # web server spike build cache and runtime
 spike/webservers/*
 !spike/webservers/*.sh
+
+# Rust build output
+/target/
