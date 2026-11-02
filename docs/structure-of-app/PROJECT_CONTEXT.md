@@ -133,8 +133,12 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - The Devid CA is trusted (SSL only, name-constrained to `.test`) in the System keychain. Brave shows `https://erdbpro-saas.test` as secure, issued by "Devid Local CA".
 - Only `erdbpro-saas` and `phpmyadmin` still exist among Valet's 9 secured sites. The other 7 were leftover configs for deleted folders.
 - The cloudflared tunnel targets `127.0.0.1:8000` and ports 3xxx, so the switch does not touch it; `:8000` was verified 200 afterwards.
-- **Until M6:** the daemon runs from a worktree build in the foreground, not from a LaunchAgent. If it stops, `.test` sites are down. Either restart it (`devid daemon run`) or roll back with `devid helper uninstall`, which restores Valet's resolver and removes the redirect.
-- Valet (root nginx, dnsmasq, php-fpm) still runs but no longer receives traffic. Stop it (`valet stop`) once M6 is in place.
+- **Since M6 (2026-11-02, the owner ran `devid setup`):**
+  - launchd runs the daemon from `~/.devid/bin/devid` (LaunchAgent `dev.devid.daemon`; starts at login, restarts on a crash);
+  - `~/.zshrc` line 153 puts `~/.devid/bin` before Homebrew's `php@8.4`, so new terminals get Devid's `php` (8.5.12 static) and `composer` (2.11.1);
+  - `devid doctor` is all ok except that Valet still runs.
+- Rollback: `devid uninstall` (restores Valet's resolver), then `valet start`.
+- Valet (root nginx, dnsmasq, php-fpm) still runs but no longer receives traffic; the owner stops it with `valet stop` when ready.
 
 ### Before the switch (2026-11-01)
 

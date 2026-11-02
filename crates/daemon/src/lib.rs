@@ -4,6 +4,7 @@ pub mod ca;
 pub mod config;
 pub mod dns;
 pub mod helper;
+pub mod install;
 pub mod nginx;
 pub mod paths;
 pub mod php;

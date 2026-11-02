@@ -6,10 +6,6 @@ mod common;
 use common::*;
 use std::{fs, net::UdpSocket, time::Duration};
 
-fn free_udp_port() -> u16 {
-    UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
-}
-
 fn query(port: u16, name: &str) -> Vec<u8> {
     let mut q = vec![0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
     for label in name.split('.') {
@@ -31,7 +27,11 @@ fn dns_and_helper_without_root() {
     let home = root.join("home");
     let port = free_udp_port();
     fs::create_dir_all(&home).unwrap();
-    fs::write(home.join("config.toml"), format!("dns_port = {port}\n")).unwrap();
+    fs::write(
+        home.join("config.toml"),
+        format!("dns_port = {port}\nhttp_port = {TEST_HTTP_PORT}\nhttps_port = {TEST_HTTPS_PORT}\n"),
+    )
+    .unwrap();
 
     let daemon = start_daemon(&home);
     let status = json(&home, &["status", "--json"]);

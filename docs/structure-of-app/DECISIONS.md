@@ -121,7 +121,7 @@ See ARCHITECTURE, "PHP runtime".
   - `devid doctor` reports each component with a fix hint.
   - `devid uninstall` reverses every change made by `setup`.
 - **Release contract:** every release publishes `devid-darwin-x86_64` (and `devid-darwin-arm64` once D-010 allows it) plus a `checksums.txt` in `shasum -a 256` format.
-- **Status:** `install.sh` exists. It fails cleanly until the first release exists. `setup`, `doctor` and `uninstall` arrive with Phase 2.
+- **Status:** `install.sh` exists and fails cleanly until the first release exists. `devid setup`, `doctor` and `uninstall` are implemented (M6, 2026-11-02).
 
 ## D-013: macOS only for v1 (accepted 2026-11-02)
 

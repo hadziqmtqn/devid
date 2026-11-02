@@ -1,5 +1,8 @@
 //! `devid`: thin client of the daemon (D-012). `devid daemon run` is the daemon itself.
 
+mod setup;
+mod shim;
+
 use clap::{Parser, Subcommand};
 use devid_daemon::{paths::Paths, protocol::Request, server};
 use std::{
@@ -33,6 +36,22 @@ enum Command {
     Php {
         #[command(subcommand)]
         action: PhpAction,
+    },
+    /// Install Devid for this user: binary, PATH, LaunchAgent, composer, then the system setup
+    Setup {
+        /// Only print what would change
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Check every part of the installation and say how to fix problems
+    Doctor,
+    /// Undo `devid setup` (keeps ~/.devid data unless --purge)
+    Uninstall {
+        #[arg(long)]
+        dry_run: bool,
+        /// Also delete ~/.devid (PHP, config, CA, certificates)
+        #[arg(long)]
+        purge: bool,
     },
     /// One-time system setup that needs your password (.test DNS, ports 80/443, CA trust)
     Helper {
@@ -141,6 +160,9 @@ enum DaemonAction {
 }
 
 fn main() -> ExitCode {
+    if let Some(code) = shim::dispatch() {
+        return code;
+    }
     match run(Cli::parse().command, &Paths::from_env()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -181,6 +203,9 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
                 .map(|_| println!("{server} installed"))
         }
         Command::Helper { action } => helper(action, paths),
+        Command::Setup { dry_run } => setup::setup(paths, dry_run),
+        Command::Doctor => setup::doctor(paths),
+        Command::Uninstall { dry_run, purge } => setup::uninstall(paths, dry_run, purge),
         Command::Sites { json } => send(Request::Sites).map(|v| print_sites(&v["sites"], json)),
         Command::Link { name, path } => send(Request::Link { name, path: abs(path)? })
             .map(|v| println!("linked {}", v["site"].as_str().unwrap_or("?"))),
