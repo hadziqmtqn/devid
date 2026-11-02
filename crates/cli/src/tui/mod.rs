@@ -5,7 +5,7 @@ mod app;
 mod ui;
 
 use crate::request;
-use app::{Action, App};
+use app::{Action, App, Effect};
 use devid_daemon::{paths::Paths, protocol::Request};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use std::time::{Duration, Instant};
@@ -15,13 +15,48 @@ const REFRESH: Duration = Duration::from_secs(2);
 fn refresh(app: &mut App, paths: &Paths) {
     match request(paths, &Request::Status) {
         Ok(status) => {
-            app.sites =
-                request(paths, &Request::Sites).ok().and_then(|v| v["sites"].as_array().cloned()).unwrap_or_default();
+            let sites = request(paths, &Request::Sites).unwrap_or_default();
+            app.sites = sites["sites"].as_array().cloned().unwrap_or_default();
+            app.parked = sites["parked"]
+                .as_array()
+                .map(|l| l.iter().filter_map(|p| p.as_str().map(String::from)).collect())
+                .unwrap_or_default();
             app.status = Ok(status);
         }
         Err(e) => {
             app.status = Err(e);
             app.sites.clear();
+            app.parked.clear();
+        }
+    }
+}
+
+/// Carry out an effect; the result becomes the message line.
+fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
+    use std::process::{Command, Stdio};
+    let run = |cmd: &mut Command, done: String| match cmd.stdout(Stdio::null()).stderr(Stdio::null()).status() {
+        Ok(s) if s.success() => (done, false),
+        Ok(s) => (format!("failed ({s})"), true),
+        Err(e) => (e.to_string(), true),
+    };
+    match effect {
+        Effect::Daemon { request: req, done } => match request(paths, &req) {
+            Ok(_) => (done, false),
+            Err(e) => (e, true),
+        },
+        Effect::OpenUrl(url) => run(Command::new("open").arg(&url), format!("opened {url}")),
+        Effect::OpenTerminal(path) => {
+            run(Command::new("open").args(["-a", "Terminal"]).arg(&path), format!("opened {path} in Terminal"))
+        }
+        Effect::Copy(text) => {
+            let copied = Command::new("pbcopy").stdin(Stdio::piped()).spawn().and_then(|mut child| {
+                std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes())?;
+                child.wait()
+            });
+            match copied {
+                Ok(s) if s.success() => (format!("copied {text}"), false),
+                _ => ("could not copy to the clipboard".into(), true),
+            }
         }
     }
 }
@@ -46,6 +81,10 @@ pub fn run(paths: &Paths) -> Result<(), String> {
                 match app.handle_key(key) {
                     Action::Quit => return Ok(()),
                     Action::Refresh => last = None,
+                    Action::Do(effect) => {
+                        app.message = Some(perform(effect, paths));
+                        last = None; // show the change right away
+                    }
                     Action::None => {}
                 }
             }
@@ -135,6 +174,37 @@ mod tests {
         let (text, _) = render(&a);
         assert!(text.contains("✗ daemon not running"));
         assert!(text.contains("devid setup"), "the screen says how to fix it");
+    }
+
+    #[test]
+    fn overlays_and_messages() {
+        use super::app::{InputFor, Mode, PickFor};
+        let mut a = app(false);
+        a.focus = Focus::Page;
+        a.mode = Mode::Menu { site: 0, items: App::site_menu(&a.sites[0]), index: 0 };
+        let (text, _) = render(&a);
+        assert!(text.contains("erdbpro-saas") && text.contains("o  Open in browser") && text.contains("c  Copy URL"));
+        a.mode = Mode::Input { purpose: InputFor::Link, text: "~/code".into() };
+        assert!(render(&a).0.contains("path: ~/code"));
+        a.mode = Mode::Pick {
+            purpose: PickFor::Isolate("legacy".into()),
+            options: vec!["8.4".into(), "8.5".into()],
+            index: 1,
+        };
+        assert!(render(&a).0.contains("PHP version for legacy"));
+        a.mode = Mode::Confirm {
+            question: "Unlink legacy?".into(),
+            request: Box::new(devid_daemon::protocol::Request::Unlink { name: "legacy".into() }),
+            done: String::new(),
+        };
+        assert!(render(&a).0.contains("y yes · n no"));
+        a.mode = Mode::Normal;
+        a.message = Some(("legacy now uses PHP 8.4".into(), false));
+        assert!(render(&a).0.contains("✓ legacy now uses PHP 8.4"), "success replaces the key hints");
+        a.message = Some(("PHP 8.3 is not installed".into(), true));
+        assert!(render(&a).0.contains("✗ PHP 8.3 is not installed"));
+        a.message = None;
+        assert!(render(&a).0.contains("enter actions"), "Sites keys when the page has focus");
     }
 
     #[test]
