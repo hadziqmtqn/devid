@@ -393,7 +393,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                     })
                 })
                 .collect();
-            Ok(json!({"ok": true, "sites": list}))
+            Ok(json!({"ok": true, "sites": list, "parked": config.parked}))
         }
         Request::Link { name, path } => {
             let path = existing_dir(&path)?;

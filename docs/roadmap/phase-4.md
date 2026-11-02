@@ -2,7 +2,7 @@
 
 > Scope: the terminal UI that `devid` opens with no arguments (D-012), and the daemon features the approved prototype needs
 > Verified against: 2026-11-02
-> Status: T1 done in code (shell); T2–T5 proposed
+> Status: T1 done (#21); T2 done in code (Sites actions); T3–T5 proposed
 
 Phase 4 gives Devid the interface from the approved prototype (`devid-prototype/index.html`) as a TUI. It takes the prototype's structure and flows, not its look (D-017).
 

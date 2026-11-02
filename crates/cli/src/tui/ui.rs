@@ -1,7 +1,7 @@
 //! Rendering. D-017: the terminal's 16 colors, used only for meaning; every state also has a
 //! symbol and text; NO_COLOR drops colors entirely (selection still shows through REVERSED).
 
-use super::app::{App, Focus, Page};
+use super::app::{App, Focus, InputFor, Mode, Page, PickFor};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -61,11 +61,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_header(frame, app, header);
     draw_sidebar(frame, app, sidebar);
     draw_page(frame, app, page);
-    frame.render_widget(
-        Paragraph::new(" ↑↓/jk move · tab switch panel · 1-5 pages · r refresh · ? help · q quit")
-            .style(Style::default().add_modifier(Modifier::DIM)),
-        footer,
-    );
+    draw_footer(frame, app, footer);
+    draw_overlay(frame, app);
     if app.show_help {
         draw_help(frame, app);
     }
@@ -228,10 +225,103 @@ fn draw_settings(frame: &mut Frame, status: &Value, area: Rect) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
+/// The last action's result if any, otherwise the keys for this page.
+fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
+    let line = match &app.message {
+        Some((text, true)) => Line::styled(format!(" ✗ {text}"), bad(app)),
+        Some((text, false)) => Line::styled(format!(" ✓ {text}"), ok(app)),
+        None => {
+            let keys = match (app.page, app.focus) {
+                (Page::Sites, Focus::Page) => {
+                    " enter actions · a link folder · p park folder · U unpark · tab sidebar · ? help · q quit"
+                }
+                (Page::Sites, Focus::Sidebar) => {
+                    " ↑↓ pages · enter open · a link folder · p park folder · U unpark · ? help · q quit"
+                }
+                _ => " ↑↓/jk move · tab switch panel · 1-5 pages · r refresh · ? help · q quit",
+            };
+            Line::styled(keys, Style::default().add_modifier(Modifier::DIM))
+        }
+    };
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn popup(frame: &mut Frame, width: u16, height: u16, title: &str, lines: Vec<Line>) {
+    let area = frame.area();
+    let (w, h) = (width.min(area.width), height.min(area.height));
+    let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+            Block::bordered().title(Line::styled(format!(" {title} "), Style::default().add_modifier(Modifier::BOLD))),
+        ),
+        rect,
+    );
+}
+
+fn draw_overlay(frame: &mut Frame, app: &App) {
+    let hint = |t: &str| Line::styled(t.to_string(), Style::default().add_modifier(Modifier::DIM));
+    match &app.mode {
+        Mode::Normal => {}
+        Mode::Menu { site, items, index } => {
+            let name = app.sites.get(*site).map(|s| s["name"].as_str().unwrap_or("?").to_string()).unwrap_or_default();
+            let mut lines: Vec<Line> = items
+                .iter()
+                .enumerate()
+                .map(|(i, (k, label))| {
+                    let line = format!(" {k}  {label}");
+                    if i == *index { Line::styled(line, selected()) } else { Line::raw(line) }
+                })
+                .collect();
+            lines.push(Line::raw(""));
+            lines.push(hint(" ↑↓ enter, or the letter · esc close"));
+            popup(frame, 44, items.len() as u16 + 4, &name, lines);
+        }
+        Mode::Input { purpose, text } => {
+            let title = match purpose {
+                InputFor::Link => "Link a folder as <folder name>.test",
+                InputFor::Park => "Park a folder: each subfolder becomes <name>.test",
+            };
+            popup(
+                frame,
+                70,
+                5,
+                title,
+                vec![Line::raw(format!(" path: {text}█")), hint(" ~ works · enter confirm · esc cancel")],
+            );
+        }
+        Mode::Pick { purpose, options, index } => {
+            let title = match purpose {
+                PickFor::Isolate(site) => format!("PHP version for {site}"),
+                PickFor::Unpark => "Unpark which folder?".to_string(),
+            };
+            let mut lines: Vec<Line> = options
+                .iter()
+                .enumerate()
+                .map(|(i, o)| {
+                    let line = format!(" {o}");
+                    if i == *index { Line::styled(line, selected()) } else { Line::raw(line) }
+                })
+                .collect();
+            lines.push(hint(" ↑↓ enter · esc cancel"));
+            popup(frame, 60, options.len() as u16 + 3, &title, lines);
+        }
+        Mode::Confirm { question, .. } => {
+            popup(
+                frame,
+                60,
+                5,
+                "Confirm",
+                vec![Line::styled(format!(" {question}"), warn(app)), hint(" y yes · n no")],
+            );
+        }
+    }
+}
+
 fn draw_help(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let w = area.width.min(58);
-    let h = area.height.min(14);
+    let h = area.height.min(16);
     let popup = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     let lines = vec![
         Line::raw("↑ ↓  or  j k     move"),
@@ -241,6 +331,8 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("r                refresh now (also every 2 s)"),
         Line::raw("q  esc  ctrl-c   quit"),
         Line::raw(""),
+        Line::raw("Sites: enter = actions (open, Terminal, copy, PHP, unlink)"),
+        Line::raw("       a link · p park · U unpark"),
         Line::raw("Every action is also a command: `devid --help`."),
         Line::raw(if app.no_color { "NO_COLOR is set: monochrome." } else { "Set NO_COLOR=1 for a monochrome UI." }),
         Line::styled("press any key to close", Style::default().add_modifier(Modifier::DIM)),

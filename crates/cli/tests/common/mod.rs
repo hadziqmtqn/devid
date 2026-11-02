@@ -206,3 +206,14 @@ pub fn fake_httpd(root: &Path, home: &Path) -> PathBuf {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     path
 }
+
+/// Send one raw JSON request to the daemon's socket and return the reply (for fields the CLI
+/// does not print).
+pub fn request_json(home: &Path, line: &str) -> Value {
+    use std::io::{BufRead, BufReader, Write};
+    let mut stream = std::os::unix::net::UnixStream::connect(home.join("run/devid.sock")).unwrap();
+    stream.write_all(format!("{line}\n").as_bytes()).unwrap();
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply).unwrap();
+    serde_json::from_str(&reply).unwrap()
+}
