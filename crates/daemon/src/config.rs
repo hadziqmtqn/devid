@@ -1,7 +1,7 @@
 //! `~/.devid/config.toml`: the owner's choices. Created with defaults on first start.
 
 use serde::{Deserialize, Serialize};
-use std::{fs, io, path::Path};
+use std::{collections::BTreeMap, fs, io, path::Path};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -12,11 +12,28 @@ pub struct Config {
     pub server: String,
     /// PHP version for sites without their own (D-009: 8.3, 8.4, 8.5).
     pub default_php: String,
+    // shortcut: high port until the M5 helper redirects 80/443.
+    /// Port the web server listens on (127.0.0.1 only).
+    pub http_port: u16,
+    /// Folders whose subfolders each become `<name>.<tld>` (D-011).
+    pub parked: Vec<String>,
+    /// Explicit sites: name -> folder. A link wins over a parked folder of the same name.
+    pub links: BTreeMap<String, String>,
+    /// Per-site PHP version: site name -> version.
+    pub isolated: BTreeMap<String, String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { tld: "test".into(), server: "nginx".into(), default_php: "8.5".into() }
+        Self {
+            tld: "test".into(),
+            server: "nginx".into(),
+            default_php: "8.5".into(),
+            http_port: 8088,
+            parked: Vec::new(),
+            links: BTreeMap::new(),
+            isolated: BTreeMap::new(),
+        }
     }
 }
 

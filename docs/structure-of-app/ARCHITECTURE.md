@@ -1,8 +1,8 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (Phase 2 M2: PHP manager and php-fpm supervision)
-> Status: partial (M1–M2 implemented; the rest proposed)
+> Verified against: 2026-11-02 (Phase 2 M3: sites and nginx)
+> Status: partial (M1–M3 implemented; the rest proposed)
 
 ## Components (Rust Cargo workspace)
 
@@ -15,6 +15,22 @@ Implemented in M2:
 - `daemon::supervisor`: one php-fpm master per wanted version, with restart on crash (gives up after 5 crashes in 60 s) and a stop sequence of SIGQUIT repeated every second, then SIGKILL after 10 s.
 - `~/.devid/ca/cacert.pem` (system bundle for now; the Devid CA is added in M4).
 - CLI: `devid php list`, `devid php install <ver> --from <dir>` and `devid php use <ver>`.
+
+Implemented in M3:
+- `daemon::sites` resolves sites from `config.toml`:
+  - `parked` folders: every non-hidden subfolder with a valid DNS-label name;
+  - `links`: name → folder; a link wins over a parked folder with the same name;
+  - `isolated`: name → PHP version.
+  The docroot is `<folder>/public` when it exists.
+- `daemon::nginx` renders one `nginx.conf` for all sites:
+  - listens on `127.0.0.1:<http_port>`, with a default server that answers 404;
+  - includes the Laravel FastCGI buffer settings;
+  - leaves out any path that cannot be quoted safely (quote, backslash, `$`, control characters) instead of injecting it.
+  Every new config is checked with `nginx -t` before it replaces the old one. The error log is passed with `-e`.
+- `daemon::supervisor` is generic (`Spec`) and runs php-fpm masters and nginx with the same restart and stop logic. Config changes reach a running nginx through SIGHUP.
+- Every site-changing command goes through `State::mutate`: apply the new config, and save `config.toml` only if nginx accepted it; otherwise roll back.
+- Running PHP masters = the default version plus every version a site uses, if installed.
+- CLI: `devid sites`, `link`, `unlink`, `park`, `unpark`, `isolate <ver>`, `unisolate` and `server install nginx --from <file>`. `isolate` and `unisolate` default to the site that contains the current folder.
 
 `helper` is created in M5. The table below is the target layout.
 

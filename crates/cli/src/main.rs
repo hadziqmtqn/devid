@@ -34,6 +34,51 @@ enum Command {
         #[command(subcommand)]
         action: PhpAction,
     },
+    /// Manage the web server binary
+    Server {
+        #[command(subcommand)]
+        action: ServerAction,
+    },
+    /// List sites with their URL, folder and PHP version
+    Sites {
+        /// Print the raw JSON response
+        #[arg(long)]
+        json: bool,
+    },
+    /// Serve a folder (default: the current one) as <name>.test
+    Link {
+        /// Site name (default: the folder name)
+        name: Option<String>,
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Stop serving a linked site
+    Unlink { name: String },
+    /// Serve every subfolder of a folder (default: the current one) as <subfolder>.test
+    Park { path: Option<PathBuf> },
+    /// Stop serving a parked folder
+    Unpark { path: Option<PathBuf> },
+    /// Pin a site (default: the one containing the current folder) to a PHP version
+    Isolate {
+        version: String,
+        #[arg(long)]
+        site: Option<String>,
+    },
+    /// Return a site to the default PHP version
+    Unisolate {
+        #[arg(long)]
+        site: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServerAction {
+    /// Install a web server binary (nginx for now)
+    Install {
+        server: String,
+        #[arg(long)]
+        from: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -59,21 +104,7 @@ enum DaemonAction {
 }
 
 fn main() -> ExitCode {
-    let paths = Paths::from_env();
-    let result = match Cli::parse().command {
-        Command::Daemon { action: DaemonAction::Run } => server::run(paths).map_err(|e| e.to_string()),
-        Command::Daemon { action: DaemonAction::Stop } => request(&paths, &Request::Stop).map(|_| println!("daemon stopped")),
-        Command::Status { json } => request(&paths, &Request::Status).map(|v| print_status(&v, json)),
-        Command::Php { action: PhpAction::List } => request(&paths, &Request::PhpList).map(|v| print_php(&v["php"])),
-        Command::Php { action: PhpAction::Install { version, from } } => std::path::absolute(&from)
-            .map_err(|e| e.to_string())
-            .and_then(|from| request(&paths, &Request::PhpInstall { version: version.clone(), from: from.display().to_string() }))
-            .map(|_| println!("PHP {version} installed")),
-        Command::Php { action: PhpAction::Use { version } } => {
-            request(&paths, &Request::PhpUse { version: version.clone() }).map(|_| println!("default PHP is now {version}"))
-        }
-    };
-    match result {
+    match run(Cli::parse().command, &Paths::from_env()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("devid: {e}");
@@ -82,11 +113,58 @@ fn main() -> ExitCode {
     }
 }
 
+/// Absolute form of `path` (default: the current folder); the daemon has a different cwd.
+fn abs(path: Option<PathBuf>) -> Result<String, String> {
+    let path = path.unwrap_or_else(|| PathBuf::from("."));
+    let abs = std::path::absolute(&path).map_err(|e| e.to_string())?;
+    // Resolve `.`/`..` and symlinks when the folder exists, so links match the real path.
+    Ok(abs.canonicalize().unwrap_or(abs).display().to_string())
+}
+
+fn cwd() -> Result<String, String> {
+    abs(None)
+}
+
+fn run(command: Command, paths: &Paths) -> Result<(), String> {
+    let send = |req: Request| request(paths, &req);
+    match command {
+        Command::Daemon { action: DaemonAction::Run } => server::run(paths.clone()).map_err(|e| e.to_string()),
+        Command::Daemon { action: DaemonAction::Stop } => send(Request::Stop).map(|_| println!("daemon stopped")),
+        Command::Status { json } => send(Request::Status).map(|v| print_status(&v, json)),
+        Command::Php { action: PhpAction::List } => send(Request::PhpList).map(|v| print_php(&v["php"])),
+        Command::Php { action: PhpAction::Install { version, from } } => {
+            send(Request::PhpInstall { version: version.clone(), from: abs(Some(from))? })
+                .map(|_| println!("PHP {version} installed"))
+        }
+        Command::Php { action: PhpAction::Use { version } } => {
+            send(Request::PhpUse { version: version.clone() }).map(|_| println!("default PHP is now {version}"))
+        }
+        Command::Server { action: ServerAction::Install { server, from } } => {
+            send(Request::ServerInstall { server: server.clone(), from: abs(Some(from))? })
+                .map(|_| println!("{server} installed"))
+        }
+        Command::Sites { json } => send(Request::Sites).map(|v| print_sites(&v["sites"], json)),
+        Command::Link { name, path } => send(Request::Link { name, path: abs(path)? })
+            .map(|v| println!("linked {}", v["site"].as_str().unwrap_or("?"))),
+        Command::Unlink { name } => send(Request::Unlink { name: name.clone() }).map(|_| println!("unlinked {name}")),
+        Command::Park { path } => {
+            send(Request::Park { path: abs(path)? }).map(|v| println!("parked {}", v["parked"].as_str().unwrap_or("?")))
+        }
+        Command::Unpark { path } => send(Request::Unpark { path: abs(path)? }).map(|_| println!("unparked")),
+        Command::Isolate { version, site } => send(Request::Isolate { version, site, cwd: cwd()? }).map(|v| {
+            println!("{} now uses PHP {}", v["site"].as_str().unwrap_or("?"), v["php"].as_str().unwrap_or("?"))
+        }),
+        Command::Unisolate { site } => send(Request::Unisolate { site, cwd: cwd()? })
+            .map(|v| println!("{} uses the default PHP again", v["site"].as_str().unwrap_or("?"))),
+    }
+}
+
 /// Send one request and return the daemon's JSON reply.
 fn request(paths: &Paths, req: &Request) -> Result<serde_json::Value, String> {
     let sock = paths.socket();
-    let mut stream = UnixStream::connect(&sock)
-        .map_err(|_| format!("daemon is not running (no socket at {}); start it with `devid daemon run`", sock.display()))?;
+    let mut stream = UnixStream::connect(&sock).map_err(|_| {
+        format!("daemon is not running (no socket at {}); start it with `devid daemon run`", sock.display())
+    })?;
     let mut line = serde_json::to_string(req).expect("request serializes");
     line.push('\n');
     stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
@@ -105,11 +183,42 @@ fn print_status(v: &serde_json::Value, json: bool) {
         println!("{v}");
         return;
     }
-    println!("devid daemon {} running (pid {}, up {}s)", v["version"].as_str().unwrap_or("?"), v["pid"], v["uptime_secs"]);
+    println!(
+        "devid daemon {} running (pid {}, up {}s)",
+        v["version"].as_str().unwrap_or("?"),
+        v["pid"],
+        v["uptime_secs"]
+    );
     println!("  home:        {}", v["home"].as_str().unwrap_or("?"));
-    println!("  web server:  {}", v["server"].as_str().unwrap_or("?"));
+    println!(
+        "  web server:  {} {} (port {})",
+        v["server"].as_str().unwrap_or("?"),
+        v["server_status"].as_str().unwrap_or("?"),
+        v["http_port"]
+    );
+    println!("  sites:       {}", v["sites"]);
     println!("  default PHP: {}", v["default_php"].as_str().unwrap_or("?"));
     print_php(&v["php"]);
+}
+
+fn print_sites(list: &serde_json::Value, json: bool) {
+    if json {
+        println!("{list}");
+        return;
+    }
+    let sites = list.as_array().map(Vec::as_slice).unwrap_or_default();
+    if sites.is_empty() {
+        println!("no sites; run `devid park` in your projects folder or `devid link` in a project");
+    }
+    for s in sites {
+        let php = s["php"].as_str().unwrap_or("?");
+        let note = match (s["isolated"] == true, s["php_installed"] == true) {
+            (_, false) => format!("PHP {php} (not installed!)"),
+            (true, _) => format!("PHP {php} (isolated)"),
+            (false, _) => format!("PHP {php}"),
+        };
+        println!("{:<40} {:<26} {}", s["url"].as_str().unwrap_or("?"), note, s["path"].as_str().unwrap_or("?"));
+    }
 }
 
 fn print_php(list: &serde_json::Value) {
@@ -120,6 +229,10 @@ fn print_php(list: &serde_json::Value) {
     for p in versions {
         let pid = p["pid"].as_u64().map(|pid| format!(" (pid {pid})")).unwrap_or_default();
         let default = if p["default"] == true { "  default" } else { "" };
-        println!("  PHP {}  {}{pid}{default}", p["version"].as_str().unwrap_or("?"), p["status"].as_str().unwrap_or("?"));
+        println!(
+            "  PHP {}  {}{pid}{default}",
+            p["version"].as_str().unwrap_or("?"),
+            p["status"].as_str().unwrap_or("?")
+        );
     }
 }

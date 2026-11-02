@@ -1,6 +1,6 @@
 //! PHP versions under `~/.devid/php/<ver>/`: install, list, and the files php-fpm runs with (D-008, D-009).
 
-use crate::paths::Paths;
+use crate::{paths::Paths, supervisor::Spec};
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -53,7 +53,8 @@ pub fn cacert(paths: &Paths) -> PathBuf {
 
 /// Installed versions, sorted, newest last.
 pub fn installed(paths: &Paths) -> Vec<String> {
-    let mut found: Vec<String> = SUPPORTED.iter().filter(|v| fpm_bin(paths, v).is_file()).map(|v| v.to_string()).collect();
+    let mut found: Vec<String> =
+        SUPPORTED.iter().filter(|v| fpm_bin(paths, v).is_file()).map(|v| v.to_string()).collect();
     found.sort();
     found
 }
@@ -178,14 +179,38 @@ pub fn write_config(paths: &Paths, version: &str) -> io::Result<()> {
     )
 }
 
+/// How the supervisor runs php-fpm for `version`.
+pub fn spec(paths: &Paths, version: &str) -> Spec {
+    let etc = etc(paths, version);
+    Spec {
+        program: fpm_bin(paths, version),
+        args: vec![
+            "--nodaemonize".into(),
+            "--fpm-config".into(),
+            etc.join("php-fpm.conf").into(),
+            "-c".into(),
+            etc.join("php.ini").into(),
+        ],
+        // D-008: never fall back to compiled-in ini paths.
+        env: vec![("PHPRC".into(), etc.clone().into()), ("PHP_INI_SCAN_DIR".into(), etc.join("conf.d").into())],
+        pid_file: pid_file(paths, version),
+        comm: "php-fpm",
+    }
+}
+
+/// System CA bundles: macOS first; the Linux path keeps the test suite runnable in CI.
+const SYSTEM_BUNDLES: [&str; 2] = ["/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt"];
+
 /// D-008: PHP trusts the system bundle (plus the Devid CA once M4 adds it).
 pub fn ensure_cacert(paths: &Paths) -> io::Result<()> {
     let target = cacert(paths);
     if target.exists() {
         return Ok(());
     }
+    let source =
+        SYSTEM_BUNDLES.iter().find(|p| Path::new(p).is_file()).ok_or_else(|| err("no system CA bundle found"))?;
     fs::create_dir_all(target.parent().expect("cacert has a parent"))?;
-    fs::copy("/etc/ssl/cert.pem", &target)?;
+    fs::copy(source, &target)?;
     Ok(())
 }
 

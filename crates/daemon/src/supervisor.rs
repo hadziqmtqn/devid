@@ -1,9 +1,10 @@
-//! Keeps one php-fpm master per wanted PHP version alive, restarting it if it dies.
+//! Keeps child services (php-fpm masters, the web server) alive, restarting them if they die.
 
-use crate::{paths::Paths, php};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
+    ffi::OsString,
     fs,
+    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -17,7 +18,20 @@ use std::{
 const MAX_CRASHES: usize = 5;
 const CRASH_WINDOW: Duration = Duration::from_secs(60);
 
+/// How to run one service in the foreground. Both php-fpm and nginx stop gracefully on SIGQUIT.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spec {
+    pub program: PathBuf,
+    pub args: Vec<OsString>,
+    pub env: Vec<(String, OsString)>,
+    /// Written by the service itself; used to find an orphan left by a dead daemon.
+    pub pid_file: PathBuf,
+    /// Process name that must match before an orphan is signalled (pids get reused).
+    pub comm: &'static str,
+}
+
 struct Slot {
+    spec: Spec,
     stop: AtomicBool,
     pid: AtomicU32,
     failed: AtomicBool,
@@ -31,34 +45,57 @@ pub enum ProcState {
     Failed,
 }
 
+#[derive(Default)]
 pub struct Supervisor {
-    paths: Paths,
     slots: Mutex<BTreeMap<String, Arc<Slot>>>,
 }
 
 impl Supervisor {
-    pub fn new(paths: Paths) -> Self {
-        Self { paths, slots: Mutex::new(BTreeMap::new()) }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Start versions in `wanted` that are not running, stop the ones that are no longer wanted.
-    pub fn reconcile(&self, wanted: &BTreeSet<String>) {
+    /// Make the running set match `wanted`: start new services, stop unwanted ones, and restart
+    /// ones whose spec changed or that had failed (e.g. after a reinstall).
+    pub fn reconcile(&self, wanted: &BTreeMap<String, Spec>) {
         let mut slots = self.slots.lock().unwrap();
-        let stale: Vec<String> = slots.keys().filter(|v| !wanted.contains(*v)).cloned().collect();
-        for version in stale {
-            if let Some(slot) = slots.remove(&version) {
-                stop_slot(&slot);
+        let outdated: Vec<String> = slots
+            .iter()
+            .filter(|(name, slot)| {
+                wanted.get(*name).is_none_or(|spec| *spec != slot.spec) || slot.failed.load(Ordering::SeqCst)
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in outdated {
+            stop_slot(&slots.remove(&name).unwrap());
+        }
+        for (name, spec) in wanted {
+            if !slots.contains_key(name) {
+                slots.insert(name.clone(), spawn(name.clone(), spec.clone()));
             }
         }
-        for version in wanted {
-            let restart = slots.get(version).is_some_and(|s| s.failed.load(Ordering::SeqCst));
-            if restart {
-                // A failed version gets a fresh start when it is wanted again (e.g. after reinstall).
-                stop_slot(&slots.remove(version).unwrap());
+    }
+
+    /// Restart one service on its current spec (e.g. new binaries after a reinstall).
+    pub fn restart(&self, name: &str) {
+        let mut slots = self.slots.lock().unwrap();
+        if let Some(slot) = slots.remove(name) {
+            let spec = slot.spec.clone();
+            stop_slot(&slot);
+            slots.insert(name.to_string(), spawn(name.to_string(), spec));
+        }
+    }
+
+    /// Send a signal to a running service, e.g. SIGHUP for an nginx config reload.
+    /// Returns false if it is not running.
+    pub fn signal(&self, name: &str, sig: libc::c_int) -> bool {
+        let slots = self.slots.lock().unwrap();
+        match slots.get(name).map(|s| s.pid.load(Ordering::SeqCst)) {
+            Some(pid) if pid != 0 => {
+                signal(pid as i32, sig);
+                true
             }
-            if !slots.contains_key(version) {
-                slots.insert(version.clone(), self.spawn(version.clone()));
-            }
+            _ => false,
         }
     }
 
@@ -66,7 +103,7 @@ impl Supervisor {
         let slots = self.slots.lock().unwrap();
         slots
             .iter()
-            .map(|(v, s)| {
+            .map(|(name, s)| {
                 let state = if s.failed.load(Ordering::SeqCst) {
                     ProcState::Failed
                 } else {
@@ -75,37 +112,38 @@ impl Supervisor {
                         pid => ProcState::Running(pid),
                     }
                 };
-                (v.clone(), state)
+                (name.clone(), state)
             })
             .collect()
     }
 
     pub fn stop_all(&self) {
-        self.reconcile(&BTreeSet::new());
-    }
-
-    fn spawn(&self, version: String) -> Arc<Slot> {
-        let slot = Arc::new(Slot {
-            stop: AtomicBool::new(false),
-            pid: AtomicU32::new(0),
-            failed: AtomicBool::new(false),
-            handle: Mutex::new(None),
-        });
-        let (paths, s) = (self.paths.clone(), Arc::clone(&slot));
-        let handle = thread::spawn(move || watch(&paths, &version, &s));
-        *slot.handle.lock().unwrap() = Some(handle);
-        slot
+        self.reconcile(&BTreeMap::new());
     }
 }
 
-fn watch(paths: &Paths, version: &str, slot: &Slot) {
+fn spawn(name: String, spec: Spec) -> Arc<Slot> {
+    let slot = Arc::new(Slot {
+        spec,
+        stop: AtomicBool::new(false),
+        pid: AtomicU32::new(0),
+        failed: AtomicBool::new(false),
+        handle: Mutex::new(None),
+    });
+    let s = Arc::clone(&slot);
+    let handle = thread::spawn(move || watch(&name, &s));
+    *slot.handle.lock().unwrap() = Some(handle);
+    slot
+}
+
+fn watch(name: &str, slot: &Slot) {
     let mut crashes: Vec<Instant> = Vec::new();
     while !slot.stop.load(Ordering::SeqCst) {
-        kill_orphan(paths, version);
-        let mut child = match start(paths, version) {
+        kill_orphan(&slot.spec);
+        let mut child = match start(&slot.spec) {
             Ok(child) => child,
             Err(e) => {
-                eprintln!("devid: php-fpm {version} failed to start: {e}");
+                eprintln!("devid: {name} failed to start: {e}");
                 slot.failed.store(true, Ordering::SeqCst);
                 return;
             }
@@ -117,12 +155,12 @@ fn watch(paths: &Paths, version: &str, slot: &Slot) {
             return;
         }
 
-        eprintln!("devid: php-fpm {version} exited unexpectedly ({status:?}); restarting");
+        eprintln!("devid: {name} exited unexpectedly ({status:?}); restarting");
         let now = Instant::now();
         crashes.retain(|t| now.duration_since(*t) < CRASH_WINDOW);
         crashes.push(now);
         if crashes.len() >= MAX_CRASHES {
-            eprintln!("devid: php-fpm {version} crashed {MAX_CRASHES} times in {CRASH_WINDOW:?}; giving up");
+            eprintln!("devid: {name} crashed {MAX_CRASHES} times in {CRASH_WINDOW:?}; giving up");
             slot.failed.store(true, Ordering::SeqCst);
             return;
         }
@@ -130,40 +168,33 @@ fn watch(paths: &Paths, version: &str, slot: &Slot) {
     }
 }
 
-fn start(paths: &Paths, version: &str) -> std::io::Result<Child> {
-    let etc = php::etc(paths, version);
-    Command::new(php::fpm_bin(paths, version))
-        .arg("--nodaemonize")
-        .arg("--fpm-config")
-        .arg(etc.join("php-fpm.conf"))
-        .arg("-c")
-        .arg(etc.join("php.ini"))
-        // D-008: never fall back to compiled-in ini paths.
-        .env("PHPRC", &etc)
-        .env("PHP_INI_SCAN_DIR", etc.join("conf.d"))
-        .stdin(Stdio::null())
-        .spawn()
+fn start(spec: &Spec) -> std::io::Result<Child> {
+    let mut cmd = Command::new(&spec.program);
+    cmd.args(&spec.args).stdin(Stdio::null());
+    for (key, value) in &spec.env {
+        cmd.env(key, value);
+    }
+    cmd.spawn()
 }
 
-/// A master left over from a daemon that died would hold the socket; stop it first.
-fn kill_orphan(paths: &Paths, version: &str) {
-    let pid_file = php::pid_file(paths, version);
-    let Some(pid) = fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse::<i32>().ok()) else {
+/// A service left over from a daemon that died would hold its socket or port; stop it first.
+fn kill_orphan(spec: &Spec) {
+    let Some(pid) = fs::read_to_string(&spec.pid_file).ok().and_then(|s| s.trim().parse::<i32>().ok()) else {
         return;
     };
-    // Only signal it if that pid is still a php-fpm process; pids get reused.
+    // Only signal it if that pid still runs the expected program; pids get reused.
     let comm = Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output();
-    if comm.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("php-fpm")) {
+    if comm.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(spec.comm)) {
         signal(pid, libc::SIGQUIT);
         let deadline = Instant::now() + Duration::from_secs(5);
         while alive(pid) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(50));
         }
     }
-    let _ = fs::remove_file(pid_file);
+    let _ = fs::remove_file(&spec.pid_file);
 }
 
-/// Stop a version without ever hanging the daemon. SIGQUIT lets php-fpm finish in-flight requests,
+/// Stop a service without ever hanging the daemon. SIGQUIT lets it finish in-flight requests,
 /// but php-fpm drops signals that arrive while it is still starting up, so repeat it every second
 /// and fall back to SIGKILL after `STOP_TIMEOUT`.
 fn stop_slot(slot: &Slot) {
@@ -176,7 +207,7 @@ fn stop_slot(slot: &Slot) {
         let pid = slot.pid.load(Ordering::SeqCst) as i32;
         if pid != 0 {
             if start.elapsed() >= STOP_TIMEOUT {
-                eprintln!("devid: php-fpm pid {pid} ignored SIGQUIT for {STOP_TIMEOUT:?}; killing it");
+                eprintln!("devid: pid {pid} ignored SIGQUIT for {STOP_TIMEOUT:?}; killing it");
                 signal(pid, libc::SIGKILL);
             } else if last_quit.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
                 signal(pid, libc::SIGQUIT);

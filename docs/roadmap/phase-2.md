@@ -2,7 +2,7 @@
 
 > Scope: milestones and technical choices for Phase 2 (daemon, CLI, multi-PHP, `.test`, HTTPS)
 > Verified against: 2026-11-02
-> Status: proposed (milestones); M1 and M2 done
+> Status: proposed (milestones); M1–M3 done
 
 Phase 2 delivers a working `devid` on the owner's Mac: sites served at `*.test` over HTTPS, a PHP version per site, nginx by default (D-015), without Valet or Homebrew. Each milestone is one worktree and one PR.
 
@@ -12,8 +12,8 @@ Phase 2 delivers a working `devid` on the owner's Mac: sites served at `*.test` 
 |---|---|---|---|
 | M1 | Cargo workspace; daemon on a unix socket; `devid status`; config file | no | `devid daemon run` + `devid status` work; integration test passes |
 | M2 | PHP manager: install a version into `~/.devid/php/<ver>`, supervise one php-fpm master per version, base ini + `cacert.pem` | no | two versions run under the daemon; `devid php list/install/use` |
-| M3 | Sites: `link`, `park`, per-site PHP; nginx config rendering and supervision on high ports (8080/8443) | no | erdbpro-saas served by the daemon on :8443 |
-| M4 | Local CA and per-site certificates in Rust; `cacert.pem` regenerated on change | no | HTTPS works with `--resolve`; PHP site-to-site works |
+| M3 | Sites: `link`, `park`, per-site PHP; nginx config rendering and supervision on a high HTTP port (`http_port`, default 8088; 8080 was taken on this Mac) | no | erdbpro-saas served by the daemon over HTTP ✅ |
+| M4 | Local CA and per-site certificates in Rust; `cacert.pem` regenerated on change; nginx HTTPS listener on a high port | no | HTTPS works with `--resolve`; PHP site-to-site works |
 | M5 | DNS responder for `*.test` in the daemon; helper (sudo, once): `/etc/resolver/test`, CA trust, ports 80/443 | **yes** | `https://erdbpro-saas.test` opens in the browser without warnings |
 | M6 | `devid setup`, `doctor`, `uninstall`; LaunchAgent; `php`/`composer` shims | yes (via M5 helper) | fresh install on this Mac from `install.sh` works end to end |
 | M7 | Caddy and Apache adapters (D-015 alternatives); `devid server use` | no | switching servers keeps every site working |
