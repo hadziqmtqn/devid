@@ -10,7 +10,7 @@ Native local PHP development app for macOS (Herd-like, no Homebrew, no VM). Rust
 
 ## Current stage
 
-Planning. No code exists yet. The next step is the Phase 1 spike; its risks and pass criteria are in PROJECT_CONTEXT. Put spike work in `spike/`.
+Phase 1 (spike) is done. Phase 2 (daemon + CLI) is in progress; the milestones are in `docs/roadmap/phase-2.md`. Rust code lives in `crates/` (`cargo test`, `cargo clippy --all-targets -- -D warnings`). Spike scripts stay in `spike/`.
 
 ## Hard constraints
 

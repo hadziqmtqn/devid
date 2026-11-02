@@ -1,10 +1,16 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (no code exists; everything here is proposed)
-> Status: proposed
+> Verified against: 2026-11-02 (Phase 2 M1: workspace, daemon socket, `devid status`)
+> Status: partial (M1 implemented; the rest proposed)
 
 ## Components (Rust Cargo workspace)
+
+Implemented in M1:
+- `crates/daemon` (library `devid-daemon`): paths, `config.toml`, the JSON-lines protocol and the unix socket server.
+- `crates/cli` (binary `devid`): `devid status`, `devid daemon run` and `devid daemon stop`.
+
+`helper` is created in M5. The table below is the target layout.
 
 | Crate | Runs as | Responsibility |
 |---|---|---|
@@ -27,7 +33,7 @@ There is exactly one active web server globally.
 ## PHP runtime (accepted, D-008)
 
 - **Binaries:** static php-fpm and php CLI from static-php-cli, built by us for x86_64 (arm64 deferred, D-010).
-- **Install:** downloaded per version on demand from GitHub Releases into `~/Library/Application Support/Devid/php/<version>/`. The download is checked against a `manifest.json` (version, sha256).
+- **Install:** downloaded per version on demand from GitHub Releases into `~/.devid/php/<version>/` (all state lives under `~/.devid`, see `docs/roadmap/phase-2.md`). The download is checked against a `manifest.json` (version, sha256).
 - **Configuration:** php-fpm and the CLI shims always start with `PHPRC` and `PHP_INI_SCAN_DIR` pointing at that version's folder. Compiled-in ini paths are never used.
 - **TLS:** the base ini sets `openssl.cafile` and `curl.cainfo` to a Devid `cacert.pem` (Mozilla bundle plus the Devid CA). The file is regenerated whenever the CA changes.
 - **Xdebug and pcov:** shipped as separate `.so` files per version. They are off by default. Enabling one drops an ini into the scan dir and restarts that version's php-fpm.
