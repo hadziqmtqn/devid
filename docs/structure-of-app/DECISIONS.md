@@ -24,6 +24,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-014 | 2026-11-02 | accepted | Install with `install.sh` plus `devid setup`/`doctor`/`uninstall`; no Node |
 | D-015 | 2026-11-02 | accepted | nginx is the default web server; Caddy and Apache stay selectable |
 | D-016 | 2026-11-02 | accepted | Binaries are built and released from a separate public repo, `devid-binaries`; the code stays private |
+| D-017 | 2026-11-02 | accepted | TUI colors: semantic, from the terminal's own 16-color palette; not the prototype's exact colors |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -158,3 +159,22 @@ See ARCHITECTURE, "PHP runtime".
   - Anyone can see the build scripts and download the binaries, which are open-source software plus the compiled `devid`; the Devid source stays private.
   - `install.sh`'s `REPO` changes to `devid-binaries` in R4.
 - **Plan:** `docs/roadmap/phase-5.md`.
+
+## D-017: TUI colors (accepted 2026-11-02)
+
+- **Context:** the approved prototype is a macOS System Settings–style GUI with its own colors. The v1 interface is a TUI (D-012), and terminals use many themes (dark, light, custom).
+- **Options considered:**
+  - monochrome: always readable, but running/failed are hard to scan;
+  - the prototype's exact truecolor palette: clashes with terminal themes, low-contrast greys on dark backgrounds, and not every terminal supports truecolor;
+  - **semantic colors from the terminal's palette**.
+- **Decision:** use the terminal's own 16 ANSI colors, and only for meaning:
+  - green = running / ok;
+  - red = failed / missing;
+  - yellow = warning;
+  - an accent or inverse for the selected row.
+  The TUI takes the prototype's **structure and flows** (sidebar with Sites, PHP, Server, Logs and Settings), not its colors.
+- **Rules:**
+  - every state also has a symbol and text (`● running`, `✗ failed`), so it reads without color and for color-blind users;
+  - `NO_COLOR` (no-color.org) gives a monochrome UI;
+  - no truecolor;
+  - important text never relies on dim colors, so contrast holds on dark and light themes.

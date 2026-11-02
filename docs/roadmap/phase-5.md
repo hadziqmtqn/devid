@@ -2,7 +2,7 @@
 
 > Scope: building and shipping Devid's binaries, and how an installed Devid gets updates
 > Verified against: 2026-11-02
-> Status: R1–R3 done (release 2026.11.02-3 with Caddy; the owner's Mac runs release binaries); R4 in review; D-016 accepted
+> Status: R1–R4 done (devid v0.1.0 released 2026-11-02; installed on the owner's Mac with install.sh); R5 in review (devid-binaries#5); D-016 accepted
 
 Today Devid installs PHP and nginx with `--from <spike folder>`, and an upgrade means `git pull && cargo build && ./target/release/devid setup`. Phase 5 replaces both with releases that the installed Devid downloads, verifies and updates by itself. `install.sh` (D-014) starts working at the end of this phase.
 
@@ -53,3 +53,7 @@ installed Devid ── reads manifest.json ── downloads + verifies sha256 �
   - creating the public repository (R1, after approval);
   - creating one fine-grained token, limited to "Contents: write" on `devid-binaries`, and storing it as a secret in `devid` (R4).
 - **Verified in R1 (2026-11-02):** `macos-15-intel` runs free for the public repository. A first build without caches takes PHP 27–43 min per version in parallel and nginx 6 min. The first run failed on a `pipefail` + `grep -q` check bug (SIGPIPE), fixed in devid-binaries#1.
+
+## Next (after Phase 5)
+
+- **Shorter install command:** a subdomain on the owner's domain with a Cloudflare redirect rule to `…/devid-latest/install.sh`, giving `curl -fsSL https://<subdomain>/install | sh`. Deferred by the owner on 2026-11-02; the GitHub URL works meanwhile. Keep `-fsSL` (`-f` stops an error page from running as a script; `-L` follows the redirect).
