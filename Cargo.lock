@@ -216,6 +216,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rcgen",
+ "ring",
  "serde",
  "serde_json",
  "time",

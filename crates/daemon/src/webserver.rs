@@ -97,3 +97,19 @@ pub(crate) fn probe(program: &Path, args: &[&str]) -> io::Result<std::process::O
     }
     child.wait_with_output()
 }
+
+/// Version of an installed nginx ("1.30.6") or Caddy ("2.11.7"); None for Apache (the OS owns it).
+pub fn installed_version(paths: &Paths, name: &str) -> Option<String> {
+    let (bin, args): (std::path::PathBuf, &[&str]) = match name {
+        "nginx" => (nginx::bin(paths), &["-v"]),
+        "caddy" => (caddy::bin(paths), &["version"]),
+        _ => return None,
+    };
+    let out = probe(&bin, args).ok()?;
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let raw = match name {
+        "nginx" => text.split("nginx/").nth(1)?,
+        _ => text.trim_start().strip_prefix('v')?,
+    };
+    Some(raw.split_whitespace().next()?.to_string())
+}

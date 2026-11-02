@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-02 (Phase 2 M7: Caddy and Apache adapters)
+> Verified against: 2026-11-02 (Phase 5 R3: downloads from releases)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -81,6 +81,11 @@ Implemented in M7:
   - `shortcut:` the first HTTPS vhost also answers unknown hosts.
 - **`Spec.stop_signal`:** the supervisor stops each service with its own graceful signal: SIGQUIT for php-fpm and nginx, SIGTERM for Caddy and Apache.
 - **Version probes** for `server install` time out after 5 s, so a wrong binary cannot hang the daemon.
+
+Implemented in Phase 5 R3:
+- **`daemon::releases`** reads `manifest.json` from `https://github.com/hadziqmtqn/devid-binaries/releases/latest/download/` (D-016). It refuses any artifact URL outside that repository's release downloads, downloads with `curl --proto =https`, verifies SHA-256 (with `ring`, already in the tree) before unpacking, and removes the archive and the unpacked folder after installing. `DEVID_MANIFEST_URL` overrides the location for tests (`file://`).
+- `devid php install <ver>` and `devid server install <nginx|caddy>` download from the manifest when `--from` is omitted. `--from` still installs a local build.
+- `devid update [--check]` compares the installed PHP versions (`PHP_VERSION`), nginx and Caddy with the manifest and installs the newer ones through the same path, restarting the affected service.
 
 `helper` is created in M5. The table below is the target layout.
 
