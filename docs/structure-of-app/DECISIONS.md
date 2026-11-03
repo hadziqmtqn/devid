@@ -27,7 +27,8 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-017 | 2026-11-02 | accepted | TUI colors: semantic, from the terminal's own 16-color palette; not the prototype's exact colors |
 | D-018 | 2026-11-03 | proposed | Local HTTPS and the system pieces on other operating systems |
 | D-019 | 2026-11-03 | accepted (direction, not scheduled) | After v1: a desktop app and support for every OS (macOS arm64, Linux, Windows) |
-| D-020 | 2026-11-03 | proposed (Phase 6) | Users add PHP extensions that are not bundled: prebuilt loaders such as ionCube first, PECL builds second |
+| D-020 | 2026-11-03 | superseded by D-021 | Users add PHP extensions that are not bundled: prebuilt loaders such as ionCube first, PECL builds second |
+| D-021 | 2026-11-03 | accepted (direction; the Phase 6 spike confirms feasibility) | Extra PHP extensions come only from a Devid catalog built from trusted sources; no user-supplied `.so`, no compiling on the user's Mac |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -223,6 +224,8 @@ See ARCHITECTURE, "PHP runtime".
 
 ## D-020: user-installed PHP extensions (proposed 2026-11-03, Phase 6)
 
+*(Superseded by D-021 on 2026-11-03: no user-supplied `.so` files and no local PECL builds. ionCube was only an example.)*
+
 - **Context:** D-008 ships a fixed extension set with "no pecl in v1"; only Xdebug and pcov are separate `.so` files. The owner needs extensions that are not bundled, first of all the **ionCube Loader**, which is closed source and only ships as prebuilt `.so` files per PHP version and platform.
 - **Proposal:**
   1. **Prebuilt extensions first:** `devid php ext add <ver> <file.so>` installs a `.so` the user downloaded (ionCube, or any vendor loader). Devid checks it loads (`php -m`), writes `conf.d`, restarts that php-fpm, and rolls back if PHP fails to start.
@@ -230,3 +233,15 @@ See ARCHITECTURE, "PHP runtime".
 - **Supersedes, if accepted:** D-008's "no pecl in v1" for user-added extensions. The bundled set stays fixed and is still the only thing Devid builds and updates.
 - **Not decided yet:** whether Devid downloads ionCube itself (license and redistribution terms) or the user supplies the file; whether a small catalog of prebuilt optional extensions is worth the CI cost.
 - **Accept when:** the Phase 6 spike loads ionCube into Devid's static PHP on the owner's Mac (see `docs/roadmap/phase-6.md`).
+
+## D-021: extra PHP extensions from a trusted catalog (accepted 2026-11-03, Phase 6)
+
+- **Context:** users need PHP extensions that Devid does not bundle (D-008). D-020 proposed installing a user-supplied `.so` and building from PECL on the user's Mac. The owner wants every extension to come from a safe, verified source instead, and ionCube was only an example.
+- **Decision:**
+  - `devid php ext install <ver> <name>` installs only extensions listed in Devid's **extension catalog**: an `extensions` section in `manifest.json` (D-016) with the name, PHP version, URL, SHA-256, `extension` or `zend_extension`, source and license of each `.so`.
+  - CI in `devid-binaries` builds each catalog extension from its official source (PECL, php-src, or the project's own release), pinned by checksum, for every PHP version it supports, and publishes it with the PHP builds. A vendor's closed-source loader can be listed only if its license allows Devid to mirror it or to download it from the vendor's official URL with a pinned checksum.
+  - Devid verifies the SHA-256, checks that the extension loads, and rolls back if php-fpm fails to start. A PHP update brings matching extension builds in the same release.
+  - There is no `ext add <file.so>` and no local compiling, so users need no Xcode Command Line Tools. An extension that is not in the catalog is requested and added to the catalog.
+- **Supersedes:** D-020. D-008's "fixed extension set" still holds for the bundled set; the catalog is a second, opt-in set.
+- **User documentation:** the README lists which kinds of extensions can be added and, for those that cannot, why (closed source without a redistribution license, a proprietary system library, thread-safe PHP only, no PHP 8.3+ support, Windows only, and so on). The draft list is in `docs/roadmap/phase-6.md`.
+- **Accept when:** done; the owner accepted the direction on 2026-11-03. The E1 spike decides which extensions are feasible as shared builds against Devid's static PHP.
