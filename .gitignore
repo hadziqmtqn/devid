@@ -21,5 +21,10 @@ spike/runtime/multi/
 spike/webservers/*
 !spike/webservers/*.sh
 
+# extension spike build cache (downloads, sources, results)
+spike/ext/*
+!spike/ext/*.sh
+!spike/ext/README.md
+
 # Rust build output
 /target/
