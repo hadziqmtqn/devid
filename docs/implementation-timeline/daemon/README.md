@@ -14,3 +14,4 @@
 | 2026-11-03 | [Fix: `php artisan serve` through the shim (v0.2.1)](2026-11-03-shim-artisan-serve.md) |
 | 2026-11-03 | [Fix: update check with an unreadable installed version (v0.2.2)](2026-11-03-update-unknown-version.md) |
 | 2026-11-03 | [`devid setup` installs PHP and a web server (v0.2.3)](2026-11-03-setup-installs-php-server.md) |
+| 2026-11-03 | [Fix: `.test` sites slow while the Mac is busy (LaunchAgent priority)](2026-11-03-agent-priority.md) |
