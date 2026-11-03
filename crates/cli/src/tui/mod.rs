@@ -21,6 +21,18 @@ fn refresh(app: &mut App, paths: &Paths) {
                 .as_array()
                 .map(|l| l.iter().filter_map(|p| p.as_str().map(String::from)).collect())
                 .unwrap_or_default();
+            app.servers = request(paths, &Request::ServerList)
+                .ok()
+                .and_then(|v| v["servers"].as_array().cloned())
+                .unwrap_or_default();
+            app.logs =
+                request(paths, &Request::Logs).ok().and_then(|v| v["logs"].as_array().cloned()).unwrap_or_default();
+            app.log_text = match app.selected_log() {
+                Some(name) => request(paths, &Request::LogRead { name, offset: None })
+                    .map(|v| v["text"].as_str().unwrap_or_default().to_string())
+                    .unwrap_or_else(|e| format!("({e})")),
+                None => String::new(),
+            };
             app.status = Ok(status);
         }
         Err(e) => {
@@ -76,7 +88,7 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
             Err(e) => (e, true),
         },
         // Handled in the loop, which owns the terminal.
-        Effect::EditThenRestart { .. } => ("internal: edit handled by the loop".into(), true),
+        Effect::EditThenRestart { .. } | Effect::View(_) => ("internal: handled by the loop".into(), true),
         Effect::Copy(text) => {
             let copied = Command::new("pbcopy").stdin(Stdio::piped()).spawn().and_then(|mut child| {
                 std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes())?;
@@ -98,7 +110,8 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     let result = (|| -> std::io::Result<()> {
         let mut last: Option<Instant> = None;
         loop {
-            if last.is_none_or(|t| t.elapsed() >= REFRESH) {
+            let every = if app.follow && app.page == app::Page::Logs { Duration::from_secs(1) } else { REFRESH };
+            if last.is_none_or(|t| t.elapsed() >= every) {
                 refresh(&mut app, paths);
                 last = Some(Instant::now());
             }
@@ -110,6 +123,15 @@ pub fn run(paths: &Paths) -> Result<(), String> {
                 match app.handle_key(key) {
                     Action::Quit => return Ok(()),
                     Action::Refresh => last = None,
+                    Action::Do(Effect::View(path)) => {
+                        ratatui::restore();
+                        let _ = std::process::Command::new("sh")
+                            .args(["-c", "${PAGER:-less} \"$1\"", "devid-view"])
+                            .arg(&path)
+                            .status();
+                        terminal = ratatui::init();
+                        last = None;
+                    }
                     Action::Do(Effect::EditThenRestart { path, service }) => {
                         // Step aside for the editor, then come back and apply the change.
                         ratatui::restore();
@@ -214,7 +236,17 @@ mod tests {
         assert!(text.contains("PHP 8.5") && text.contains("● running") && text.contains("default"));
         assert!(text.contains("○ stopped"));
         a.page = Page::Server;
-        assert!(render(&a).0.contains("80/443"), "standard ports via the pf redirect are explained");
+        a.servers = vec![
+            json!({"server": "nginx", "installed": true, "active": true, "status": "running", "paused": false, "version": "1.30.6"}),
+        ];
+        let text = render(&a).0;
+        assert!(text.contains("* nginx") && text.contains("1.30.6"), "{text}");
+        assert!(text.contains("80/443"), "standard ports via the pf redirect are explained");
+        a.page = Page::Logs;
+        a.logs = vec![json!({"name": "php85-fpm.log", "size": 42})];
+        a.log_text = "line one\nNOTICE: ready to handle connections\n".into();
+        let text = render(&a).0;
+        assert!(text.contains("php85-fpm.log") && text.contains("ready to handle connections"), "{text}");
         a.page = Page::Settings;
         assert!(render(&a).0.contains("*.test"));
         a.show_help = true;

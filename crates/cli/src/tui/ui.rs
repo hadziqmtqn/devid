@@ -132,13 +132,7 @@ fn draw_page(frame: &mut Frame, app: &App, area: Rect) {
         Page::Sites => draw_sites(frame, app, inner),
         Page::Php => draw_php(frame, app, status, inner),
         Page::Server => draw_server(frame, app, status, inner),
-        Page::Logs => frame.render_widget(
-            Paragraph::new(vec![
-                Line::raw("Log viewer (tail, follow, clear) arrives in T4."),
-                Line::raw(format!("Logs are in {}/log/", tilde(s(&status["home"])))),
-            ]),
-            inner,
-        ),
+        Page::Logs => draw_logs(frame, app, inner),
         Page::Settings => draw_settings(frame, status, inner),
     }
 }
@@ -210,11 +204,23 @@ fn draw_php(frame: &mut Frame, app: &App, _status: &Value, area: Rect) {
 }
 
 fn draw_server(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
+    let [list, info] = Layout::vertical([Constraint::Length(5), Constraint::Min(2)]).areas(area);
+    let rows = app.servers.iter().enumerate().map(|(i, srv)| {
+        let state_text = if srv["paused"] == true { "stopped".to_string() } else { s(&srv["status"]).to_string() };
+        Row::new(vec![
+            Cell::from(format!("{} {}", if srv["active"] == true { "*" } else { " " }, s(&srv["server"]))),
+            Cell::from(state(app, &state_text)),
+            Cell::from(srv["version"].as_str().unwrap_or("").to_string()),
+            Cell::from(if srv["active"] == true { "active (one at a time, D-005)" } else { "" }),
+        ])
+        .style(row_style(app, i))
+    });
+    frame.render_widget(
+        Table::new(rows, [Constraint::Length(9), Constraint::Length(17), Constraint::Length(9), Constraint::Min(10)])
+            .header(Row::new(["Server", "Status", "Version", ""]).style(Style::default().add_modifier(Modifier::BOLD))),
+        list,
+    );
     let lines = vec![
-        Line::from(vec![
-            Span::raw(format!("Active web server: {}  ", s(&status["server"]))),
-            state(app, s(&status["server_status"])),
-        ]),
         Line::raw(format!(
             "Listening on 127.0.0.1:{} (http) and :{} (https){}",
             status["http_port"],
@@ -222,10 +228,39 @@ fn draw_server(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
             if status["standard_ports"] == true { "; reached on 80/443 through the pf redirect" } else { "" }
         )),
         Line::raw(format!("DNS: {}", s(&status["dns"]))),
-        Line::raw(""),
-        Line::raw("Switching, restart/stop/start and the config view arrive in T4."),
     ];
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), info);
+}
+
+fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
+    if app.logs.is_empty() {
+        frame.render_widget(Paragraph::new("No logs yet."), area);
+        return;
+    }
+    let list_height = (app.logs.len() as u16 + 1).min(area.height / 3).max(2);
+    let [list, text] = Layout::vertical([Constraint::Length(list_height), Constraint::Min(1)]).areas(area);
+    let rows = app.logs.iter().enumerate().map(|(i, l)| {
+        Row::new(vec![Cell::from(s(&l["name"]).to_string()), Cell::from(format!("{} bytes", l["size"]))])
+            .style(row_style(app, i))
+    });
+    frame.render_widget(
+        Table::new(rows, [Constraint::Length(26), Constraint::Min(10)]).header(
+            Row::new(["Log", if app.follow { "Size · following" } else { "Size" }])
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        ),
+        list,
+    );
+    let block = Block::new().borders(Borders::TOP);
+    let inner = block.inner(text);
+    frame.render_widget(block, text);
+    let lines: Vec<&str> = app.log_text.lines().collect();
+    let visible = &lines[lines.len().saturating_sub(inner.height as usize)..];
+    let body = if lines.is_empty() {
+        vec![Line::styled("(empty)", Style::default().add_modifier(Modifier::DIM))]
+    } else {
+        visible.iter().map(|l| Line::raw(l.to_string())).collect()
+    };
+    frame.render_widget(Paragraph::new(body), inner);
 }
 
 fn draw_settings(frame: &mut Frame, status: &Value, area: Rect) {
@@ -254,6 +289,10 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 (Page::Sites, Focus::Page) => {
                     " enter actions · a link folder · p park folder · U unpark · tab sidebar · ? help · q quit"
                 }
+                (Page::Server, _) => {
+                    " enter actions (use, install, restart, stop/start, view config) · S stop all · A start all · ? help · q quit"
+                }
+                (Page::Logs, _) => " ↑↓ pick a log · f follow · c clear · tab sidebar · ? help · q quit",
                 (Page::Php, _) => {
                     " enter actions (default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
                 }
@@ -287,6 +326,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
         Mode::Normal => {}
         Mode::Menu { row, items, index } => {
             let name = match app.page {
+                Page::Server => app.servers.get(*row).map(|v| s(&v["server"]).to_string()).unwrap_or_default(),
                 Page::Php => format!("PHP {}", devid_daemon::php::SUPPORTED[(*row).min(2)]),
                 _ => app.sites.get(*row).map(|s| s["name"].as_str().unwrap_or("?").to_string()).unwrap_or_default(),
             };
@@ -346,7 +386,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
 fn draw_help(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let w = area.width.min(58);
-    let h = area.height.min(17);
+    let h = area.height.min(19);
     let popup = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     let lines = vec![
         Line::raw("↑ ↓  or  j k     move"),
@@ -359,6 +399,8 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("Sites: enter = actions (open, Terminal, copy, PHP, unlink)"),
         Line::raw("       a link · p park · U unpark"),
         Line::raw("PHP:   enter = actions · u check updates · U update"),
+        Line::raw("Server: enter = actions · S stop all · A start all"),
+        Line::raw("Logs:  f follow · c clear"),
         Line::raw("Every action is also a command: `devid --help`."),
         Line::raw(if app.no_color { "NO_COLOR is set: monochrome." } else { "Set NO_COLOR=1 for a monochrome UI." }),
         Line::styled("press any key to close", Style::default().add_modifier(Modifier::DIM)),

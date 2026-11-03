@@ -54,6 +54,8 @@ pub enum Effect {
     Update {
         check: bool,
     },
+    /// Show a file read-only in $PAGER (the TUI steps aside).
+    View(String),
 }
 
 #[derive(Debug)]
@@ -120,6 +122,13 @@ pub struct App {
     pub status: Result<Value, String>,
     pub sites: Vec<Value>,
     pub parked: Vec<String>,
+    /// `server_list` entries (nginx, caddy, apache).
+    pub servers: Vec<Value>,
+    /// Log files (name, size) and the selected log's text.
+    pub logs: Vec<Value>,
+    pub log_text: String,
+    /// Logs page: refresh every second.
+    pub follow: bool,
 }
 
 fn s(v: &Value) -> String {
@@ -139,6 +148,10 @@ impl App {
             status: Err("connecting…".into()),
             sites: Vec::new(),
             parked: Vec::new(),
+            servers: Vec::new(),
+            logs: Vec::new(),
+            log_text: String::new(),
+            follow: false,
         }
     }
 
@@ -147,8 +160,9 @@ impl App {
         match self.page {
             Page::Sites => self.sites.len(),
             Page::Php => devid_daemon::php::SUPPORTED.len(),
-            Page::Server => 3,
-            Page::Logs | Page::Settings => 0,
+            Page::Server => self.servers.len(),
+            Page::Logs => self.logs.len(),
+            Page::Settings => 0,
         }
     }
 
@@ -204,6 +218,49 @@ impl App {
             }
             ('e', Some(p)) => Action::Do(Effect::EditThenRestart { path: s(&p["ini"]), service }),
             ('r', Some(_)) => daemon(Request::Restart { service: service.clone() }, format!("restarted {service}")),
+            _ => Action::None,
+        }
+    }
+
+    /// The selected log's name, when on the Logs page.
+    pub fn selected_log(&self) -> Option<String> {
+        (self.page == Page::Logs).then(|| self.logs.get(self.row)).flatten().map(|l| s(&l["name"]))
+    }
+
+    /// Actions for a web server row.
+    pub fn server_menu(server: &Value) -> Vec<(char, String)> {
+        let name = s(&server["server"]);
+        if server["installed"] != true {
+            let from = if name == "apache" { "macOS system httpd" } else { "download from the release" };
+            return vec![('i', format!("Install {name} ({from})"))];
+        }
+        if server["active"] != true {
+            return vec![('u', format!("Use {name} (switches the web server)"))];
+        }
+        let stopped = server["paused"] == true;
+        vec![
+            ('r', format!("Restart {name}")),
+            ('s', if stopped { format!("Start {name}") } else { format!("Stop {name}") }),
+            ('v', "View the generated config".to_string()),
+        ]
+    }
+
+    fn server_action(&mut self, row: usize, choice: char) -> Action {
+        let Some(server) = self.servers.get(row).cloned() else { return Action::None };
+        let name = s(&server["server"]);
+        let daemon = |request, done: String| Action::Do(Effect::Daemon { request, done });
+        match choice {
+            'i' => daemon(Request::ServerInstall { server: name.clone(), from: None }, format!("{name} installed")),
+            'u' => daemon(Request::ServerUse { server: name.clone() }, format!("now serving with {name}")),
+            'r' => daemon(Request::Restart { service: name.clone() }, format!("restarted {name}")),
+            's' if server["paused"] == true => {
+                daemon(Request::ServiceStart { service: name.clone() }, format!("started {name}"))
+            }
+            's' => daemon(
+                Request::ServiceStop { service: name.clone() },
+                format!("stopped {name} (sites are down until you start it)"),
+            ),
+            'v' => Action::Do(Effect::View(s(&server["config"]))),
             _ => Action::None,
         }
     }
@@ -291,6 +348,36 @@ impl App {
                 self.mode = Mode::Menu { row: self.row, items, index: 0 };
             }
             KeyCode::Char('u') if self.page == Page::Php => return Action::Do(Effect::Update { check: true }),
+            KeyCode::Enter if self.page == Page::Server && self.focus == Focus::Page => {
+                if let Some(server) = self.servers.get(self.row) {
+                    let items = Self::server_menu(server);
+                    self.mode = Mode::Menu { row: self.row, items, index: 0 };
+                }
+            }
+            KeyCode::Char('S') if self.page == Page::Server => {
+                self.mode = Mode::Confirm {
+                    question: "Stop the web server and every php-fpm? Sites are down until you start them.".into(),
+                    request: Box::new(Request::StopAll),
+                    done: "stopped all services".into(),
+                };
+            }
+            KeyCode::Char('A') if self.page == Page::Server => {
+                return Action::Do(Effect::Daemon { request: Request::StartAll, done: "started all services".into() });
+            }
+            KeyCode::Char('f') if self.page == Page::Logs => {
+                self.follow = !self.follow;
+                self.message =
+                    Some((format!("follow {}", if self.follow { "on (every second)" } else { "off" }), false));
+            }
+            KeyCode::Char('c') if self.page == Page::Logs => {
+                if let Some(name) = self.selected_log() {
+                    self.mode = Mode::Confirm {
+                        question: format!("Clear {name}? Its contents are deleted."),
+                        request: Box::new(Request::LogClear { name: name.clone() }),
+                        done: format!("cleared {name}"),
+                    };
+                }
+            }
             KeyCode::Char('U') if self.page == Page::Php => {
                 self.mode = Mode::Confirm {
                     question: "Download and install newer PHP/nginx/Caddy from Devid's release?".into(),
@@ -337,6 +424,9 @@ impl App {
         };
         if self.page == Page::Php {
             return self.php_action(row, choice);
+        }
+        if self.page == Page::Server {
+            return self.server_action(row, choice);
         }
         let Some(site) = self.sites.get(row).cloned() else { return Action::None };
         let (name, url, path) = (s(&site["name"]), s(&site["url"]), s(&site["path"]));
@@ -654,6 +744,54 @@ mod tests {
         app.handle_key(ch('U'));
         assert!(matches!(app.mode, Mode::Confirm { .. }));
         assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "update", "check": false}));
+    }
+
+    #[test]
+    fn server_and_logs_pages() {
+        let mut app = App::new(false);
+        app.servers = vec![
+            json!({"server": "nginx", "installed": true, "active": true, "paused": false, "config": "/h/nginx/conf/nginx.conf"}),
+            json!({"server": "caddy", "installed": false, "active": false, "paused": false}),
+            json!({"server": "apache", "installed": true, "active": false, "paused": false}),
+        ];
+        app.page = Page::Server;
+        app.focus = Focus::Page;
+        let keys = |v: &Value| App::server_menu(v).iter().map(|(k, _)| *k).collect::<String>();
+        assert_eq!(keys(&app.servers[0]), "rsv", "active: restart, stop, view");
+        assert_eq!(keys(&app.servers[1]), "i");
+        assert_eq!(keys(&app.servers[2]), "u");
+
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(daemon_json(app.handle_key(ch('s'))), json!({"cmd": "service_stop", "service": "nginx"}));
+        app.servers[0]["paused"] = json!(true);
+        assert!(App::server_menu(&app.servers[0]).iter().any(|(_, l)| l == "Start nginx"));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(daemon_json(app.handle_key(ch('s'))), json!({"cmd": "service_start", "service": "nginx"}));
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(app.handle_key(ch('v')), Action::Do(Effect::View(p)) if p == "/h/nginx/conf/nginx.conf"));
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            daemon_json(app.handle_key(ch('i'))),
+            json!({"cmd": "server_install", "server": "caddy", "from": null})
+        );
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(daemon_json(app.handle_key(ch('u'))), json!({"cmd": "server_use", "server": "apache"}));
+        app.handle_key(ch('S'));
+        assert!(matches!(app.mode, Mode::Confirm { .. }), "stop all asks first");
+        assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "stop_all"}));
+        assert_eq!(daemon_json(app.handle_key(ch('A'))), json!({"cmd": "start_all"}));
+
+        app.page = Page::Logs;
+        app.row = 0;
+        app.logs = vec![json!({"name": "daemon.log", "size": 10}), json!({"name": "php85-fpm.log", "size": 99})];
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.selected_log().as_deref(), Some("php85-fpm.log"));
+        app.handle_key(ch('f'));
+        assert!(app.follow);
+        app.handle_key(ch('c'));
+        assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "log_clear", "name": "php85-fpm.log"}));
     }
 
     #[test]

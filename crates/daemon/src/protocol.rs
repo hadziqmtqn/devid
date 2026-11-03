@@ -28,6 +28,25 @@ pub enum Request {
     Restart {
         service: String,
     },
+    /// Stop a service and keep it stopped until `ServiceStart` (or a daemon restart).
+    ServiceStop {
+        service: String,
+    },
+    ServiceStart {
+        service: String,
+    },
+    StopAll,
+    StartAll,
+    /// Log files in ~/.devid/log.
+    Logs,
+    /// A log's tail (offset None) or what is new since `offset`; replies with the new offset.
+    LogRead {
+        name: String,
+        offset: Option<u64>,
+    },
+    LogClear {
+        name: String,
+    },
     /// Install a web server binary (`from` optional for apache: the system httpd).
     ServerInstall {
         server: String,

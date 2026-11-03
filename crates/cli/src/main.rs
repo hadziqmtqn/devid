@@ -64,6 +64,23 @@ enum Command {
     },
     /// Restart a service: php-8.4, nginx, caddy or apache
     Restart { service: String },
+    /// Stop a service (or `all`) until `devid start`; a daemon restart brings everything back
+    Stop { service: String },
+    /// Start a service stopped with `devid stop` (or `all`)
+    Start { service: String },
+    /// List logs, or show one: `devid logs php85-fpm.log -n 50 --follow`
+    Logs {
+        name: Option<String>,
+        /// Lines to show from the end
+        #[arg(short = 'n', long, default_value_t = 40)]
+        lines: usize,
+        /// Keep printing new lines (ctrl-c to stop)
+        #[arg(short, long)]
+        follow: bool,
+        /// Empty the log
+        #[arg(long)]
+        clear: bool,
+    },
     /// Update devid itself to the newest release
     SelfUpdate {
         /// Only show whether a newer devid exists
@@ -245,6 +262,45 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Php { action: PhpAction::Ext { version, ext, state } } => {
             send(Request::PhpExt { version: version.clone(), ext: ext.clone(), enabled: state == "on" })
                 .map(|_| println!("{ext} {state} for PHP {version} (php-fpm restarted)"))
+        }
+        Command::Stop { service } if service == "all" => {
+            send(Request::StopAll).map(|_| println!("stopped all services"))
+        }
+        Command::Stop { service } => {
+            send(Request::ServiceStop { service: service.clone() }).map(|_| println!("stopped {service}"))
+        }
+        Command::Start { service } if service == "all" => {
+            send(Request::StartAll).map(|_| println!("started all services"))
+        }
+        Command::Start { service } => {
+            send(Request::ServiceStart { service: service.clone() }).map(|_| println!("started {service}"))
+        }
+        Command::Logs { name: None, .. } => send(Request::Logs).map(|v| {
+            for l in v["logs"].as_array().map(Vec::as_slice).unwrap_or_default() {
+                println!("{:<24} {:>10} bytes", l["name"].as_str().unwrap_or("?"), l["size"]);
+            }
+        }),
+        Command::Logs { name: Some(name), clear: true, .. } => {
+            send(Request::LogClear { name: name.clone() }).map(|_| println!("cleared {name}"))
+        }
+        Command::Logs { name: Some(name), lines, follow, .. } => {
+            let first = send(Request::LogRead { name: name.clone(), offset: None })?;
+            let text = first["text"].as_str().unwrap_or_default();
+            let all: Vec<&str> = text.lines().collect();
+            for line in &all[all.len().saturating_sub(lines)..] {
+                println!("{line}");
+            }
+            if !follow {
+                return Ok(());
+            }
+            let mut offset = first["offset"].as_u64();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                let next = send(Request::LogRead { name: name.clone(), offset })?;
+                print!("{}", next["text"].as_str().unwrap_or_default());
+                std::io::Write::flush(&mut std::io::stdout()).map_err(|e| e.to_string())?;
+                offset = next["offset"].as_u64();
+            }
         }
         Command::Restart { service } => {
             send(Request::Restart { service: service.clone() }).map(|_| println!("restarted {service}"))

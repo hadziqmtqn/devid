@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-03 (Phase 4 T3: PHP page, extensions, restart)
+> Verified against: 2026-11-03 (Phase 4 T4: Server and Logs)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -145,3 +145,16 @@ Implemented in T3:
 - **`restart`** restarts one supervised service (`php-8.4`, `nginx`, …).
 - CLI: `devid php ext <ver> <xdebug|pcov> <on|off>`, `devid restart <service>`.
 - TUI PHP page: every supported version (D-009), with install for missing ones, make default, Xdebug/pcov toggles, edit `php.ini` (the TUI steps aside for `$VISUAL`/`$EDITOR`, then restarts php-fpm), restart, `u` check for updates and `U` update (confirmed). Slow actions show "⏳ working…" first.
+
+Implemented in T4:
+- **Stop/start:** the daemon keeps a `paused` set, and `apply` leaves those services out of the wanted set, so a stopped service stays stopped across site or config changes. `stop`/`start` accept only services Devid would run (php-fpm for the default and site versions, the active server). `stop all` pauses all of them. The set is not persisted: a daemon restart (login) brings everything back. `status` lists `paused`.
+- **Logs (`daemon::logs`):**
+  - lists `~/.devid/log/*.log`;
+  - reads the tail (last 64 KB, first partial line dropped) or what is new since an offset (a shrunk file is read from the start);
+  - clears a log by truncating it in place, so writers keep their file;
+  - accepts only plain `*.log` names, never paths.
+- **`server_list`** adds each server's version, config path and `paused`.
+- **CLI:** `devid stop|start <service|all>`, and `devid logs [name] [-n N] [--follow] [--clear]` (follow polls the daemon by offset every second).
+- **TUI:**
+  - Server page: servers with status/version/active; actions install, use (switch), restart, stop/start, and view config in `$PAGER`; `S` stop all (confirmed), `A` start all.
+  - Logs page: log list plus the selected log's tail; `f` follow (1 s refresh), `c` clear (confirmed).
