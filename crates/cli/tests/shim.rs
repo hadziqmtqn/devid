@@ -88,10 +88,26 @@ fn setup_and_uninstall_dry_runs_change_nothing() {
         String::from_utf8_lossy(&o.stdout).into_owned()
     };
     let plan = run(&["setup", "--dry-run"]);
-    for expected in ["shims", "PATH", "LaunchAgent", "composer.phar", "/etc/resolver/test", "dry run: nothing changed"]
-    {
+    for expected in [
+        "shims",
+        "PATH",
+        "LaunchAgent",
+        "composer.phar",
+        "/etc/resolver/test",
+        "dry run: nothing changed",
+        "install PHP 8.5",
+        "install nginx",
+    ] {
         assert!(plan.contains(expected), "setup dry run mentions {expected}:\n{plan}");
     }
+    let plan = run(&["setup", "--dry-run", "--php", "8.3", "--php", "8.4", "--server", "caddy"]);
+    for expected in
+        ["install PHP 8.3", "install PHP 8.4", "make PHP 8.3 the default", "install caddy", "serve sites with caddy"]
+    {
+        assert!(plan.contains(expected), "setup dry run with choices mentions {expected}:\n{plan}");
+    }
+    let plan = run(&["setup", "--dry-run", "--no-php", "--no-server"]);
+    assert!(!plan.contains("PHP") && !plan.contains("nginx"), "--no-php --no-server installs neither:\n{plan}");
     let plan = run(&["uninstall", "--dry-run", "--purge"]);
     for expected in ["remove-trusted-cert", "LaunchAgent", "PATH line", "delete"] {
         assert!(plan.contains(expected), "uninstall dry run mentions {expected}:\n{plan}");

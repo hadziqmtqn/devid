@@ -394,7 +394,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         Request::PhpUse { version } => {
             php::check_supported(&version).map_err(|e| e.to_string())?;
             if !php::installed(&state.paths).contains(&version) {
-                return Err(format!("PHP {version} is not installed; run `devid php install {version} --from <dir>`"));
+                return Err(format!("PHP {version} is not installed; run `devid php install {version}`"));
             }
             state.mutate(|c, _| {
                 c.default_php = version.clone();
@@ -538,7 +538,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         Request::Isolate { version, site, cwd } => {
             php::check_supported(&version).map_err(|e| e.to_string())?;
             if !php::installed(&state.paths).contains(&version) {
-                return Err(format!("PHP {version} is not installed; run `devid php install {version} --from <dir>`"));
+                return Err(format!("PHP {version} is not installed; run `devid php install {version}`"));
             }
             state.mutate(|c, sites| {
                 let name = pick_site(sites, site, &cwd)?;

@@ -121,7 +121,7 @@ See ARCHITECTURE, "PHP runtime".
 - **Context:** Devid is a single Rust binary. A Node-based installer would depend on the owner's nvm-managed Node, and a tool that manages the environment should not depend on it.
 - **Decision:**
   - `install.sh` (repo root, POSIX `sh`, no sudo) detects OS and CPU and downloads the release asset `devid-<os>-<arch>` with `checksums.txt`. It uses `gh` while the repo is private and plain `curl` once it is public. It verifies SHA-256, installs to `~/.devid/bin/devid`, and runs `devid setup`.
-  - `devid setup` is idempotent. It downloads Caddy and PHP (sha256-checked), installs the daemon as a user LaunchAgent, then lists the system changes and asks for sudo once for the helper (`/etc/resolver/test`, CA trust, ports 80/443).
+  - `devid setup` is idempotent. It downloads Caddy and PHP (sha256-checked), installs the daemon as a user LaunchAgent, then lists the system changes and asks for sudo once for the helper (`/etc/resolver/test`, CA trust, ports 80/443). *(Updated 2026-11-03, v0.2.3: as built, setup installs the binary, PATH, LaunchAgent, composer and the helper first, then downloads PHP 8.5 and nginx (nginx replaced Caddy as the default in D-015). `--php <ver>` (repeatable), `--server <name>`, `--no-php` and `--no-server` change that choice; anything already installed is skipped.)*
   - `devid doctor` reports each component with a fix hint.
   - `devid uninstall` reverses every change made by `setup`.
 - **Release contract:** every release publishes `devid-darwin-x86_64` (and `devid-darwin-arm64` once D-010 allows it) plus a `checksums.txt` in `shasum -a 256` format.

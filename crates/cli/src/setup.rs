@@ -2,7 +2,7 @@
 //! go through `devid helper` (sudo, one password prompt).
 
 use crate::{HelperAction, helper, helper_plan, request};
-use devid_daemon::{ca, helper as h, install, paths::Paths, protocol::Request};
+use devid_daemon::{ca, config::Config, helper as h, install, paths::Paths, php, protocol::Request, webserver};
 use std::{
     net::ToSocketAddrs,
     path::Path,
@@ -31,7 +31,30 @@ fn wait_until(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
     false
 }
 
-pub fn setup(paths: &Paths, dry_run: bool) -> Result<(), String> {
+/// What `devid setup` installs besides the system parts (`--php`, `--server`, `--no-php`, `--no-server`).
+pub struct Pick {
+    pub php: Vec<String>,
+    pub server: Option<String>,
+    pub no_php: bool,
+    pub no_server: bool,
+}
+
+/// PHP versions to install and the version to make the default. Without `--php`, the configured
+/// default is installed only when no PHP is installed at all, so a re-run changes nothing.
+fn php_plan(requested: &[String], default: &str, installed: &[String]) -> (Vec<String>, Option<String>) {
+    if requested.is_empty() {
+        return (if installed.is_empty() { vec![default.to_string()] } else { vec![] }, None);
+    }
+    let mut todo: Vec<String> = Vec::new();
+    for v in requested {
+        if !installed.contains(v) && !todo.contains(v) {
+            todo.push(v.clone());
+        }
+    }
+    (todo, Some(requested[0].clone()).filter(|v| v != default))
+}
+
+pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
     println!("devid setup{}:", if dry_run { " (dry run, nothing changes)" } else { "" });
     let bin = install::installed_bin(paths);
     step(dry_run, &format!("install {} and php/composer shims", bin.display()), || {
@@ -68,10 +91,44 @@ pub fn setup(paths: &Paths, dry_run: bool) -> Result<(), String> {
         println!("  {} system setup (.test DNS, ports 80/443, CA trust) via sudo:", if dry_run { "-" } else { ".." });
         helper(HelperAction::Install { dry_run }, paths)?;
     }
+
+    // After the sudo step, so the password prompt comes before the downloads.
+    let config = Config::load_or_create(&paths.config()).map_err(|e| e.to_string())?;
+    if !pick.no_php {
+        let installed = php::installed(paths);
+        let (todo, default) = php_plan(&pick.php, &config.default_php, &installed);
+        if todo.is_empty() && default.is_none() {
+            println!("  ok  PHP {} already installed", installed.join(", "));
+        }
+        for version in todo {
+            step(dry_run, &format!("download and install PHP {version} (sha256-checked)"), || {
+                request(paths, &Request::PhpInstall { version: version.clone(), from: None })
+                    .map(|v| v["version"].as_str().unwrap_or_default().to_string())
+            })?;
+        }
+        if let Some(version) = default {
+            step(dry_run, &format!("make PHP {version} the default"), || {
+                request(paths, &Request::PhpUse { version: version.clone() }).map(|_| String::new())
+            })?;
+        }
+    }
+    if !pick.no_server {
+        let server = pick.server.unwrap_or(config.server.clone());
+        if webserver::installed(paths, &server) {
+            println!("  ok  {server} already installed");
+        } else {
+            step(dry_run, &format!("install {server}"), || {
+                request(paths, &Request::ServerInstall { server: server.clone(), from: None }).map(|_| String::new())
+            })?;
+        }
+        if server != config.server {
+            step(dry_run, &format!("serve sites with {server}"), || {
+                request(paths, &Request::ServerUse { server: server.clone() }).map(|_| String::new())
+            })?;
+        }
+    }
     if !dry_run {
-        println!(
-            "\ndone. Next: `devid php install <ver> --from <dir>` if needed, `devid park ~/Projects`, `devid doctor`."
-        );
+        println!("\ndone. Next: `devid park ~/Projects` (or `devid link` in one project), then `devid doctor`.");
     }
     Ok(())
 }
@@ -139,19 +196,16 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
                 &format!("DNS {}", s["dns"].as_str().unwrap_or("?")),
                 "another program holds the DNS port; change dns_port in ~/.devid/config.toml",
             );
+            let server = s["server"].as_str().unwrap_or("nginx");
             check(
                 s["server_status"] == "running",
-                &format!("nginx {}", s["server_status"].as_str().unwrap_or("?")),
-                "`devid server install nginx --from <file>`; logs in ~/.devid/log/",
+                &format!("{server} {}", s["server_status"].as_str().unwrap_or("?")),
+                &format!("`devid server install {server}`; logs in ~/.devid/log/"),
             );
             let default = s["default_php"].as_str().unwrap_or("?");
             let running =
                 s["php"].as_array().is_some_and(|l| l.iter().any(|p| p["default"] == true && p["status"] == "running"));
-            check(
-                running,
-                &format!("default PHP {default} runs"),
-                &format!("`devid php install {default} --from <dir>`"),
-            );
+            check(running, &format!("default PHP {default} runs"), &format!("`devid php install {default}`"));
         }
         Err(e) => check(false, "daemon answers", &format!("{e}; or `devid setup`")),
     }
@@ -255,4 +309,23 @@ pub fn self_update(paths: &Paths, check: bool) -> Result<(), String> {
     let status = std::process::Command::new(&bin).arg("setup").status().map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&bin);
     if status.success() { Ok(()) } else { Err(format!("devid {latest} setup failed ({status})")) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::php_plan;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn php_plan_installs_only_what_is_missing() {
+        // No --php: the configured default on a fresh machine, nothing on a re-run.
+        assert_eq!(php_plan(&[], "8.5", &[]), (s(&["8.5"]), None));
+        assert_eq!(php_plan(&[], "8.5", &s(&["8.4"])), (vec![], None));
+        // --php: missing ones (no duplicates); the first becomes the default unless it already is.
+        assert_eq!(php_plan(&s(&["8.3", "8.4", "8.3"]), "8.5", &s(&["8.4"])), (s(&["8.3"]), Some("8.3".into())));
+        assert_eq!(php_plan(&s(&["8.5"]), "8.5", &s(&["8.5"])), (vec![], None));
+    }
 }

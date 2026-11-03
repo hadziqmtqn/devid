@@ -5,6 +5,7 @@
 #   curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
 #   DEVID_VERSION=0.1.0 sh install.sh   specific release
 #   DEVID_NO_SETUP=1 sh install.sh      install the binary only
+#   ... | sh -s -- --php 8.3 --server caddy   pass options to `devid setup`
 set -eu
 
 # Binaries live in the public devid-binaries repo (D-016); the source stays private.
@@ -53,5 +54,5 @@ say "installed $BIN_DIR/devid ($("$BIN_DIR/devid" --version))"
 if [ -n "${DEVID_NO_SETUP:-}" ]; then
   say "skipping setup; run '$BIN_DIR/devid setup' when ready"
 else
-  exec "$BIN_DIR/devid" setup
+  exec "$BIN_DIR/devid" setup "$@"
 fi

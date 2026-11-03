@@ -30,7 +30,7 @@ pub fn resolve(paths: &Paths, cwd: &Path) -> Result<(String, PathBuf), String> {
     let version = sites::find_by_dir(&sites, cwd).map_or(config.default_php.clone(), |s| s.php.clone());
     let bin = php::dir(paths, &version).join("bin/php");
     if !bin.is_file() {
-        return Err(format!("PHP {version} is not installed; run `devid php install {version} --from <dir>`"));
+        return Err(format!("PHP {version} is not installed; run `devid php install {version}`"));
     }
     Ok((version, bin))
 }
