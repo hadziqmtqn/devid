@@ -308,8 +308,15 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Update { check } => send(Request::Update { check }).map(|v| {
             let changes = v["changes"].as_array().map(Vec::as_slice).unwrap_or_default();
             let release = v["release"].as_str().unwrap_or("?");
-            if changes.is_empty() {
+            let unknown = v["unknown"].as_array().map(Vec::as_slice).unwrap_or_default();
+            if changes.is_empty() && unknown.is_empty() {
                 println!("everything is up to date (release {release})");
+            }
+            for u in unknown {
+                println!(
+                    "skipped: {} (could not read the installed version; try again, or reinstall it)",
+                    u.as_str().unwrap_or("?")
+                );
             }
             for c in changes {
                 let verb = if check { "available" } else { "updated" };
