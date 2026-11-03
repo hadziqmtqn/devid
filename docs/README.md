@@ -17,6 +17,7 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 - [Phase 2 plan](roadmap/phase-2.md): milestones M1–M7 and technical choices (done).
 - [Phase 5 plan](roadmap/phase-5.md): build pipeline, releases and updates (R1–R5, done).
 - [Phase 4 plan](roadmap/phase-4.md): the TUI (T1–T5, done).
+- [Phase 6 plan](roadmap/phase-6.md): user-installed PHP extensions, ionCube first (proposed).
 - [Implementation timeline](implementation-timeline/README.md): one record per merged milestone.
 
 ## External sources
