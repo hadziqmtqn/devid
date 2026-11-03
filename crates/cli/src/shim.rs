@@ -1,4 +1,4 @@
-//! `php` and `composer` shims: symlinks to `devid` in `~/.devid/bin`. The PHP version is the one of
+//! `php` and `composer` shims: hard links to `devid` in `~/.devid/bin`. The PHP version is the one of
 //! the site containing the current folder (if isolated), otherwise the default. Works without the
 //! daemon, reading config.toml directly, so it stays fast and usable when the daemon is down.
 
