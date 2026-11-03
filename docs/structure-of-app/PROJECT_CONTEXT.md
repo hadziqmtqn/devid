@@ -125,6 +125,19 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 
 ## Machine state
 
+**2026-11-03: Valet removed** (owner ran `valet stop`, then `valet uninstall --force`, `devid helper install` and `composer global remove laravel/valet`).
+
+- Gone: Valet itself, Homebrew `php` / `php@8.4` / `nginx` / `dnsmasq`, Valet's CA and certificates in the keychain, and its sudoers and loopback entries.
+- Left behind (harmless, the owner may delete them):
+  - `~/.config/valet` (old configs and site certificates; Valet's uninstall did not remove the folder);
+  - `/usr/local/etc/php-valet-bak<timestamp>` (old php.ini files);
+  - `/etc/resolver/test.devid-backup` (Valet's resolver). `devid uninstall` would restore it and point `.test` at a dnsmasq that no longer exists, so removing it (`sudo rm`) is cleaner.
+- `valet uninstall` deleted `/etc/resolver/test`; `devid helper install` put Devid's back.
+- The two `php@8.4` PATH lines in `~/.zshrc` were removed (backup `~/.zshrc.bak`). New terminals get only Devid's `php` (8.5.12) and `composer`.
+- `php artisan serve` for erdbpro-saas (the tunnel's `:8000`) runs on Devid's PHP through the shim since v0.2.1.
+- Checked after the removal: `devid doctor` all ok; `phpmyadmin.test` and `erdbpro-saas.test` 200; `:8000` 200.
+- devid 0.2.1 is installed (`devid self-update`).
+
 **2026-11-02: `.test` switched from Valet to Devid** (owner ran `devid helper install`).
 
 - Devid's daemon (home `~/.devid`) serves `~/Projects` (parked) on nginx with static PHP 8.5, the same version Valet used for every site.
@@ -142,8 +155,8 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
   - `devid` 0.1.0 itself, installed with `curl … install.sh | sh`.
 
   Updates are `devid self-update` and `devid update`. The local `spike/` builds are no longer used at runtime.
-- Rollback: `devid uninstall` (restores Valet's resolver), then `valet start`.
-- Valet (root nginx, dnsmasq, php-fpm) still runs but no longer receives traffic; the owner stops it with `valet stop` when ready.
+- Rollback (until 2026-11-03): `devid uninstall` (restores Valet's resolver), then `valet start`. Superseded: Valet has been removed.
+- Valet (root nginx, dnsmasq, php-fpm) kept running without traffic until the owner stopped and removed it on 2026-11-03.
 
 ### Before the switch (2026-11-01)
 
