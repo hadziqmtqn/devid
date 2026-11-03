@@ -178,3 +178,28 @@ See ARCHITECTURE, "PHP runtime".
   - `NO_COLOR` (no-color.org) gives a monochrome UI;
   - no truecolor;
   - important text never relies on dim colors, so contrast holds on dark and light themes.
+
+## D-018: local HTTPS and the system pieces on other operating systems (proposed 2026-11-03)
+
+- **Context:** v1 is macOS only. The owner asked how certificates and the system setup would work for a new install and on other OSes.
+- **Today (macOS, implemented):**
+  - the daemon creates the local CA on first start (name-constrained to `.test`);
+  - leaf certificates are issued per site and renewed 30 days before expiry (397-day lifetime);
+  - `devid setup` asks for the password once, and the helper trusts the CA in the System keychain;
+  - PHP and Composer use Devid's `cacert.pem` (system bundle plus the Devid CA).
+  The user does nothing by hand.
+- **Known gaps on macOS (to document for users):**
+  - Firefox has its own store; on macOS it usually reads the keychain (`security.enterprise_roots.enabled`), not yet tested;
+  - Node and Python use their own bundles and need `NODE_EXTRA_CA_CERTS` (or the Python equivalent) pointing at the Devid CA.
+- **Proposal for other OSes:** the CA and certificate code (rcgen) is portable and stays as is. The helper becomes one interface with one implementation per OS, the way mkcert does it:
+
+  | | macOS (now) | Linux | Windows |
+  |---|---|---|---|
+  | Trust the CA | System keychain (sudo) | `update-ca-certificates` (Debian) or `update-ca-trust` (Fedora), sudo; Chrome/Firefox use NSS (`~/.pki/nssdb`) via `certutil` | `certutil -addstore Root`; the user store only needs a confirmation dialog, no admin |
+  | `.test` DNS | `/etc/resolver/test` | systemd-resolved per-domain routing; distros without resolved are the hard case | NRPT, or a hosts entry per site |
+  | Ports 80/443 | pf redirect | `setcap` or `net.ipv4.ip_unprivileged_port_start` | no privilege needed |
+
+- **Assessment:**
+  - Linux is the most work: many distro variants, plus NSS.
+  - Windows is easier for HTTPS, but needs its own static PHP builds and a different process model.
+- **Status:** proposed, not scheduled. v1 stays macOS only.
