@@ -43,16 +43,26 @@ The script downloads `devid`, checks its sha256 and starts `devid setup`. The sc
    - `.test` DNS (`/etc/resolver/test`);
    - ports 80/443 redirected to Devid (a pf rule);
    - trust for the Devid certificate authority.
+6. Downloads PHP 8.5 and nginx (both sha256-checked), unless PHP or the web server is already installed.
 
-To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version, run `DEVID_VERSION=0.2.2 sh install.sh`.
+To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version of Devid, run `DEVID_VERSION=0.2.3 sh install.sh`.
+
+To choose PHP versions and the web server, pass options to setup. With the install script, put them after `sh -s --`:
+
+```sh
+curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh -s -- --php 8.3 --server caddy
+devid setup --php 8.3 --php 8.4     # several versions; the first becomes the default
+devid setup --server apache         # nginx, caddy or apache
+devid setup --no-php --no-server    # only the system parts; install PHP and a server later
+```
+
+You can add or switch PHP versions and web servers at any time later (see [PHP](#php) and [Web servers and services](#web-servers-and-services)).
 
 Open a new terminal after setup so that `php` and `composer` come from Devid.
 
 ## First steps
 
 ```sh
-devid php install 8.5          # download PHP 8.5 (the default version)
-devid server install nginx     # download nginx (the default web server)
 devid park ~/Projects          # every subfolder becomes <folder>.test
 devid doctor                   # check that everything works
 ```
@@ -215,10 +225,10 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
 - Automatic HTTPS through a local CA.
 - The CLI and the TUI (D-012).
 - Install, self-update and binary updates from public releases (D-014, D-016).
+- `devid setup` also installs PHP and a web server, chosen with `--php` and `--server` (v0.2.3).
 
 ### Next: small v1.x improvements
 
-- `devid setup` also installs the default PHP and nginx, so a new install needs no extra steps.
 - A shorter install command on its own domain (deferred, `docs/roadmap/phase-5.md`).
 
 ### v2 and later: planned, not scheduled

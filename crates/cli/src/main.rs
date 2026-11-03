@@ -41,11 +41,23 @@ enum Command {
         #[command(subcommand)]
         action: PhpAction,
     },
-    /// Install Devid for this user: binary, PATH, LaunchAgent, composer, then the system setup
+    /// Install Devid for this user: binary, PATH, LaunchAgent, composer, the system setup, then PHP and a web server
     Setup {
         /// Only print what would change
         #[arg(long)]
         dry_run: bool,
+        /// PHP version to install (repeatable; the first becomes the default). Default: 8.5 if none is installed
+        #[arg(long, value_parser = devid_daemon::php::SUPPORTED)]
+        php: Vec<String>,
+        /// Web server to install and use. Default: the active one (nginx on a new install)
+        #[arg(long, value_parser = devid_daemon::webserver::SERVERS)]
+        server: Option<String>,
+        /// Do not install PHP
+        #[arg(long, conflicts_with = "php")]
+        no_php: bool,
+        /// Do not install a web server
+        #[arg(long, conflicts_with = "server")]
+        no_server: bool,
     },
     /// Check every part of the installation and say how to fix problems
     Doctor,
@@ -351,7 +363,9 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             }
         }),
         Command::Helper { action } => helper(action, paths),
-        Command::Setup { dry_run } => setup::setup(paths, dry_run),
+        Command::Setup { dry_run, php, server, no_php, no_server } => {
+            setup::setup(paths, dry_run, setup::Pick { php, server, no_php, no_server })
+        }
         Command::Doctor => setup::doctor(paths),
         Command::Tui => match tui::run(paths)? {
             // Settings actions that need the plain terminal (sudo, daemon restart) run after the TUI closed.
@@ -447,7 +461,7 @@ fn print_sites(list: &serde_json::Value, json: bool) {
 fn print_php(list: &serde_json::Value) {
     let versions = list.as_array().map(Vec::as_slice).unwrap_or_default();
     if versions.is_empty() {
-        println!("  no PHP installed; run `devid php install <version> --from <dir>`");
+        println!("  no PHP installed; run `devid php install <version>`");
     }
     for p in versions {
         let pid = p["pid"].as_u64().map(|pid| format!(" (pid {pid})")).unwrap_or_default();
