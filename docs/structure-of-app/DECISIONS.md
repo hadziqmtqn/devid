@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-03
+> Verified against: 2026-11-04
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -26,10 +26,11 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-016 | 2026-11-02 | accepted | Binaries are built and released from a separate public repo, `devid-binaries`; the code stays private |
 | D-017 | 2026-11-02 | accepted | TUI colors: semantic, from the terminal's own 16-color palette; not the prototype's exact colors |
 | D-018 | 2026-11-03 | proposed | Local HTTPS and the system pieces on other operating systems |
-| D-019 | 2026-11-03 | accepted (direction, not scheduled) | After v1: a desktop app and support for every OS (macOS arm64, Linux, Windows) |
+| D-019 | 2026-11-03 | accepted (direction, not scheduled; desktop app technology and timing set by D-023) | After v1: a desktop app and support for every OS (macOS arm64, Linux, Windows) |
 | D-020 | 2026-11-03 | superseded by D-021 | Users add PHP extensions that are not bundled: prebuilt loaders such as ionCube first, PECL builds second |
 | D-021 | 2026-11-03 | accepted (direction; the Phase 6 spike confirms feasibility) | Extra PHP extensions come only from a Devid catalog built from trusted sources; no user-supplied `.so`, no compiling on the user's Mac |
 | D-022 | 2026-11-03 | accepted | Add mysqli, readline and soap to the bundled PHP build (CodeIgniter 4 and WordPress need mysqli) |
+| D-023 | 2026-11-04 | accepted (Phase 7, after Phase 6; the G1 spike confirms idle RAM) | The desktop app is a Tauri v2 menu-bar app with the prototype's plain HTML, no Node; another daemon client |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -219,7 +220,7 @@ See ARCHITECTURE, "PHP runtime".
     - then Linux (D-013, D-018);
     - then Windows.
 - **Supersedes:** D-013's "Windows is … not planned". Windows is a goal now, still the largest effort: it needs its own PHP builds and has no php-fpm.
-- **Not decided yet:** order and dates, the GUI technology (measure idle RAM first), and the public-release items of D-010 (license, signing/notarization, notice).
+- **Not decided yet:** order and dates, the GUI technology (measure idle RAM first), and the public-release items of D-010 (license, signing/notarization, notice). *(2026-11-04: D-023 sets the desktop app's technology, Tauri v2, and its timing, Phase 7 after Phase 6.)*
 - **Rule that keeps this possible:** all behaviour stays in the daemon behind its socket API, and OS-specific code stays in the `platform`/`helper` layer.
 - **Where it is tracked:** the README "Roadmap" section.
 
@@ -274,3 +275,40 @@ See ARCHITECTURE, "PHP runtime".
 - **Rollout:** `devid update` compares PHP version numbers, so a rebuild of the same PHP version is not offered as an update. Installed versions get the new build with `devid php install <ver>` (it re-downloads and keeps `php.ini`), or with the next PHP patch release. Offering same-version rebuilds through `devid update` needs a build marker in `manifest.json`; that is open work, also needed for catalog extensions (Phase 6).
 - **Shipped:** 2026-11-03 in the `devid-binaries` release `2026.11.03-4` (PR #6), for PHP 8.3.36, 8.4.27 and 8.5.12. Each tarball matched its `manifest.json` checksum, listed mysqli, mysqlnd, readline and soap in `php -m` and `php-fpm -m`, and linked only system libraries. The README lists them (Devid PR #37). The owner reinstalled 8.4 and 8.5 with `devid php install` on 2026-11-04; `php.ini` was kept.
 
+## D-023: the desktop app is a Tauri v2 menu-bar app with the prototype's HTML (accepted 2026-11-04, Phase 7)
+
+- **Context:** D-019 plans a desktop app after v1 but leaves the technology open. The owner weighed three options on 2026-11-04:
+  - **Swift native** (SwiftUI `MenuBarExtra`):
+    - likely the leanest;
+    - builds with the Command Line Tools alone (Swift 6.0.3 and SDK 15.2 on the owner's Mac, no Xcode);
+    - macOS only, and the daemon protocol would have to be rewritten in Swift.
+  - **A local web app served by the daemon** at `http://localhost` (pf already sends `127.0.0.1:80` to the web server):
+    - costs nothing at idle and opens in any browser;
+    - has no menu-bar icon;
+    - every page the browser loads could send requests to it, so it needs Host and Origin checks and a login token.
+  - **Tauri v2:** chosen.
+- **Decision:**
+  - **Where:** the desktop app is a Tauri v2 app in a new workspace crate, `crates/gui` (D-002's `gui` crate returns).
+  - **Frontend:** the approved prototype's plain HTML, CSS and JS (`devid-prototype/index.html` is one file with no framework or CDN), wired to real data. There is no Node, npm, bundler, React, Tailwind or shadcn, unlike D-003.
+  - **It is another daemon client (D-012 client rule):**
+    - Its Rust side talks to `~/.devid/run/devid.sock` with the same `Request` types as the CLI.
+    - The web view reaches the daemon only through a fixed set of Tauri commands, never the socket or the network directly.
+    - Devid opens no new network port.
+  - **Idle:** only the menu-bar icon stays resident. The window and its web view are created when the user opens them and destroyed when the window closes.
+  - **Look:** the prototype's look (macOS System Settings, D-007). D-017's terminal palette applies to the TUI only.
+- **Why Tauri:**
+  - the same language and types as the daemon;
+  - the prototype is reused as it is;
+  - one code base for macOS, Linux and Windows (D-019);
+  - the system web view (WKWebView on macOS) instead of a bundled Chromium (Electron stays rejected).
+- **Risk:** idle RAM, D-012's reason for deferring a GUI, is not measured yet. Phase 7 starts with a spike (G1) that measures it against limits set in advance (`docs/roadmap/phase-7.md`).
+  - If it fails, the fallback is no resident menu-bar icon: the app runs only while its window is open, like the TUI.
+  - The fallback would be recorded as a new decision.
+- **When:** Phase 7, after Phase 6 is released (E5). E6 (catalog workflow in `devid-binaries`) does not block it. Two reasons:
+  - Phase 6 adds daemon requests (extensions) that the GUI's PHP page should show from the start.
+  - Phase 6 meets a more immediate need: frameworks that need extensions Devid does not bundle.
+- **Amends:**
+  - D-012: a GUI now exists, along the "GUI later" path it describes.
+  - D-019: the desktop app's technology and timing are decided.
+  - D-003 stays superseded. Only its "Tauri v2, menu bar first, no Electron" returns.
+- **Not in Phase 7:** arm64, Linux and Windows builds (D-010, D-019), and notarization.
