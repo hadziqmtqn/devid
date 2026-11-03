@@ -56,6 +56,10 @@ pub enum Effect {
     },
     /// Show a file read-only in $PAGER (the TUI steps aside).
     View(String),
+    /// Run `devid doctor`'s checks and show them on the Settings page.
+    Doctor,
+    /// Check for a newer devid and newer PHP/nginx/Caddy.
+    CheckUpdates,
 }
 
 #[derive(Debug)]
@@ -64,6 +68,8 @@ pub enum Action {
     Quit,
     Refresh,
     Do(Effect),
+    /// Close the TUI and run `devid <args>` in the plain terminal (sudo prompts, daemon restarts).
+    Handover(Vec<String>),
 }
 
 /// What text input is for.
@@ -106,6 +112,11 @@ pub enum Mode {
         request: Box<Request>,
         done: String,
     },
+    /// Like Confirm, but yes closes the TUI and runs `devid <args>`.
+    ConfirmHandover {
+        question: String,
+        args: Vec<String>,
+    },
 }
 
 /// Everything the screen shows. `status`/`sites` come from the daemon; `Err` means it is down.
@@ -129,6 +140,8 @@ pub struct App {
     pub log_text: String,
     /// Logs page: refresh every second.
     pub follow: bool,
+    /// Last `doctor` results on the Settings page: (ok, what, fix).
+    pub checks: Vec<(bool, String, String)>,
 }
 
 fn s(v: &Value) -> String {
@@ -152,6 +165,7 @@ impl App {
             logs: Vec::new(),
             log_text: String::new(),
             follow: false,
+            checks: Vec::new(),
         }
     }
 
@@ -307,6 +321,14 @@ impl App {
             Mode::Menu { row, items, index } => self.menu_key(key, row, items, index),
             Mode::Input { purpose, text } => self.input_key(key, purpose, text),
             Mode::Pick { purpose, options, index } => self.pick_key(key, purpose, options, index),
+            Mode::ConfirmHandover { question, args } => match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => Action::Handover(args),
+                KeyCode::Char('n') | KeyCode::Esc => Action::None,
+                _ => {
+                    self.mode = Mode::ConfirmHandover { question, args };
+                    Action::None
+                }
+            },
             Mode::Confirm { question, request, done } => match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => Action::Do(Effect::Daemon { request: *request, done }),
                 KeyCode::Char('n') | KeyCode::Esc => Action::None,
@@ -363,6 +385,29 @@ impl App {
             }
             KeyCode::Char('A') if self.page == Page::Server => {
                 return Action::Do(Effect::Daemon { request: Request::StartAll, done: "started all services".into() });
+            }
+            KeyCode::Char('d') if self.page == Page::Settings => return Action::Do(Effect::Doctor),
+            KeyCode::Char('u') if self.page == Page::Settings => return Action::Do(Effect::CheckUpdates),
+            KeyCode::Char('U') if self.page == Page::Settings => {
+                self.mode = Mode::Confirm {
+                    question: "Download and install newer PHP/nginx/Caddy from Devid's release?".into(),
+                    request: Box::new(Request::Update { check: false }),
+                    done: "updated".into(),
+                };
+            }
+            KeyCode::Char('D') if self.page == Page::Settings => {
+                self.mode = Mode::ConfirmHandover {
+                    question: "Update devid itself? The TUI closes, `devid self-update` runs and restarts the daemon."
+                        .into(),
+                    args: vec!["self-update".into()],
+                };
+            }
+            KeyCode::Char('s') if self.page == Page::Settings => return Action::Handover(vec!["setup".into()]),
+            KeyCode::Char('X') if self.page == Page::Settings => {
+                self.mode = Mode::ConfirmHandover {
+                    question: "Uninstall Devid? The TUI closes; sites stop and the system setup is undone (sudo). ~/.devid data is kept.".into(),
+                    args: vec!["uninstall".into()],
+                };
             }
             KeyCode::Char('f') if self.page == Page::Logs => {
                 self.follow = !self.follow;
@@ -792,6 +837,25 @@ mod tests {
         assert!(app.follow);
         app.handle_key(ch('c'));
         assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "log_clear", "name": "php85-fpm.log"}));
+    }
+
+    #[test]
+    fn settings_page() {
+        let mut app = App::new(false);
+        app.page = Page::Settings;
+        assert!(matches!(app.handle_key(ch('d')), Action::Do(Effect::Doctor)));
+        assert!(matches!(app.handle_key(ch('u')), Action::Do(Effect::CheckUpdates)));
+        assert!(matches!(app.handle_key(ch('s')), Action::Handover(a) if a == ["setup"]));
+        app.handle_key(ch('D'));
+        assert!(matches!(&app.mode, Mode::ConfirmHandover { args, .. } if args == &["self-update"]));
+        assert!(matches!(app.handle_key(ch('y')), Action::Handover(a) if a == ["self-update"]));
+        app.handle_key(ch('X'));
+        assert!(matches!(app.handle_key(ch('z')), Action::None));
+        assert!(matches!(app.mode, Mode::ConfirmHandover { .. }), "other keys keep asking");
+        assert!(matches!(app.handle_key(ch('n')), Action::None));
+        assert_eq!(app.mode, Mode::Normal, "uninstall cancelled");
+        app.handle_key(ch('U'));
+        assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "update", "check": false}));
     }
 
     #[test]

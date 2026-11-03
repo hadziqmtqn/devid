@@ -1,8 +1,8 @@
 # Phase 4 Plan: TUI
 
 > Scope: the terminal UI that `devid` opens with no arguments (D-012), and the daemon features the approved prototype needs
-> Verified against: 2026-11-02
-> Status: T1–T3 done (#21–#23); T4 done in code (Server + Logs); T5 proposed
+> Verified against: 2026-11-03
+> Status: T1–T4 done (#21–#24); T5 done in code (Settings, v0.2.0); the `v0.2.0` tag waits for the merge
 
 Phase 4 gives Devid the interface from the approved prototype (`devid-prototype/index.html`) as a TUI. It takes the prototype's structure and flows, not its look (D-017).
 

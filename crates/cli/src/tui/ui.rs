@@ -133,7 +133,7 @@ fn draw_page(frame: &mut Frame, app: &App, area: Rect) {
         Page::Php => draw_php(frame, app, status, inner),
         Page::Server => draw_server(frame, app, status, inner),
         Page::Logs => draw_logs(frame, app, inner),
-        Page::Settings => draw_settings(frame, status, inner),
+        Page::Settings => draw_settings(frame, app, status, inner),
     }
 }
 
@@ -263,8 +263,8 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(body), inner);
 }
 
-fn draw_settings(frame: &mut Frame, status: &Value, area: Rect) {
-    let lines = vec![
+fn draw_settings(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
+    let mut lines = vec![
         Line::raw(format!("Domain:    *.{}", s(&status["tld"]))),
         Line::raw(format!(
             "Ports:     http {}, https {}, dns {}",
@@ -274,9 +274,21 @@ fn draw_settings(frame: &mut Frame, status: &Value, area: Rect) {
         Line::raw(format!("CA:        {}", tilde(s(&status["ca"])))),
         Line::raw(format!("devid:     {}", s(&status["version"]))),
         Line::raw(""),
-        Line::raw("Updates, doctor, setup and uninstall arrive in T5."),
+        Line::raw("d doctor · u check updates · U update PHP/nginx · D update devid · s setup · X uninstall"),
+        Line::raw(""),
     ];
-    frame.render_widget(Paragraph::new(lines), area);
+    if app.checks.is_empty() {
+        lines.push(Line::styled("Press d to run the health check.", Style::default().add_modifier(Modifier::DIM)));
+    }
+    for (good, what, fix) in &app.checks {
+        if *good {
+            lines.push(Line::styled(format!("ok  {what}"), ok(app)));
+        } else {
+            lines.push(Line::styled(format!("✗   {what}"), bad(app)));
+            lines.push(Line::raw(format!("    fix: {fix}")));
+        }
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
 /// The last action's result if any, otherwise the keys for this page.
@@ -292,6 +304,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 (Page::Server, _) => {
                     " enter actions (use, install, restart, stop/start, view config) · S stop all · A start all · ? help · q quit"
                 }
+                (Page::Settings, _) => {
+                    " d doctor · u check updates · U update PHP/nginx · D update devid · s setup · X uninstall · ? help · q quit"
+                }
                 (Page::Logs, _) => " ↑↓ pick a log · f follow · c clear · tab sidebar · ? help · q quit",
                 (Page::Php, _) => {
                     " enter actions (default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
@@ -299,7 +314,6 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 (Page::Sites, Focus::Sidebar) => {
                     " ↑↓ pages · enter open · a link folder · p park folder · U unpark · ? help · q quit"
                 }
-                _ => " ↑↓/jk move · tab switch panel · 1-5 pages · r refresh · ? help · q quit",
             };
             Line::styled(keys, Style::default().add_modifier(Modifier::DIM))
         }
@@ -371,7 +385,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
             lines.push(hint(" ↑↓ enter · esc cancel"));
             popup(frame, 60, options.len() as u16 + 3, &title, lines);
         }
-        Mode::Confirm { question, .. } => {
+        Mode::Confirm { question, .. } | Mode::ConfirmHandover { question, .. } => {
             popup(
                 frame,
                 60,
@@ -386,7 +400,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
 fn draw_help(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let w = area.width.min(58);
-    let h = area.height.min(19);
+    let h = area.height.min(20);
     let popup = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     let lines = vec![
         Line::raw("↑ ↓  or  j k     move"),
@@ -401,6 +415,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("PHP:   enter = actions · u check updates · U update"),
         Line::raw("Server: enter = actions · S stop all · A start all"),
         Line::raw("Logs:  f follow · c clear"),
+        Line::raw("Settings: d doctor · u/U updates · D devid · s setup · X uninstall"),
         Line::raw("Every action is also a command: `devid --help`."),
         Line::raw(if app.no_color { "NO_COLOR is set: monochrome." } else { "Set NO_COLOR=1 for a monochrome UI." }),
         Line::styled("press any key to close", Style::default().add_modifier(Modifier::DIM)),
