@@ -27,6 +27,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-017 | 2026-11-02 | accepted | TUI colors: semantic, from the terminal's own 16-color palette; not the prototype's exact colors |
 | D-018 | 2026-11-03 | proposed | Local HTTPS and the system pieces on other operating systems |
 | D-019 | 2026-11-03 | accepted (direction, not scheduled) | After v1: a desktop app and support for every OS (macOS arm64, Linux, Windows) |
+| D-020 | 2026-11-03 | proposed (Phase 6) | Users add PHP extensions that are not bundled: prebuilt loaders such as ionCube first, PECL builds second |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -220,3 +221,12 @@ See ARCHITECTURE, "PHP runtime".
 - **Rule that keeps this possible:** all behaviour stays in the daemon behind its socket API, and OS-specific code stays in the `platform`/`helper` layer.
 - **Where it is tracked:** the README "Roadmap" section.
 
+## D-020: user-installed PHP extensions (proposed 2026-11-03, Phase 6)
+
+- **Context:** D-008 ships a fixed extension set with "no pecl in v1"; only Xdebug and pcov are separate `.so` files. The owner needs extensions that are not bundled, first of all the **ionCube Loader**, which is closed source and only ships as prebuilt `.so` files per PHP version and platform.
+- **Proposal:**
+  1. **Prebuilt extensions first:** `devid php ext add <ver> <file.so>` installs a `.so` the user downloaded (ionCube, or any vendor loader). Devid checks it loads (`php -m`), writes `conf.d`, restarts that php-fpm, and rolls back if PHP fails to start.
+  2. **PECL builds second:** `devid php ext install <ver> <name>` builds from PECL with a per-version dev kit (headers, `phpize`, `php-config`) published next to each PHP build. It needs the Xcode Command Line Tools; external C libraries are the user's responsibility.
+- **Supersedes, if accepted:** D-008's "no pecl in v1" for user-added extensions. The bundled set stays fixed and is still the only thing Devid builds and updates.
+- **Not decided yet:** whether Devid downloads ionCube itself (license and redistribution terms) or the user supplies the file; whether a small catalog of prebuilt optional extensions is worth the CI cost.
+- **Accept when:** the Phase 6 spike loads ionCube into Devid's static PHP on the owner's Mac (see `docs/roadmap/phase-6.md`).
