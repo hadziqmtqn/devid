@@ -28,8 +28,22 @@ Measured on the owner's Mac, same app (`/login`), same PHP 8.5 binary:
 ## Verification
 
 - `cargo test`: all pass.
-- After the v0.2.3 update on the owner's Mac: check that `launchctl print gui/$UID/dev.devid.daemon` no longer says `spawn type = background`, and that the `/login` timings are close to the "without `ProcessType`" row.
+- `plutil -lint` passes on the generated plist.
+- **On the owner's Mac after `devid self-update` to v0.2.3** (2026-11-03, 19:07):
+  - `launchctl print gui/$UID/dev.devid.daemon` shows `spawn type = daemon (3)`, no longer `background`; the installed plist has no `ProcessType`.
+  - The daemon, nginx and php-fpm run at PRI 20 (before: 4). Port 8000 (`php artisan serve`, cloudflared) kept running.
+  - `erdbpro-saas.test`, measured at a load average of 3.9–4.2, like the measurements before the fix:
+
+    | | v0.2.2 (Background) | v0.2.3 |
+    |---|---|---|
+    | `/login`, warm | 0.52–0.97 s | 0.21–0.24 s |
+    | `/`, warm | 0.8–1.3 s | 0.32 s |
+    | first request after 12 s idle (a new php-fpm worker) | 0.95 s, up to 3.2 s | 0.36 s |
+    | spikes of 3–7 s | yes | none seen |
+
+  - The first request after the daemon restart took 2.7 s: opcache starts empty, so every file is compiled once. Later requests are fast.
+  - `php artisan serve` on the same app answers in 0.11–0.14 s. The remaining ~0.1 s gap is probably PRI 20 against 31. `ProcessType = Interactive` might close it; a test job with that type did not start, so it is not investigated further for now.
 
 ## Open
 
-- php-fpm logged two workers killed with SIGKILL after 18 and 26 s (11:54 and 17:54 on 2026-11-03). Memory was not short (71 % free), Devid sets no `request_terminate_timeout`, and the unified log has no record of the sender. Not explained yet; watch the log after this fix.
+- php-fpm logged two workers killed with SIGKILL after 18 and 26 s (11:54 and 17:54 on 2026-11-03). Memory was not short (71 % free), Devid sets no `request_terminate_timeout`, and the unified log has no record of the sender. Not explained yet. No new SIGKILL after the v0.2.3 update; keep watching the log.
