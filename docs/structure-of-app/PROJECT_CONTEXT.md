@@ -43,6 +43,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 3 | nginx and Apache adapters | done 2026-11-02 (folded into Phase 2 M7, with Caddy) |
 | 4 | TUI (ratatui) on top of the daemon API; colors per D-017; plan in `docs/roadmap/phase-4.md` | done 2026-11-03 (T1–T5, released as v0.2.0) |
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | done 2026-11-02 (R1–R5) |
+| 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | E1 spike in progress (apcu and mongodb pass, 2026-11-03) |
 
 ## Open risks (Phase 1 must prove)
 
@@ -123,7 +124,17 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - ✅ (2026-11-02) HTTPS calls from PHP succeed, including site-to-site through the Devid CA.
 - ✅ (2026-11-02) erdbpro-saas loads through the static php-fpm on Caddy, nginx and Apache.
 
+### Phase 6 E1 spike (2026-11-03)
+
+Shared extensions built separately against the static PHP build root load into Devid's released PHP 8.5.12, in the CLI and php-fpm (script `spike/ext/build.sh`):
+- **apcu 5.1.28:** builds in 6 s, 91 KB, links only `libSystem`; works.
+- **mongodb 2.5.5:** builds in 3 min 53 s, 8.7 MB, carries its own static OpenSSL; BSON and TLS verification work, also next to PHP's OpenSSL, Xdebug and apcu.
+
+Details, findings for the catalog build (OpenSSL rebuilds, CA trust, build-path rpath) and what is still untested are in `docs/roadmap/phase-6.md`, "E1 results so far".
+
 ## Machine state
+
+**2026-11-04: PHP 8.4 and 8.5 reinstalled with the D-022 build** (owner ran `devid php install 8.5` and `devid php install 8.4`, release `2026.11.03-4`). Both now include mysqli, readline and soap in the CLI and php-fpm; `php.ini` was kept; php-fpm 8.5 restarted on the new binary; `erdbpro-saas.test/login` 200 (0.1 s warm) and `:8000` unaffected.
 
 **2026-11-03: Valet removed** (owner ran `valet stop`, then `valet uninstall --force`, `devid helper install` and `composer global remove laravel/valet`).
 

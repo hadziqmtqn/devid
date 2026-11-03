@@ -29,6 +29,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-019 | 2026-11-03 | accepted (direction, not scheduled) | After v1: a desktop app and support for every OS (macOS arm64, Linux, Windows) |
 | D-020 | 2026-11-03 | superseded by D-021 | Users add PHP extensions that are not bundled: prebuilt loaders such as ionCube first, PECL builds second |
 | D-021 | 2026-11-03 | accepted (direction; the Phase 6 spike confirms feasibility) | Extra PHP extensions come only from a Devid catalog built from trusted sources; no user-supplied `.so`, no compiling on the user's Mac |
+| D-022 | 2026-11-03 | accepted | Add mysqli, readline and soap to the bundled PHP build (CodeIgniter 4 and WordPress need mysqli) |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -242,6 +243,34 @@ See ARCHITECTURE, "PHP runtime".
   - CI in `devid-binaries` builds each catalog extension from its official source (PECL, php-src, or the project's own release), pinned by checksum, for every PHP version it supports, and publishes it with the PHP builds. A vendor's closed-source loader can be listed only if its license allows Devid to mirror it or to download it from the vendor's official URL with a pinned checksum.
   - Devid verifies the SHA-256, checks that the extension loads, and rolls back if php-fpm fails to start. A PHP update brings matching extension builds in the same release.
   - There is no `ext add <file.so>` and no local compiling, so users need no Xcode Command Line Tools. An extension that is not in the catalog is requested and added to the catalog.
+- **Where users download from (clarified 2026-11-03):**
+  - **Open-source extensions:** CI downloads the source from the official provider; users download the built `.so` only from the `devid-binaries` release. Devid never contacts PECL, php-src or a project's site itself.
+  - **Closed-source vendor loaders** (ionCube, SourceGuardian and similar): the vendor builds the binary, so the vendor's license decides, per vendor, in this order:
+    1. **Mirroring allowed:** CI downloads the vendor's official package, checks that it loads into each PHP build, and republishes it in `devid-binaries` with the vendor's license text. Users download from `devid-binaries`, as for any other extension.
+    2. **Only downloads from the vendor allowed:** the manifest entry says `source: vendor` and holds the vendor's official HTTPS URL, a pinned SHA-256 of that file and the path of the right `.so` inside it per PHP version. Devid downloads **directly from the vendor**, only when the user runs `install` or `update`, never in the background. If the file no longer matches the pinned SHA-256 (the vendor replaced it), Devid refuses to install it until the catalog is updated. CI's scheduled upstream check notices a changed vendor file, tests the new one and updates the pin.
+    3. **Neither allowed:** the loader is not in the catalog; the README lists it with the reason.
+  - **For every vendor entry:** the manifest records the vendor, the license URL, which of the cases above applies and the date the license was checked. Before the first install, Devid shows the vendor and the license link and asks the user to accept (a prompt, or `--accept-license` in scripts). For case 2 it also says that the file comes from the vendor's server.
+  - **Never:** a URL from the user or from anywhere but the manifest, a plain-HTTP download, or a file without a pinned SHA-256. The manifest itself comes only from `devid-binaries`.
+- **What the catalog holds (clarified 2026-11-03):**
+  - Curated, not every extension: Packagist lists 356 PIE extensions, many experimental. An entry needs a stable, maintained release for PHP 8.3–8.5, NTS and macOS, open-source dependencies that can be built in, passing CI load and smoke tests, and a real need.
+  - **Priority:** what Laravel, CodeIgniter, Symfony and similar frameworks need, with Laravel Sail's runtime images as the reference set. First: imagick, igbinary, msgpack, memcached, mongodb, swoole, apcu, ldap. The full list is in `docs/roadmap/phase-6.md`.
+  - **Source index:** PIE and Packagist first (PECL is deprecated), PECL only for extensions not on PIE yet, php-src for php-src extensions.
+  - **Adding entries later** is a dedicated GitHub Actions task in `devid-binaries` (Phase 6, E6): a reviewed recipe goes in, CI builds and tests it for every PHP version and publishes it. Discovery can be automated; adding an entry never is.
 - **Supersedes:** D-020. D-008's "fixed extension set" still holds for the bundled set; the catalog is a second, opt-in set.
 - **User documentation:** the README lists which kinds of extensions can be added and, for those that cannot, why (closed source without a redistribution license, a proprietary system library, thread-safe PHP only, no PHP 8.3+ support, Windows only, and so on). The draft list is in `docs/roadmap/phase-6.md`.
 - **Accept when:** done; the owner accepted the direction on 2026-11-03. The E1 spike decides which extensions are feasible as shared builds against Devid's static PHP.
+
+## D-022: mysqli, readline and soap in the bundled PHP build (proposed and accepted 2026-11-03)
+
+- **Context:** while ranking catalog extensions by framework needs (D-021), three php-src extensions turned out to be missing from Devid's PHP build itself:
+  - **mysqli:** CodeIgniter 4's only MySQL driver and WordPress need it; `pdo_mysql` and mysqlnd are already built in.
+  - **readline:** `php artisan tinker` (PsySH) and `php -a` lose history and line editing without it.
+  - **soap:** used by SOAP clients (payment, government and banking APIs).
+  Laravel Sail's PHP 8.4/8.5 images install all three.
+- **Proposal:** add `mysqli`, `readline` and `soap` to the `EXT` list of the PHP build in `devid-binaries`. They need no new library (mysqlnd, libedit and libxml2 are already in the build), so the cost is a slightly larger binary.
+- **Why bundled, not catalog:** they are small, common, and part of php-src; a catalog download for them would add steps for a basic need.
+- **Amends:** D-008's fixed extension set (still fixed, three entries larger).
+- **Accepted:** by the owner on 2026-11-03. Implemented in `devid-binaries` (`scripts/build-php.sh`: `EXT`, plus the three in the required-extension check).
+- **Rollout:** `devid update` compares PHP version numbers, so a rebuild of the same PHP version is not offered as an update. Installed versions get the new build with `devid php install <ver>` (it re-downloads and keeps `php.ini`), or with the next PHP patch release. Offering same-version rebuilds through `devid update` needs a build marker in `manifest.json`; that is open work, also needed for catalog extensions (Phase 6).
+- **Shipped:** 2026-11-03 in the `devid-binaries` release `2026.11.03-4` (PR #6), for PHP 8.3.36, 8.4.27 and 8.5.12. Each tarball matched its `manifest.json` checksum, listed mysqli, mysqlnd, readline and soap in `php -m` and `php-fpm -m`, and linked only system libraries. The README lists them (Devid PR #37). The owner reinstalled 8.4 and 8.5 with `devid php install` on 2026-11-04; `php.ini` was kept.
+
