@@ -120,6 +120,18 @@ fn install_and_update_from_a_release() {
     let local = fake_build(&root, "8.5");
     assert!(devid(&home, &["php", "install", "8.5", "--from", local.to_str().unwrap()]).status.success());
 
+    // An installed PHP whose version cannot be read is skipped, never offered or reinstalled as "older".
+    publish(&rel, "r4", &php2, "8.5.13", &nginx2, "1.30.6");
+    let php_bin = home.join("php/8.5/bin/php");
+    script(&php_bin, "#!/bin/sh\nexit 1\n");
+    let check = out(&devid(&home, &["update", "--check"]));
+    assert!(check.contains("skipped: php 8.5 (could not read the installed version"), "{check}");
+    assert!(!check.contains("available: php") && !check.contains("up to date"), "{check}");
+    let o = devid(&home, &["update"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(!out(&o).contains("updated: php"), "{}", out(&o));
+    assert_eq!(fs::read_to_string(&php_bin).unwrap(), "#!/bin/sh\nexit 1\n", "not reinstalled");
+
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }

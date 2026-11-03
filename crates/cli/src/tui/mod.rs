@@ -77,12 +77,22 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
                             .collect()
                     })
                     .unwrap_or_default();
-                match (changes.is_empty(), check) {
-                    (true, _) => {
+                let unknown: Vec<&str> = v["unknown"]
+                    .as_array()
+                    .map(|l| l.iter().filter_map(serde_json::Value::as_str).collect())
+                    .unwrap_or_default();
+                let (text, failed) = match (changes.is_empty(), check) {
+                    (true, _) if unknown.is_empty() => {
                         (format!("everything is up to date (release {})", v["release"].as_str().unwrap_or("?")), false)
                     }
+                    (true, _) => ("no updates found".to_string(), true),
                     (false, true) => (format!("available: {} — press U to update", changes.join(", ")), false),
                     (false, false) => (format!("updated: {}", changes.join(", ")), false),
+                };
+                if unknown.is_empty() {
+                    (text, failed)
+                } else {
+                    (format!("{text} · version unknown, skipped: {} (try again)", unknown.join(", ")), true)
                 }
             }
             Err(e) => (e, true),

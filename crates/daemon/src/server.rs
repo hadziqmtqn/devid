@@ -409,11 +409,16 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         Request::Update { check } => {
             let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
             let mut changes = Vec::new();
+            // Installed but the version could not be read (e.g. the probe timed out): never treat that
+            // as "older", which would offer and run a needless reinstall.
+            let mut unknown = Vec::new();
             for version in php::installed(&state.paths) {
-                let current = php::full_version(&state.paths, &version).unwrap_or_default();
-                if let Some(a) = releases::artifact(&manifest, "php", Some(&version))
-                    && releases::newer(&a.version, &current)
-                {
+                let Some(a) = releases::artifact(&manifest, "php", Some(&version)) else { continue };
+                let Some(current) = php::full_version(&state.paths, &version) else {
+                    unknown.push(format!("php {version}"));
+                    continue;
+                };
+                if releases::newer(&a.version, &current) {
                     changes.push(json!({"what": format!("php {version}"), "from": current, "to": a.version}));
                     if !check {
                         install_php(state, &version, None, Some(&manifest))?;
@@ -421,17 +426,24 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 }
             }
             for server in ["nginx", "caddy"] {
-                let Some(current) = webserver::installed_version(&state.paths, server) else { continue };
-                if let Some(a) = releases::artifact(&manifest, server, None)
-                    && releases::newer(&a.version, &current)
-                {
+                if !webserver::installed(&state.paths, server) {
+                    continue;
+                }
+                let Some(a) = releases::artifact(&manifest, server, None) else { continue };
+                let Some(current) = webserver::installed_version(&state.paths, server) else {
+                    unknown.push(server.to_string());
+                    continue;
+                };
+                if releases::newer(&a.version, &current) {
                     changes.push(json!({"what": server, "from": current, "to": a.version}));
                     if !check {
                         install_server(state, server, None, Some(&manifest))?;
                     }
                 }
             }
-            Ok(json!({"ok": true, "changes": changes, "applied": !check, "release": manifest["tag"]}))
+            Ok(
+                json!({"ok": true, "changes": changes, "unknown": unknown, "applied": !check, "release": manifest["tag"]}),
+            )
         }
         Request::ServerUse { server } => {
             webserver::check(&server)?;
