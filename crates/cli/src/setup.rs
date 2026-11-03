@@ -76,16 +76,37 @@ pub fn setup(paths: &Paths, dry_run: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Read-only health check with a fix for every problem.
+/// One `doctor` result.
+pub struct Check {
+    pub ok: bool,
+    pub what: String,
+    pub fix: String,
+}
+
+/// Print the checks; fails if any problem was found.
 pub fn doctor(paths: &Paths) -> Result<(), String> {
-    let mut problems = 0;
-    let mut check = |ok: bool, what: &str, fix: &str| {
-        if ok {
-            println!("ok       {what}");
+    let checks = doctor_checks(paths)?;
+    for c in &checks {
+        if c.ok {
+            println!("ok       {}", c.what);
         } else {
-            problems += 1;
-            println!("PROBLEM  {what}\n         fix: {fix}");
+            println!("PROBLEM  {}\n         fix: {}", c.what, c.fix);
         }
+    }
+    match checks.iter().filter(|c| !c.ok).count() {
+        0 => {
+            println!("\nall good");
+            Ok(())
+        }
+        n => Err(format!("{n} problem(s) found")),
+    }
+}
+
+/// Read-only health checks with a fix for every problem (also shown in the TUI Settings page).
+pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
+    let mut checks = Vec::new();
+    let mut check = |ok: bool, what: &str, fix: &str| {
+        checks.push(Check { ok, what: what.to_string(), fix: fix.to_string() });
     };
 
     let on_path = |name: &str| {
@@ -149,13 +170,7 @@ pub fn doctor(paths: &Paths) -> Result<(), String> {
         .output()
         .is_ok_and(|o| o.status.success());
     check(!valet, "Valet is stopped", "Valet still runs (its dnsmasq); once Devid works, stop it with `valet stop`");
-
-    if problems == 0 {
-        println!("\nall good");
-        Ok(())
-    } else {
-        Err(format!("{problems} problem(s) found"))
-    }
+    Ok(checks)
 }
 
 pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String> {
@@ -188,20 +203,30 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
     Ok(())
 }
 
+/// Download one file from the `devid-latest` release into ~/.devid/downloads.
+fn fetch_latest(paths: &Paths, name: &str) -> Result<std::path::PathBuf, String> {
+    use devid_daemon::releases;
+    let dir = paths.home.join("downloads");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(format!("self-update-{name}"));
+    releases::fetch(&format!("{}/devid-latest/{name}", releases::release_base()), &dest).map_err(|e| e.to_string())?;
+    Ok(dest)
+}
+
+/// The newest released devid version.
+pub fn latest_devid(paths: &Paths) -> Result<String, String> {
+    let file = fetch_latest(paths, "devid-version.txt")?;
+    let version = std::fs::read_to_string(&file).map_err(|e| e.to_string())?.trim().to_string();
+    let _ = std::fs::remove_file(file);
+    Ok(version)
+}
+
 /// `devid self-update`: download the newest devid from the `devid-latest` release, verify it against
 /// that release's checksums.txt, then run its `setup`, which installs it and restarts the daemon.
 pub fn self_update(paths: &Paths, check: bool) -> Result<(), String> {
     use devid_daemon::releases;
-    let base = format!("{}/devid-latest", releases::release_base());
-    let dir = paths.home.join("downloads");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let get = |name: &str| -> Result<std::path::PathBuf, String> {
-        let dest = dir.join(format!("self-update-{name}"));
-        releases::fetch(&format!("{base}/{name}"), &dest).map_err(|e| e.to_string())?;
-        Ok(dest)
-    };
-
-    let latest = std::fs::read_to_string(get("devid-version.txt")?).map_err(|e| e.to_string())?.trim().to_string();
+    let get = |name: &str| fetch_latest(paths, name);
+    let latest = latest_devid(paths)?;
     let current = devid_daemon::VERSION;
     if !releases::newer(&latest, current) {
         println!("devid {current} is the newest version");

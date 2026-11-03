@@ -88,7 +88,21 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
             Err(e) => (e, true),
         },
         // Handled in the loop, which owns the terminal.
-        Effect::EditThenRestart { .. } | Effect::View(_) => ("internal: handled by the loop".into(), true),
+        Effect::EditThenRestart { .. } | Effect::View(_) | Effect::Doctor => {
+            ("internal: handled by the loop".into(), true)
+        }
+        Effect::CheckUpdates => {
+            let current = devid_daemon::VERSION;
+            let devid = match crate::setup::latest_devid(paths) {
+                Ok(latest) if devid_daemon::releases::newer(&latest, current) => {
+                    format!("devid {latest} available (D to update)")
+                }
+                Ok(_) => format!("devid {current} is the newest"),
+                Err(e) => format!("devid: {e}"),
+            };
+            let (binaries, failed) = perform(Effect::Update { check: true }, paths);
+            (format!("{devid} · {binaries}"), failed)
+        }
         Effect::Copy(text) => {
             let copied = Command::new("pbcopy").stdin(Stdio::piped()).spawn().and_then(|mut child| {
                 std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes())?;
@@ -102,12 +116,13 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
     }
 }
 
-pub fn run(paths: &Paths) -> Result<(), String> {
+/// Run the TUI. Returns `devid` arguments to run after the TUI closed (a handover), if any.
+pub fn run(paths: &Paths) -> Result<Option<Vec<String>>, String> {
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let mut app = App::new(no_color);
     // init() also installs a panic hook that restores the terminal.
     let mut terminal = ratatui::init();
-    let result = (|| -> std::io::Result<()> {
+    let result = (|| -> std::io::Result<Option<Vec<String>>> {
         let mut last: Option<Instant> = None;
         loop {
             let every = if app.follow && app.page == app::Page::Logs { Duration::from_secs(1) } else { REFRESH };
@@ -121,7 +136,21 @@ pub fn run(paths: &Paths) -> Result<(), String> {
                 && key.kind == KeyEventKind::Press
             {
                 match app.handle_key(key) {
-                    Action::Quit => return Ok(()),
+                    Action::Quit => return Ok(None),
+                    Action::Handover(args) => return Ok(Some(args)),
+                    Action::Do(Effect::Doctor) => {
+                        app.message = Some(match crate::setup::doctor_checks(paths) {
+                            Ok(checks) => {
+                                let problems = checks.iter().filter(|c| !c.ok).count();
+                                app.checks = checks.into_iter().map(|c| (c.ok, c.what, c.fix)).collect();
+                                match problems {
+                                    0 => ("doctor: all good".to_string(), false),
+                                    n => (format!("doctor: {n} problem(s), see below"), true),
+                                }
+                            }
+                            Err(e) => (e, true),
+                        });
+                    }
                     Action::Refresh => last = None,
                     Action::Do(Effect::View(path)) => {
                         ratatui::restore();
@@ -154,7 +183,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
                     }
                     Action::Do(effect) => {
                         // Downloads take seconds; say so before blocking.
-                        if matches!(effect, Effect::Daemon { .. } | Effect::Update { .. }) {
+                        if matches!(effect, Effect::Daemon { .. } | Effect::Update { .. } | Effect::CheckUpdates) {
                             app.message = Some(("⏳ working…".into(), false));
                             terminal.draw(|frame| ui::draw(frame, &app))?;
                         }
@@ -248,7 +277,15 @@ mod tests {
         let text = render(&a).0;
         assert!(text.contains("php85-fpm.log") && text.contains("ready to handle connections"), "{text}");
         a.page = Page::Settings;
-        assert!(render(&a).0.contains("*.test"));
+        let text = render(&a).0;
+        assert!(text.contains("*.test") && text.contains("Press d to run the health check"));
+        a.checks = vec![
+            (true, "daemon answers".into(), String::new()),
+            (false, "Valet is stopped".into(), "run `valet stop`".into()),
+        ];
+        let text = render(&a).0;
+        assert!(text.contains("ok  daemon answers") && text.contains("✗   Valet is stopped"), "{text}");
+        assert!(text.contains("fix: run `valet stop`"), "every problem shows its fix");
         a.show_help = true;
         assert!(render(&a).0.contains("press any key to close"));
     }

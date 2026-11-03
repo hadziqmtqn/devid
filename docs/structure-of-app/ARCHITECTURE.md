@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-03 (Phase 4 T4: Server and Logs)
+> Verified against: 2026-11-03 (Phase 4 T5: Settings)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -158,3 +158,9 @@ Implemented in T4:
 - **TUI:**
   - Server page: servers with status/version/active; actions install, use (switch), restart, stop/start, and view config in `$PAGER`; `S` stop all (confirmed), `A` start all.
   - Logs page: log list plus the selected log's tail; `f` follow (1 s refresh), `c` clear (confirmed).
+
+Implemented in T5:
+- **Settings page:** domain, ports, storage, CA and version, plus:
+  - `d` runs the same checks as `devid doctor` (`setup::doctor_checks`) and lists them with a fix for each problem;
+  - `u` checks for a newer devid (`devid-version.txt` in the `devid-latest` release) and newer PHP/nginx/Caddy (`update --check`); `U` installs the binaries (confirmed).
+- **Handover:** `D` (`self-update`, confirmed), `s` (`setup`) and `X` (`uninstall`, confirmed) need the plain terminal for sudo prompts and the daemon restart. `tui::run` returns those arguments, and `main` runs `devid <args>` after the terminal is restored.
