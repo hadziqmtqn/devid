@@ -1,10 +1,10 @@
 //! User-level installation (D-014, macOS): the binary and shims in `~/.devid/bin`, a PATH line in
 //! the shell rc file, and a LaunchAgent that keeps the daemon running. Root steps live in helper.rs.
 
-use crate::paths::Paths;
+use crate::paths::{Paths, user_home};
 use std::{
     fs, io,
-    os::unix::fs::{PermissionsExt, symlink},
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -17,10 +17,6 @@ const COMPOSER_URL: &str = "https://getcomposer.org/download/latest-stable/compo
 
 fn err(msg: impl Into<String>) -> io::Error {
     io::Error::other(msg.into())
-}
-
-fn user_home() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").expect("HOME is set"))
 }
 
 pub fn bin_dir(paths: &Paths) -> PathBuf {
@@ -96,7 +92,9 @@ pub fn install_binary(paths: &Paths) -> io::Result<()> {
     for shim in SHIMS {
         let link = bin_dir(paths).join(shim);
         let _ = fs::remove_file(&link);
-        symlink("devid", &link)?;
+        // A hard link, not a symlink: PHP resolves symlinks for PHP_BINARY, and child processes
+        // (`artisan serve`, parallel tests) must come back through the shim, not run `devid`.
+        fs::hard_link(&target, &link)?;
     }
     Ok(())
 }
@@ -225,6 +223,22 @@ pub fn ensure_composer(paths: &Paths) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shims_are_hard_links_to_the_installed_binary() {
+        use std::os::unix::fs::MetadataExt;
+        let paths = Paths { home: std::env::temp_dir().join(format!("devid-shim-test-{}", std::process::id())) };
+        for _ in 0..2 {
+            install_binary(&paths).unwrap(); // twice: re-linking an existing install works
+            let ino = fs::metadata(installed_bin(&paths)).unwrap().ino();
+            for shim in SHIMS {
+                let link = bin_dir(&paths).join(shim);
+                assert!(!fs::symlink_metadata(&link).unwrap().is_symlink(), "{shim} is not a symlink");
+                assert_eq!(fs::metadata(&link).unwrap().ino(), ino, "{shim} is the installed devid");
+            }
+        }
+        fs::remove_dir_all(&paths.home).unwrap();
+    }
 
     #[test]
     fn rc_line_is_added_once_and_removed_cleanly() {
