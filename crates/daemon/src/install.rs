@@ -127,8 +127,8 @@ pub fn agent_plist(paths: &Paths) -> String {
         <key>SuccessfulExit</key>
         <false/>
     </dict>
-    <key>ProcessType</key>
-    <string>Background</string>
+    <!-- No ProcessType: "Background" ran nginx and php-fpm at the lowest CPU priority, so pages
+         took seconds whenever the Mac was busy. -->
     <key>StandardErrorPath</key>
     <string>{log}</string>
     <key>StandardOutPath</key>
@@ -269,5 +269,6 @@ mod tests {
         assert!(plist.contains("<string>dev.devid.daemon</string>"));
         assert!(plist.contains("<key>SuccessfulExit</key>\n        <false/>"), "no restart after a clean stop");
         assert!(plist.contains("/Users/me/.devid/log/daemon.log"));
+        assert!(!plist.contains("<key>ProcessType</key>"), "sites must not run at background priority");
     }
 }
