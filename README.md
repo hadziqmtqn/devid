@@ -1,0 +1,263 @@
+# Devid
+
+Devid is a local PHP development environment for macOS. Every folder you link or park is served at `https://<name>.test` with a trusted certificate. Devid runs PHP 8.3, 8.4 and 8.5 side by side, and nginx, Caddy or Apache as the web server. It needs no Homebrew, no Docker and no virtual machine. You use it from the command line or from a terminal UI (TUI).
+
+> **Status:** v0.2, used daily on one Mac. It runs on macOS on Intel only. Apple Silicon builds come later (D-010). This repository holds the source and is private; the binaries are published in the public [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries) repository.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install)
+- [First steps](#first-steps)
+- [Sites](#sites)
+- [PHP](#php)
+- [Web servers and services](#web-servers-and-services)
+- [The TUI](#the-tui)
+- [HTTPS](#https)
+- [Updates](#updates)
+- [Troubleshooting](#troubleshooting)
+- [Uninstall](#uninstall)
+- [Files](#files)
+- [Roadmap](#roadmap)
+- [Developing Devid](#developing-devid)
+
+## Requirements
+
+- macOS 12 or newer, on an Intel Mac.
+- An administrator password, needed once during setup.
+- Nothing else running on ports 80 and 443 for `127.0.0.1`. If Laravel Valet is installed, stop it first with `valet stop` and `valet stop dnsmasq`.
+
+## Install
+
+```sh
+curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
+```
+
+The script downloads `devid`, checks its sha256 and starts `devid setup`. The script itself never uses sudo. Setup lists every step as it runs it:
+
+1. Copies `devid` to `~/.devid/bin`, and adds the `php` and `composer` commands there.
+2. Puts `~/.devid/bin` first on your `PATH` in `~/.zshrc`.
+3. Runs the Devid daemon as a LaunchAgent, so it starts at every login.
+4. Downloads `composer.phar` and checks it.
+5. Asks for your password **once** for the system setup:
+   - `.test` DNS (`/etc/resolver/test`);
+   - ports 80/443 redirected to Devid (a pf rule);
+   - trust for the Devid certificate authority.
+
+To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version, run `DEVID_VERSION=0.2.2 sh install.sh`.
+
+Open a new terminal after setup so that `php` and `composer` come from Devid.
+
+## First steps
+
+```sh
+devid php install 8.5          # download PHP 8.5 (the default version)
+devid server install nginx     # download nginx (the default web server)
+devid park ~/Projects          # every subfolder becomes <folder>.test
+devid doctor                   # check that everything works
+```
+
+Then open `https://<folder>.test` in your browser. If the folder has a `public/` subfolder (Laravel, Symfony), Devid serves that; otherwise it serves the folder itself.
+
+## Sites
+
+| Command | What it does |
+|---|---|
+| `devid park [path]` | Serves every subfolder of a folder (default: the current one) as `<subfolder>.test`. |
+| `devid unpark [path]` | Stops serving a parked folder. |
+| `devid link [name] [--path <dir>]` | Serves one folder (default: the current one) as `<name>.test` (default name: the folder name). |
+| `devid unlink <name>` | Stops serving a linked site. |
+| `devid sites` | Lists sites with their URL, folder and PHP version. |
+| `devid isolate <version> [--site <name>]` | Pins a site (default: the one containing the current folder) to a PHP version. |
+| `devid unisolate [--site <name>]` | Returns a site to the default PHP version. |
+
+Every site gets HTTPS automatically; there is no separate `secure` step.
+
+## PHP
+
+```sh
+devid php list                 # installed versions and whether php-fpm runs
+devid php install 8.4          # add another version
+devid php use 8.4              # make it the default
+devid php ext 8.5 xdebug on    # turn Xdebug (or pcov) on/off for a version
+```
+
+- **The `php` command** follows the folder you are in. Inside an isolated site it uses that site's version; anywhere else it uses the default. `composer` works the same way.
+- **Extensions:**
+  - Every version includes:
+    - bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, intl, mbstring, opcache, openssl, pcntl;
+    - PDO with MySQL, PostgreSQL and SQLite, plus pgsql and sqlite3;
+    - redis, sockets, sodium, zip, and the XML extensions.
+  - Xdebug and pcov are included but off by default. Xdebug starts in trigger mode on port 9003.
+- **php.ini:** each version has `~/.devid/php/<version>/etc/php.ini`. Devid writes it once and never overwrites it. After editing it, run `devid restart php-8.5`. The defaults are `memory_limit = 512M`, uploads up to 64 MB, errors displayed, and JIT off.
+- **Processes:** php-fpm uses `pm = ondemand`, so idle versions use almost no memory.
+
+## Web servers and services
+
+One web server runs at a time. nginx is the default.
+
+```sh
+devid server list              # nginx, caddy, apache: installed, active, version
+devid server install caddy     # nginx/caddy come from Devid's releases; apache uses macOS's /usr/sbin/httpd
+devid server use caddy         # switch; the old server stops, the new one starts
+```
+
+Services are the web server and one php-fpm per PHP version, named `nginx`, `caddy`, `apache`, `php-8.4` and so on.
+
+```sh
+devid status                   # daemon, web server, PHP versions, ports
+devid restart nginx
+devid stop php-8.4             # stays stopped until `devid start php-8.4`
+devid stop all                 # stop everything (a daemon restart, e.g. at login, brings it back)
+devid start all
+devid logs                     # list logs
+devid logs php85-fpm.log -n 50 --follow
+devid logs nginx-error.log --clear
+```
+
+## The TUI
+
+Run `devid` with no arguments, or run `devid tui`. The TUI has five pages: Sites, PHP, Server, Logs and Settings. Every action in it is also a CLI command.
+
+| Where | Keys |
+|---|---|
+| Everywhere | `↑ ↓` or `j k` move · `tab` switch sidebar/page · `1`–`5` jump to a page · `r` refresh · `?` help · `q` quit |
+| Sites | `enter` actions (open in browser, open in Terminal, copy URL, PHP version, unlink) · `a` link a folder · `p` park a folder · `U` unpark |
+| PHP | `enter` actions (make default, Xdebug, pcov, edit php.ini, restart, install) · `u` check for updates · `U` update |
+| Server | `enter` actions (use, install, restart, stop/start, view config) · `S` stop all · `A` start all |
+| Logs | `f` follow · `c` clear |
+| Settings | `d` health check · `u` check for updates · `U` update PHP/nginx · `D` update devid · `s` setup · `X` uninstall |
+
+Destructive actions ask for confirmation first. Colors come from your terminal theme, and every state also has a symbol and a word. Set `NO_COLOR=1` for a monochrome UI.
+
+## HTTPS
+
+HTTPS needs no manual steps:
+
+- **On first start:** the daemon creates a local certificate authority, "Devid Local CA". It is name-constrained to `.test`, so it cannot be used for any other domain.
+- **During setup:** `devid setup` adds the CA to the System keychain.
+- **Per site:** each site gets a certificate when it is linked or parked. Devid renews it 30 days before it expires.
+- **Browsers:** browsers that use the macOS keychain (Safari, Chrome, Brave) trust these certificates.
+- **Devid's PHP and Composer:** they use `~/.devid/ca/cacert.pem` (the macOS bundle plus the Devid CA), so HTTP calls from one `.test` site to another work.
+
+Some tools use their own certificate store:
+
+| Tool | What to do |
+|---|---|
+| Firefox | Usually reads the macOS keychain (`security.enterprise_roots.enabled`). If it warns, import `~/.devid/ca/devid-ca.crt` under Settings → Privacy & Security → Certificates. |
+| Node.js | `export NODE_EXTRA_CA_CERTS="$HOME/.devid/ca/devid-ca.crt"` |
+| Python (requests) | `export REQUESTS_CA_BUNDLE="$HOME/.devid/ca/cacert.pem"` |
+
+## Updates
+
+```sh
+devid self-update --check      # is there a newer devid?
+devid self-update              # install it (restarts the daemon)
+devid update --check           # newer PHP, nginx or Caddy?
+devid update                   # install them
+```
+
+Each download is checked against its sha256 before Devid uses it. In the TUI, the same actions are on the Settings page.
+
+## Troubleshooting
+
+Start with `devid doctor`. It checks every part of the installation and prints a fix for each problem:
+
+- `PATH`;
+- the LaunchAgent;
+- the daemon, DNS, the web server and PHP;
+- the system setup;
+- `.test` resolving;
+- the CA;
+- Valet.
+
+| Symptom | Fix |
+|---|---|
+| `php` is still Homebrew's or another one | Open a new terminal (or `exec zsh`). `~/.devid/bin` must come first on `PATH`. |
+| "daemon is not running" | Run `devid setup` again. It is safe to repeat. Logs: `~/.devid/log/daemon.log`. |
+| `.test` does not resolve, or ports 80/443 do not answer | Run `devid helper status`, then `devid helper install`. |
+| A site shows the wrong PHP version | Run `devid sites` to see each site's version, then `devid isolate <version>` inside the project. |
+| The certificate is not trusted | Run `devid helper install` to trust the CA again, then restart the browser. |
+
+## Uninstall
+
+```sh
+devid uninstall --dry-run      # show what would change
+devid uninstall                # undo setup; keeps ~/.devid (PHP, config, CA, certificates)
+devid uninstall --purge        # also delete ~/.devid
+```
+
+Uninstall undoes the system setup (with sudo), removes the LaunchAgent and the `PATH` line, and deletes `~/.devid/bin`.
+
+## Files
+
+Everything lives in `~/.devid`:
+
+| Path | Contents |
+|---|---|
+| `bin/` | `devid`, plus `php` and `composer` (hard links to `devid`) |
+| `config.toml` | Settings: `.test` domain, web server, default PHP, ports (8088/8443 behind pf, DNS 53535), parked folders, links and isolated sites. Prefer the commands to editing it. |
+| `php/<version>/` | PHP binaries, `etc/php.ini` (yours to edit), `etc/conf.d/` (Xdebug/pcov switches) |
+| `nginx/`, `caddy/`, `apache/` | Web server binaries and generated configs (rewritten by Devid) |
+| `ca/`, `certs/` | The local CA, the CA bundle and per-site certificates |
+| `log/` | Daemon, php-fpm and web server logs |
+| `run/` | The daemon socket and pid files |
+
+## Roadmap
+
+The direction after v1 is D-019. Each item lists the decision it comes from. The decisions are in [`docs/structure-of-app/DECISIONS.md`](docs/structure-of-app/DECISIONS.md). Nothing below v1 has a date yet.
+
+### v1: done (v0.2)
+
+- Sites at `*.test`: park, link, and per-site PHP versions (D-011).
+- PHP 8.3, 8.4 and 8.5 as static builds, with Xdebug and pcov switches (D-008, D-009).
+- One web server: nginx (default), Caddy or Apache (D-015).
+- Automatic HTTPS through a local CA.
+- The CLI and the TUI (D-012).
+- Install, self-update and binary updates from public releases (D-014, D-016).
+
+### Next: small v1.x improvements
+
+- `devid setup` also installs the default PHP and nginx, so a new install needs no extra steps.
+- A shorter install command on its own domain (deferred, `docs/roadmap/phase-5.md`).
+
+### v2 and later: planned, not scheduled
+
+- **Desktop app (GUI):**
+  - a menu-bar or window app based on the approved prototype;
+  - it becomes another client of the daemon's API, so the daemon needs no rework;
+  - Tauri or a small native Swift app, chosen after measuring idle RAM (D-012, D-019).
+- **More platforms:**
+  - **Apple Silicon (arm64) macOS:** the build pipeline can already produce these (D-010).
+  - **Linux:** a second platform implementation for CA trust, `.test` DNS and ports 80/443 (D-013, D-018).
+  - **Windows:** a goal, and the largest effort, since it needs its own PHP builds and has no php-fpm (D-018, D-019).
+- **Public release (D-010):**
+  - a license;
+  - signed and notarized macOS builds;
+  - a clear notice about the system changes Devid makes.
+- **Developer tools (D-011):** a mail catcher, a dump viewer, a full log viewer, and sharing a site through a tunnel.
+- **Preview mode:** run more than one web server at the same time on different ports, to compare nginx, Caddy and Apache side by side.
+- **TUI extras (Phase 4):** mouse support, themes, and changing the domain and ports from the TUI.
+
+### Out of scope
+
+- Databases. Use a separate tool such as DBngin (D-006).
+- Docker or VM-based setups.
+
+## Developing Devid
+
+The source is a Rust workspace:
+
+- `crates/daemon`: the daemon library;
+- `crates/cli`: the `devid` binary and the TUI.
+
+```sh
+cargo build
+cargo fmt
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+CI runs the same checks on every pull request. To publish a release, push a `v*` tag. The release workflow then publishes `devid` to `devid-binaries`.
+
+The plans and decisions are in [`docs/`](docs/README.md). Start with the project context, then read the architecture and the decisions.

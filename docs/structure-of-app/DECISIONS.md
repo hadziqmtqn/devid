@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-02
+> Verified against: 2026-11-03
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -20,11 +20,13 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-010 | 2026-11-02 | accepted | Personal use first; a public release needs a prominent notice |
 | D-011 | 2026-11-02 | accepted | v1 scope: sites, PHP versions, HTTPS, parked folders |
 | D-012 | 2026-11-02 | accepted | v1 is CLI + TUI; GUI deferred; all logic in the daemon |
-| D-013 | 2026-11-02 | accepted | v1 is macOS only; OS-specific code isolated in a `platform` module |
+| D-013 | 2026-11-02 | accepted (Windows "not planned" superseded by D-019) | v1 is macOS only; OS-specific code isolated in a `platform` module |
 | D-014 | 2026-11-02 | accepted | Install with `install.sh` plus `devid setup`/`doctor`/`uninstall`; no Node |
 | D-015 | 2026-11-02 | accepted | nginx is the default web server; Caddy and Apache stay selectable |
 | D-016 | 2026-11-02 | accepted | Binaries are built and released from a separate public repo, `devid-binaries`; the code stays private |
 | D-017 | 2026-11-02 | accepted | TUI colors: semantic, from the terminal's own 16-color palette; not the prototype's exact colors |
+| D-018 | 2026-11-03 | proposed | Local HTTPS and the system pieces on other operating systems |
+| D-019 | 2026-11-03 | accepted (direction, not scheduled) | After v1: a desktop app and support for every OS (macOS arm64, Linux, Windows) |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -129,7 +131,7 @@ See ARCHITECTURE, "PHP runtime".
 
 - **Context:** the CLI, TUI, Caddy and static-php-cli are cross-platform. DNS, CA trust, privileged ports, background services and php-fpm differ per OS; for example, Windows has no php-fpm.
 - **Decision:** v1 targets macOS only. All OS-specific code (resolver, CA trust, port binding, service install, shims) lives in a `platform` module and in the `helper` crate. The rest of the daemon must not call macOS APIs directly.
-- **Later:** Linux means a second `platform` implementation. Test it on GitHub Actions Ubuntu runners and a small VPS (1 vCPU / 1 GB is enough to run Devid, but not to build PHP), never in a local VM on the owner's laptop. Windows is a much larger effort and is not planned.
+- **Later:** Linux means a second `platform` implementation. Test it on GitHub Actions Ubuntu runners and a small VPS (1 vCPU / 1 GB is enough to run Devid, but not to build PHP), never in a local VM on the owner's laptop. Windows is a much larger effort and is not planned. *(Superseded by D-019: Windows is now a long-term goal.)*
 
 ## D-015: nginx as the default web server (accepted 2026-11-02)
 
@@ -203,3 +205,18 @@ See ARCHITECTURE, "PHP runtime".
   - Linux is the most work: many distro variants, plus NSS.
   - Windows is easier for HTTPS, but needs its own static PHP builds and a different process model.
 - **Status:** proposed, not scheduled. v1 stays macOS only.
+
+## D-019: direction after v1 (accepted 2026-11-03, not scheduled)
+
+- **Context:** v1 (CLI + TUI on Intel macOS) is done and in daily use (v0.2). The owner wants the longer-term plan written down, including the README roadmap.
+- **Decision:** after v1, Devid aims for:
+  - **a desktop app** as another client of the daemon API (D-012, "GUI later");
+  - **every major OS:**
+    - macOS arm64 first (D-010);
+    - then Linux (D-013, D-018);
+    - then Windows.
+- **Supersedes:** D-013's "Windows is … not planned". Windows is a goal now, still the largest effort: it needs its own PHP builds and has no php-fpm.
+- **Not decided yet:** order and dates, the GUI technology (measure idle RAM first), and the public-release items of D-010 (license, signing/notarization, notice).
+- **Rule that keeps this possible:** all behaviour stays in the daemon behind its socket API, and OS-specific code stays in the `platform`/`helper` layer.
+- **Where it is tracked:** the README "Roadmap" section.
+
