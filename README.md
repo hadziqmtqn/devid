@@ -231,10 +231,10 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
 
 - A shorter install command on its own domain (deferred, `docs/roadmap/phase-5.md`).
 
-### Next phase: PHP extensions you add yourself (Phase 6)
+### Next phase: more PHP extensions (Phase 6)
 
-- Add extensions that Devid does not bundle, starting with the **ionCube Loader**: `devid php ext add <version> <file.so>`, with a load check and an automatic rollback if PHP fails to start (D-020, `docs/roadmap/phase-6.md`).
-- Later: build extensions from PECL (`devid php ext install <version> <name>`), which needs the Xcode Command Line Tools.
+- `devid php ext install <version> <name>` adds an extension that Devid does not bundle, such as apcu, mongodb, imagick or soap. Extensions come only from Devid's catalog: built from their official sources, checksum-verified, and checked to load, with an automatic rollback if PHP fails to start. No compiler is needed (D-021, `docs/roadmap/phase-6.md`).
+- The documentation will list which kinds of extensions can be added and why some cannot (for example, closed source without a license to redistribute).
 
 ### v2 and later: planned, not scheduled
 
