@@ -2,7 +2,7 @@
 
 > Scope: the terminal UI that `devid` opens with no arguments (D-012), and the daemon features the approved prototype needs
 > Verified against: 2026-11-03
-> Status: T1–T4 done (#21–#24); T5 done in code (Settings, v0.2.0); the `v0.2.0` tag waits for the merge
+> Status: done (T1–T5, #21–#25); released as `v0.2.0`, installed on the owner's Mac with `devid self-update` (2026-11-03)
 
 Phase 4 gives Devid the interface from the approved prototype (`devid-prototype/index.html`) as a TUI. It takes the prototype's structure and flows, not its look (D-017).
 
