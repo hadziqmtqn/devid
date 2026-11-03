@@ -3,7 +3,7 @@
 use crate::{
     ca,
     config::Config,
-    dns, helper,
+    dns, helper, logs, nginx,
     paths::Paths,
     php,
     protocol::Request,
@@ -37,6 +37,9 @@ struct State {
     supervisor: Supervisor,
     started: Instant,
     stopping: AtomicBool,
+    /// Services the owner stopped on purpose; `apply` leaves them stopped. Not persisted: a
+    /// daemon restart (e.g. login) brings everything back.
+    paused: Mutex<BTreeSet<String>>,
 }
 
 fn php_service(version: &str) -> String {
@@ -44,6 +47,24 @@ fn php_service(version: &str) -> String {
 }
 
 impl State {
+    /// Every service Devid would run now: php-fpm for the default and site versions (if installed)
+    /// and the active web server (if installed). Stop/start accept only these names.
+    fn services(&self) -> BTreeSet<String> {
+        let config = self.config.lock().unwrap();
+        let installed = php::installed(&self.paths);
+        let mut out: BTreeSet<String> = sites::resolve(&config)
+            .iter()
+            .map(|s| s.php.clone())
+            .chain([config.default_php.clone()])
+            .filter(|v| installed.contains(v))
+            .map(|v| php_service(&v))
+            .collect();
+        if webserver::installed(&self.paths, &config.server) {
+            out.insert(config.server.clone());
+        }
+        out
+    }
+
     /// Bring every service in line with `config`: php-fpm for the default version and every
     /// version a site uses (if installed), and nginx with a freshly rendered config.
     /// Fails without changing anything if nginx rejects the new config.
@@ -74,6 +95,10 @@ impl State {
                 reload = Some(webserver::reload(server));
             }
             wanted.insert(server.into(), webserver::spec(&self.paths, server));
+        }
+        {
+            let paused = self.paused.lock().unwrap();
+            wanted.retain(|name, _| !paused.contains(name));
         }
         self.supervisor.reconcile(&wanted);
         // A just-started php-fpm needs a moment to create its socket; reloading nginx or replying
@@ -176,6 +201,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         config: Mutex::new(config.clone()),
         started: Instant::now(),
         stopping: AtomicBool::new(false),
+        paused: Mutex::new(BTreeSet::new()),
     });
     spawn_signal_thread(Arc::clone(&state));
     if let Err(e) = state.apply(&config) {
@@ -292,6 +318,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "ca": ca::ca_cert(&state.paths).display().to_string(),
                 "sites": sites::resolve(&config).len(),
                 "default_php": config.default_php,
+                "paused": state.paused.lock().unwrap().iter().collect::<Vec<_>>(),
                 "php": php_list(state),
             }))
         }
@@ -322,6 +349,47 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             }
             state.supervisor.restart(&service);
             Ok(json!({"ok": true, "restarted": service}))
+        }
+        Request::ServiceStop { service } | Request::ServiceStart { service }
+            if !state.services().contains(&service) =>
+        {
+            Err(format!(
+                "unknown service {service:?}; services: {}",
+                state.services().into_iter().collect::<Vec<_>>().join(", ")
+            ))
+        }
+        Request::ServiceStop { service } => {
+            state.paused.lock().unwrap().insert(service.clone());
+            let config = state.config.lock().unwrap();
+            state.apply(&config)?;
+            Ok(json!({"ok": true, "stopped": service}))
+        }
+        Request::ServiceStart { service } => {
+            state.paused.lock().unwrap().remove(&service);
+            let config = state.config.lock().unwrap();
+            state.apply(&config)?;
+            Ok(json!({"ok": true, "started": service}))
+        }
+        Request::StopAll => {
+            *state.paused.lock().unwrap() = state.services();
+            let config = state.config.lock().unwrap();
+            state.apply(&config)?;
+            Ok(json!({"ok": true}))
+        }
+        Request::StartAll => {
+            state.paused.lock().unwrap().clear();
+            let config = state.config.lock().unwrap();
+            state.apply(&config)?;
+            Ok(json!({"ok": true}))
+        }
+        Request::Logs => Ok(json!({"ok": true, "logs": logs::list(&state.paths)})),
+        Request::LogRead { name, offset } => {
+            let (text, offset) = logs::read(&state.paths, &name, offset).map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true, "text": text, "offset": offset}))
+        }
+        Request::LogClear { name } => {
+            logs::clear(&state.paths, &name).map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true}))
         }
         Request::PhpUse { version } => {
             php::check_supported(&version).map_err(|e| e.to_string())?;
@@ -381,8 +449,16 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 .iter()
                 .map(|s| {
                     let installed = webserver::installed(&state.paths, s);
+                    let config_file = match *s {
+                        "nginx" => nginx::conf(&state.paths),
+                        "caddy" => crate::caddy::conf(&state.paths),
+                        _ => crate::apache::conf(&state.paths),
+                    };
                     json!({"server": s, "installed": installed, "active": *s == config.server,
-                           "status": if *s == config.server { service_status(state, s, installed) } else if installed { "stopped" } else { "not installed" }})
+                           "status": if *s == config.server { service_status(state, s, installed) } else if installed { "stopped" } else { "not installed" },
+                           "paused": state.paused.lock().unwrap().contains(*s),
+                           "version": webserver::installed_version(&state.paths, s),
+                           "config": config_file.display().to_string()})
                 })
                 .collect();
             Ok(json!({"ok": true, "servers": list}))
