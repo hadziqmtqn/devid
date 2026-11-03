@@ -25,6 +25,6 @@ Phase 1 (spike) is done. Phase 2 (daemon + CLI) is in progress; the milestones a
 - Reply to the owner in Bahasa Indonesia. Code, comments and docs are in English.
 - Work in a git worktree per task, so every change is auditable on its own branch and PR. Use `git worktree add ../devid-worktrees/<branch> -b <branch>`, open a PR to `main` and merge from there. Do not commit directly to `main`; the only exception was the initial commit. Gitignored build caches (for example `spike/php/source`) stay in the main checkout; point to them instead of rebuilding them in a worktree.
 - Commit and push only on request. Do not add a "Generated with Claude Code" line to PR or issue text.
-- Ask before any installer or system-level change: sudo, LaunchDaemons, `/etc/resolver`, CA trust, or stopping Valet.
-- Do not break the running cloudflared tunnel (`com.cloudflare.cloudflared`) or the 9 Valet sites until migration is planned.
+- Ask before any installer or system-level change: sudo, LaunchDaemons, `/etc/resolver`, CA trust.
+- Do not break the running cloudflared tunnel (`com.cloudflare.cloudflared`). It targets `php artisan serve` on `127.0.0.1:8000` and ports 3xxx. Valet was removed on 2026-11-03, and Devid serves every `.test` site.
 - When a decision is made or reversed, append it to `docs/structure-of-app/DECISIONS.md`. Never delete an entry; mark it superseded.
