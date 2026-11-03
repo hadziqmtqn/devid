@@ -96,8 +96,9 @@ devid php ext 8.5 xdebug on    # turn Xdebug (or pcov) on/off for a version
 - **Extensions:**
   - Every version includes:
     - bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, intl, mbstring, opcache, openssl, pcntl;
-    - PDO with MySQL, PostgreSQL and SQLite, plus pgsql and sqlite3;
-    - redis, sockets, sodium, zip, and the XML extensions.
+    - PDO with MySQL, PostgreSQL and SQLite, plus mysqli, pgsql and sqlite3;
+    - readline (for `php -a` and `artisan tinker`), redis, soap, sockets, sodium, zip, and the XML extensions.
+  - PHP installed before 2026-11-03 lacks mysqli, readline and soap. `devid update` does not offer the rebuild because the version number is the same, so run `devid php install <version>` (your php.ini is kept).
   - Xdebug and pcov are included but off by default. Xdebug starts in trigger mode on port 9003.
 - **php.ini:** each version has `~/.devid/php/<version>/etc/php.ini`. Devid writes it once and never overwrites it. After editing it, run `devid restart php-8.5`. The defaults are `memory_limit = 512M`, uploads up to 64 MB, errors displayed, and JIT off.
 - **Processes:** php-fpm uses `pm = ondemand`, so idle versions use almost no memory.
