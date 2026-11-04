@@ -1,0 +1,65 @@
+--- a/MagickCore/draw.c
++++ b/MagickCore/draw.c
+@@ -3030,13 +3030,11 @@
+             (void) GetNextToken(q,&q,extent,token);
+             if (graphic_context[n]->clip_path != MagickFalse)
+               break;
+-            mvg_class=(const char *) GetValueFromSplayTree(macros,token);
+-            if (mvg_class != (const char *) NULL)
+-              {
+-                (void) DrawPatternPath(image,draw_info,mvg_class,
+-                  &graphic_context[n]->fill_pattern,exception);
+-                break;
+-              }
++            /*
++              A gradient or pattern pushed with a quoted name ("push gradient
++              \"id\"", as the SVG coder writes it) is also a named macro, so
++              look for its artifact first; the macro text is not a pattern name.
++            */
+             (void) FormatLocaleString(pattern,MagickPathExtent,"%s",token);
+             if (GetImageArtifact(image,pattern) != (const char *) NULL)
+               {
+@@ -3044,6 +3042,13 @@
+                   &graphic_context[n]->fill_pattern,exception);
+                 break;
+               }
++            mvg_class=(const char *) GetValueFromSplayTree(macros,token);
++            if (mvg_class != (const char *) NULL)
++              {
++                (void) DrawPatternPath(image,draw_info,mvg_class,
++                  &graphic_context[n]->fill_pattern,exception);
++                break;
++              }
+             status&=(MagickStatusType) QueryColorCompliance(token,AllCompliance,
+               &graphic_context[n]->fill,exception);
+             if ((graphic_context[n]->fill_alpha != (double) OpaqueAlpha) &&
+@@ -3803,17 +3808,22 @@
+             (void) GetNextToken(q,&q,extent,token);
+             if (graphic_context[n]->clip_path != MagickFalse)
+               break;
+-            mvg_class=(const char *) GetValueFromSplayTree(macros,token);
+-            if (mvg_class != (const char *) NULL)
+-              {
+-                (void) DrawPatternPath(image,draw_info,mvg_class,
+-                  &graphic_context[n]->stroke_pattern,exception);
+-                break;
+-              }
++            /*
++              A gradient or pattern pushed with a quoted name ("push gradient
++              \"id\"", as the SVG coder writes it) is also a named macro, so
++              look for its artifact first; the macro text is not a pattern name.
++            */
+             (void) FormatLocaleString(pattern,MagickPathExtent,"%s",token);
+             if (GetImageArtifact(image,pattern) != (const char *) NULL)
+               {
+                 (void) DrawPatternPath(image,draw_info,token,
++                  &graphic_context[n]->stroke_pattern,exception);
++                break;
++              }
++            mvg_class=(const char *) GetValueFromSplayTree(macros,token);
++            if (mvg_class != (const char *) NULL)
++              {
++                (void) DrawPatternPath(image,draw_info,mvg_class,
+                   &graphic_context[n]->stroke_pattern,exception);
+                 break;
+               }

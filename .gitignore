@@ -24,6 +24,7 @@ spike/webservers/*
 # extension spike build cache (downloads, sources, results)
 spike/ext/*
 !spike/ext/*.sh
+!spike/ext/*.patch
 !spike/ext/README.md
 
 # Rust build output
