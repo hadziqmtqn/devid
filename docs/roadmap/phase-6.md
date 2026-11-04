@@ -157,7 +157,7 @@ Two separate problems in ImageMagick's internal SVG renderer (MSVG), found with 
 1. **Every `fill="url(#id)"` and `stroke="url(#id)"` drew black: fixed with a patch.**
    - Cause: before drawing, ImageMagick scans the MVG for named blocks. Any `push <kind> "name"` with a quoted name becomes a "macro", and the SVG coder writes every gradient and pattern that way (`push gradient "id" linear …`). `fill` and `stroke` look the macro up first and pass the macro's text, not its name, to `DrawPatternPath`, which finds no pattern by that name. The fill stays black.
    - The same MVG with an unquoted name draws the gradient, and so does a plain `push pattern`, which confirms the cause.
-   - The code is the same from 7.1.1-30 to `main` (checked 2026-11-04). No matching upstream issue was found.
+   - The code is the same from 7.1.1-30 to `main` (checked 2026-11-04). Reported upstream as ImageMagick/ImageMagick#9093 (2026-11-04), with the reproduction and the patch.
    - Fix: `spike/ext/imagemagick-svg-url-fill.patch` (two hunks in `MagickCore/draw.c`) looks for the pattern by name first and falls back to the macro. Rebuilding ImageMagick with it takes seconds.
    - Checked with `magick` and with imagick in PHP 8.4. Now correct: gradients with `gradientUnits="userSpaceOnUse"` or percent coordinates, `<pattern>` fills, gradient strokes. Plain fills are unchanged.
 2. **Gradients in `objectBoundingBox` units are not implemented: a documented limit.**
