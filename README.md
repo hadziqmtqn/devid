@@ -237,12 +237,14 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
 - `devid php ext install <version> <name>` adds an extension that Devid does not bundle, such as apcu, mongodb, imagick or soap. Extensions come only from Devid's catalog: built from their official sources, checksum-verified, and checked to load, with an automatic rollback if PHP fails to start. No compiler is needed (D-021, `docs/roadmap/phase-6.md`).
 - The documentation will list which kinds of extensions can be added and why some cannot (for example, closed source without a license to redistribute).
 
+### Then: desktop app (Phase 7)
+
+- A menu-bar app with a window, based on the approved prototype. It starts after Phase 6 is released.
+- Built with Tauri v2 and the prototype's plain HTML, with no Node. It is another client of the daemon's API, so the daemon needs no rework.
+- The first step measures its idle memory on an Intel Mac. If only the menu-bar icon costs too much, the app runs only while its window is open, like the TUI (D-023, `docs/roadmap/phase-7.md`).
+
 ### v2 and later: planned, not scheduled
 
-- **Desktop app (GUI):**
-  - a menu-bar or window app based on the approved prototype;
-  - it becomes another client of the daemon's API, so the daemon needs no rework;
-  - Tauri or a small native Swift app, chosen after measuring idle RAM (D-012, D-019).
 - **More platforms:**
   - **Apple Silicon (arm64) macOS:** the build pipeline can already produce these (D-010).
   - **Linux:** a second platform implementation for CA trust, `.test` DNS and ports 80/443 (D-013, D-018).

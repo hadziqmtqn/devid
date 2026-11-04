@@ -26,7 +26,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - PHP 8.3, 8.4 and 8.5 (D-009), multiple versions side by side, with a per-site version.
 - `.test` DNS, a local CA and HTTPS.
 - One global web server: nginx (default, D-015), Caddy or Apache.
-- A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012).
+- A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012); a Tauri desktop app follows in Phase 7 (D-023).
 
 **Non-goals:**
 - Databases. The owner uses DBngin for PostgreSQL and MySQL.
@@ -44,6 +44,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 4 | TUI (ratatui) on top of the daemon API; colors per D-017; plan in `docs/roadmap/phase-4.md` | done 2026-11-03 (T1–T5, released as v0.2.0) |
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | done 2026-11-02 (R1–R5) |
 | 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | E1 spike in progress (apcu and mongodb pass, 2026-11-03) |
+| 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023); plan in `docs/roadmap/phase-7.md` | planned, starts after Phase 6 is released |
 
 ## Open risks (Phase 1 must prove)
 

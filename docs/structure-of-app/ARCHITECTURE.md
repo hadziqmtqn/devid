@@ -119,7 +119,7 @@ There is exactly one active web server globally.
 
 ## Client rule (D-012)
 
-All behaviour lives in `daemon` and is reached through its socket API. `cli` and the TUI only render state and send commands. A future GUI must be just another client of the same API.
+All behaviour lives in `daemon` and is reached through its socket API. `cli` and the TUI only render state and send commands. A future GUI must be just another client of the same API. The desktop app planned for Phase 7 (D-023, Tauri v2) is such a client: its Rust side sends the same `Request`s over the socket, and its web view only calls a fixed set of Tauri commands.
 
 ## Trust boundaries
 
