@@ -59,7 +59,7 @@ The catalog is curated, not a copy of every extension. Packagist lists 356 exten
 
 | Priority | Extension | Who needs it | Package (PIE) |
 |---|---|---|---|
-| 1 | imagick | Intervention Image and Spatie Image (Laravel), CodeIgniter 4 Image (ImageMagick handler), WordPress; Sail; **E1 passed** (no HEIC writing, no PDF reading; SVG gradients open, D-024) | `imagick/imagick` |
+| 1 | imagick | Intervention Image and Spatie Image (Laravel), CodeIgniter 4 Image (ImageMagick handler), WordPress; Sail; **E1 passed** (no HEIC writing, no PDF reading; SVG gradients only in user-space coordinates, D-024) | `imagick/imagick` |
 | 1 | igbinary | Laravel Redis and cache serializer; Sail | `igbinary/igbinary` |
 | 1 | msgpack | Redis serializer option; Sail | `msgpack/msgpack-php` |
 | 1 | memcached | cache drivers in Laravel, CodeIgniter 4, Symfony; Sail | `php-memcached/php-memcached` |
@@ -95,7 +95,7 @@ This table goes into the README when Phase 6 ships (E5). The E1 spike confirms o
 | Already bundled | redis, intl, gd, pdo_pgsql, Xdebug, pcov | Nothing to install. Turn Xdebug and pcov on with `devid php ext <ver> xdebug on`. |
 | Open source (PIE or PECL), no extra library | apcu, igbinary, msgpack, ds, uuid | Yes. Confirmed with apcu 5.1.28 (E1). |
 | Open source, bundles its own libraries | mongodb, grpc | Yes. Confirmed with mongodb 2.5.5 (E1): it carries its own OpenSSL copy, with no clash with PHP's. TLS to a server with a Devid (`.test`) certificate needs `tlsCAFile=~/.devid/ca/cacert.pem`; public certificates work as is. |
-| Open source, needs an open-source C library | imagick (ImageMagick), memcached (libmemcached) | Yes. CI builds the library into the extension, so nothing else is installed. Confirmed with imagick 3.8.1 and ImageMagick 7.1.2 (E1): JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF and SVG (D-024; gradients still render black); HEIC can be read but not written (the HEVC encoder, x265, is GPL); reading PDF needs Ghostscript, which Devid does not ship. |
+| Open source, needs an open-source C library | imagick (ImageMagick), memcached (libmemcached) | Yes. CI builds the library into the extension, so nothing else is installed. Confirmed with imagick 3.8.1 and ImageMagick 7.1.2 (E1): JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF and SVG (D-024; with a small ImageMagick patch, gradients work in user-space coordinates but not in `objectBoundingBox` units); HEIC can be read but not written (the HEVC encoder, x265, is GPL); reading PDF needs Ghostscript, which Devid does not ship. |
 | In php-src but not in Devid's build | ldap, xsl, gmp, tidy (mysqli, readline and soap are bundled since 2026-11-03, D-022) | Yes, built from the same php-src as the PHP release (with the C library they need built in). Confirmed with ldap and OpenLDAP 2.7.2 (E1): binds over LDAPS and verifies the server certificate. |
 | Swoole / OpenSwoole | swoole, openswoole | Yes, for CLI use (`php artisan octane:start`). They do not change how php-fpm serves `.test` sites. |
 | Closed-source loaders | ionCube Loader, SourceGuardian | Depends on the vendor's license: from `devid-binaries` (mirroring allowed), directly from the vendor with a pinned SHA-256 (only vendor downloads allowed), or not available. See "Closed-source vendor loaders". ionCube (E1): its license allows mirroring, but ionCube's last Intel Mac loader (14.0.0) covers PHP up to 8.3; its loaders for 8.4 and 8.5 are for Apple silicon only. Devid does not offer it (D-025). |
@@ -136,7 +136,7 @@ Script and method: `spike/ext/` (README). Built against the PHP build root of `s
 | Size | 91 KB | 8.7 MB | 388 KB | 21 MB (20 MB stripped); 24 MB with SVG |
 | Linked libraries (all in `/usr/lib`) | `libSystem` | `libSystem`, `libresolv` | `libSystem` | `libSystem`, `libresolv`, `libc++` |
 | Loads in `php -m` / `php-fpm -m`, 8.5.12 and 8.4.27 | yes | yes | yes | yes |
-| Works | store, fetch, inc | BSON; TLS verifies certificates and host names | LDAPS bind; refuses an unknown CA and a wrong host name | JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF: write, read, thumbnail; HEIC: read only; SVG without gradients |
+| Works | store, fetch, inc | BSON; TLS verifies certificates and host names | LDAPS bind; refuses an unknown CA and a wrong host name | JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF: write, read, thumbnail; HEIC: read only; SVG (gradients: see below) |
 | Together with Xdebug, the other three and PHP's own OpenSSL and gd | yes | yes | yes | yes |
 
 Findings that shape E2 (the catalog build):
@@ -145,10 +145,28 @@ Findings that shape E2 (the catalog build):
 - **Which OpenSSL:** it depends on the extension's build system, not on Devid. mongodb links its own static OpenSSL into the `.so`. ldap links only libldap and liblber, so OpenSSL and zlib bind to PHP's copies at load time (113 OpenSSL symbols). Both work. Either way an extension only matches the PHP build of the same release, so every PHP update rebuilds the catalog, and an OpenSSL security fix means a new release of PHP and its extensions together.
 - **CA trust:** mongodb's OpenSSL reads `/etc/ssl/cert.pem` (macOS system bundle), not `openssl.cafile`, and public TLS works. libldap uses PHP's OpenSSL, whose default bundle is the same file (a public LDAPS server was not tested). A server with a Devid certificate needs `tlsCAFile` (mongodb) or `LDAP_OPT_X_TLS_CACERTFILE` (ldap); document both.
 - **Build paths leak:** mongodb.so and imagick.so have an `LC_RPATH` to the build root; OpenSSL's `ENGINESDIR`/`MODULESDIR` and ImageMagick's `CONFIGURE_PATH`, `CODER_PATH` and `SHARE_PATH` point there too. The catalog build must drop the rpath (`install_name_tool -delete_rpath`) and set neutral paths. For ImageMagick that matters: without its config files there is no `policy.xml` (security policy) and no `type.xml`, so text needs an explicit font file (`ImagickDraw::setFont('/System/Library/Fonts/Supplemental/Arial.ttf')` works; the default font fails).
-- **imagick formats:** spc's recipe builds ImageMagick `--without-xml --without-zip --without-lzma --without-zstd --without-jbig --disable-openmp`, so SVG cannot be read. Rebuilt with `--with-xml` (libxml2 from the build root, 3.8 min), SVG works through ImageMagick's internal renderer (MSVG): shapes, paths, strokes, opacity, `viewBox` and density scaling. SVG `<text>` draws nothing without a `type.xml`. **Gradients (linear and radial) render black**, also as MVG and with ImageMagick's own `magick` command; the draw log shows the pattern is never drawn, cause not found (D-024 makes this an E2 task). HEIC writing needs x265, which is GPL, so it stays out. Reading PDF needs Ghostscript (`gs`, AGPL), which Devid does not ship; writing PDF works.
+- **imagick formats:** spc's recipe builds ImageMagick `--without-xml --without-zip --without-lzma --without-zstd --without-jbig --disable-openmp`, so SVG cannot be read. Rebuilt with `--with-xml` (libxml2 from the build root, 3.8 min), SVG works through ImageMagick's internal renderer (MSVG): shapes, paths, strokes, opacity, `viewBox` and density scaling. SVG `<text>` draws nothing without a `type.xml`. **Gradients (linear and radial) rendered black**, also as MVG and with ImageMagick's own `magick` command. See "SVG gradients" below for the cause and the patch. HEIC writing needs x265, which is GPL, so it stays out. Reading PDF needs Ghostscript (`gs`, AGPL), which Devid does not ship; writing PDF works.
 - **imagick cost:** `php -r ''` takes 0.21–0.25 s warm with imagick loaded, against 0.06 s without it and 0.11 s with mongodb (cold: 0.61 s); RSS grows by 2 MB. php-fpm loads extensions once in the master, so requests to `.test` sites do not pay this, but every `php artisan` run does. AVIF, JPEG XL and HEIC (libaom, libjxl, libheif) are most of the size and the build time.
 - **Test method:** public "bad certificate" hosts (badssl.com) gave random "connection closed" results, so TLS checks use a local server with a throwaway CA, which is deterministic: `openssl s_server` for mongodb, and for ldap a small Python TLS stub that answers one LDAP BindRequest.
 - PHP 8.3 was not part of the four builds above; E2 builds it in CI.
+
+#### SVG gradients (2026-11-04)
+
+Two separate problems in ImageMagick's internal SVG renderer (MSVG), found with `spike/ext/svg-cases.sh`:
+
+1. **Every `fill="url(#id)"` and `stroke="url(#id)"` drew black: fixed with a patch.**
+   - Cause: before drawing, ImageMagick scans the MVG for named blocks. Any `push <kind> "name"` with a quoted name becomes a "macro", and the SVG coder writes every gradient and pattern that way (`push gradient "id" linear …`). `fill` and `stroke` look the macro up first and pass the macro's text, not its name, to `DrawPatternPath`, which finds no pattern by that name. The fill stays black.
+   - The same MVG with an unquoted name draws the gradient, and so does a plain `push pattern`, which confirms the cause.
+   - The code is the same from 7.1.1-30 to `main` (checked 2026-11-04). Reported upstream as ImageMagick/ImageMagick#9093 (2026-11-04), with the reproduction and the patch.
+   - Fix: `spike/ext/imagemagick-svg-url-fill.patch` (two hunks in `MagickCore/draw.c`) looks for the pattern by name first and falls back to the macro. Rebuilding ImageMagick with it takes seconds.
+   - Checked with `magick` and with imagick in PHP 8.4. Now correct: gradients with `gradientUnits="userSpaceOnUse"` or percent coordinates, `<pattern>` fills, gradient strokes. Plain fills are unchanged.
+2. **Gradients in `objectBoundingBox` units are not implemented: a documented limit.**
+   - `objectBoundingBox` is SVG's default unit for gradients: no `x1`/`x2`, a default radial gradient, or fractions from 0 to 1.
+   - The SVG coder reads `gradientUnits` and writes `gradient-units`, but the drawing code ignores it (`draw.c`, keyword `gradient-units`). Such gradients come out as one colour or in the wrong direction.
+   - In a sample of 545 SVG files on the owner's Mac, 13 have gradients: 3,154 gradient elements use `userSpaceOnUse` and 87 use `objectBoundingBox`. Still, 10 of those 13 files have at least one.
+   - Options weighed on 2026-11-04: implement it in ImageMagick ourselves (hours to a day, then a patch to carry each release), or librsvg (full SVG, but Rust, cairo, pango, glib and more built static, with no spc recipe). The owner has no project that needs SVG now, so neither is done (D-024).
+
+The catalog build applies the patch until upstream fixes the macro lookup.
 
 #### Vendor loader: ionCube (2026-11-04)
 
@@ -167,7 +185,7 @@ Findings that shape E2 (the catalog build):
 Decided (D-025, 2026-11-04): ionCube is not offered. The owner does not use it, and on Intel it covers PHP 8.3 only with an unmaintained loader.
 
 Decided for E2 (D-024, 2026-11-04):
-- imagick keeps spc's full format set and adds SVG (`--with-xml`). Before SVG counts as supported, E2 finds why gradients render black; librsvg is the fallback.
+- imagick keeps spc's full format set and adds SVG (`--with-xml`), with the gradient patch below. Gradients in `objectBoundingBox` units stay a documented limit; no own implementation, no librsvg.
 - The catalog entry ships ImageMagick's default `policy.xml` and a `type.xml` with fonts that come with macOS. With `MAGICK_CONFIGURE_PATH` pointing at them, text with the default font and SVG `<text>` work (checked in the spike). ImageMagick's own `type-apple.xml` is out of date: 60 of its 193 font paths exist on macOS 14.
 
 Each milestone is one worktree and one PR. After E6, new catalog entries are reviewed recipe PRs in `devid-binaries` only.
