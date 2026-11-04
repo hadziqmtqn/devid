@@ -45,7 +45,7 @@ The script downloads `devid`, checks its sha256 and starts `devid setup`. The sc
    - trust for the Devid certificate authority.
 6. Downloads PHP 8.5 and nginx (both sha256-checked), unless PHP or the web server is already installed.
 
-To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version of Devid, run `DEVID_VERSION=0.2.3 sh install.sh`.
+To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version of Devid, run `DEVID_VERSION=0.3.0 sh install.sh`.
 
 To choose PHP versions and the web server, pass options to setup. With the install script, put them after `sh -s --`:
 
@@ -90,6 +90,10 @@ devid php list                 # installed versions and whether php-fpm runs
 devid php install 8.4          # add another version
 devid php use 8.4              # make it the default
 devid php ext 8.5 xdebug on    # turn Xdebug (or pcov) on/off for a version
+devid php ext available 8.4    # extra extensions from Devid's catalog
+devid php ext install 8.4 imagick
+devid php ext remove 8.4 imagick
+devid php ext list 8.4         # bundled, Xdebug/pcov, and installed catalog extensions
 ```
 
 - **The `php` command** follows the folder you are in. Inside an isolated site it uses that site's version; anywhere else it uses the default. `composer` works the same way.
@@ -100,6 +104,17 @@ devid php ext 8.5 xdebug on    # turn Xdebug (or pcov) on/off for a version
     - readline (for `php -a` and `artisan tinker`), redis, soap, sockets, sodium, zip, and the XML extensions.
   - PHP installed before 2026-11-03 lacks mysqli, readline and soap. `devid update` does not offer the rebuild because the version number is the same, so run `devid php install <version>` (your php.ini is kept).
   - Xdebug and pcov are included but off by default. Xdebug starts in trigger mode on port 9003.
+- **Extra extensions (catalog, since v0.3):** apcu, mongodb, ldap and imagick, for PHP 8.3, 8.4 and 8.5.
+  - Each comes only from Devid's releases. It is built in CI from its official source for that exact PHP release, and its checksum is verified before install. Nothing is compiled on your Mac.
+  - `install` checks that the extension loads in `php` and `php-fpm` before it restarts php-fpm. If it does not load, nothing changes and the sites keep running.
+  - `devid update` updates them together with PHP. `devid doctor` reports one that no longer loads.
+  - **imagick:** JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF and SVG. HEIC can be read but not written. PDF cannot be read (that needs Ghostscript). SVG gradients in `objectBoundingBox` units, SVG's default, are not drawn correctly. Text uses macOS fonts.
+  - **mongodb and ldap:** TLS trusts the macOS system certificates. For a server with a Devid `.test` certificate, pass `tlsCAFile` (mongodb) or `LDAP_OPT_X_TLS_CACERTFILE` (ldap) pointing at `~/.devid/ca/cacert.pem`.
+  - **Not available:**
+    - oci8 and sqlsrv, which need proprietary client libraries;
+    - parallel, which needs thread-safe PHP;
+    - the ionCube Loader, whose Intel Mac builds stop at PHP 8.3 (D-025).
+  - Other extensions are added on request (`docs/roadmap/phase-6.md`).
 - **php.ini:** each version has `~/.devid/php/<version>/etc/php.ini`. Devid writes it once and never overwrites it. After editing it, run `devid restart php-8.5`. The defaults are `memory_limit = 512M`, uploads up to 64 MB, errors displayed, and JIT off.
 - **Processes:** php-fpm uses `pm = ondemand`, so idle versions use almost no memory.
 
@@ -208,7 +223,8 @@ Everything lives in `~/.devid`:
 |---|---|
 | `bin/` | `devid`, plus `php` and `composer` (hard links to `devid`) |
 | `config.toml` | Settings: `.test` domain, web server, default PHP, ports (8088/8443 behind pf, DNS 53535), parked folders, links and isolated sites. Prefer the commands to editing it. |
-| `php/<version>/` | PHP binaries, `etc/php.ini` (yours to edit), `etc/conf.d/` (Xdebug/pcov switches) |
+| `php/<version>/` | PHP binaries, `etc/php.ini` (yours to edit), `etc/conf.d/` (switches for Xdebug, pcov and catalog extensions) |
+| `php-ext/<version>/` | Catalog extensions (`devid php ext install`), one folder each |
 | `nginx/`, `caddy/`, `apache/` | Web server binaries and generated configs (rewritten by Devid) |
 | `ca/`, `certs/` | The local CA, the CA bundle and per-site certificates |
 | `log/` | Daemon, php-fpm and web server logs |
@@ -232,10 +248,13 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
 
 - A shorter install command on its own domain (deferred, `docs/roadmap/phase-5.md`).
 
-### Next phase: more PHP extensions (Phase 6)
+### Now: more PHP extensions (Phase 6)
 
-- `devid php ext install <version> <name>` adds an extension that Devid does not bundle, such as apcu, mongodb, imagick or soap. Extensions come only from Devid's catalog: built from their official sources, checksum-verified, and checked to load, with an automatic rollback if PHP fails to start. No compiler is needed (D-021, `docs/roadmap/phase-6.md`).
-- The documentation will list which kinds of extensions can be added and why some cannot (for example, closed source without a license to redistribute).
+- **Done in v0.3.0:** `devid php ext install <version> <name>` adds an extension from Devid's catalog: apcu, mongodb, ldap and imagick (D-021, `docs/roadmap/phase-6.md`). See [PHP](#php).
+- **Next:**
+  - the extensions in the TUI's PHP page;
+  - igbinary, msgpack, memcached and swoole in the catalog;
+  - a list in these docs of which extensions can be added and why some cannot.
 
 ### Then: desktop app (Phase 7)
 

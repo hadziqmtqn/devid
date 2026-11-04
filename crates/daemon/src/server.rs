@@ -5,7 +5,7 @@ use crate::{
     config::Config,
     dns, helper, logs, nginx,
     paths::Paths,
-    php,
+    php, phpext,
     protocol::Request,
     releases,
     sites::{self, Site},
@@ -342,6 +342,53 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             state.supervisor.restart(&php_service(&version));
             Ok(json!({"ok": true, "version": version, "ext": ext, "enabled": enabled}))
         }
+        Request::PhpExtCatalog { version } => {
+            php::check_supported(&version).map_err(|e| e.to_string())?;
+            let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
+            let installed = phpext::installed(&state.paths, &version);
+            let list: Vec<Value> = phpext::catalog(&manifest, &version)
+                .into_iter()
+                .map(|e| {
+                    let have = installed.iter().find(|i| i.name == e.name).map(|i| i.version.clone());
+                    json!({"name": e.name, "version": e.version, "license": e.license, "installed": have})
+                })
+                .collect();
+            Ok(json!({"ok": true, "version": version, "release": manifest["tag"], "extensions": list}))
+        }
+        Request::PhpExtInstall { version, name } => {
+            let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
+            let installed = phpext::install(&state.paths, &version, &name, &manifest).map_err(|e| e.to_string())?;
+            state.supervisor.restart(&php_service(&version));
+            Ok(json!({"ok": true, "version": version, "name": name, "installed": installed}))
+        }
+        Request::PhpExtRemove { version, name } => {
+            phpext::remove(&state.paths, &version, &name).map_err(|e| e.to_string())?;
+            state.supervisor.restart(&php_service(&version));
+            Ok(json!({"ok": true, "version": version, "name": name}))
+        }
+        Request::PhpExtList { version } => {
+            php::check_supported(&version).map_err(|e| e.to_string())?;
+            if !php::installed(&state.paths).contains(&version) {
+                return Err(format!("PHP {version} is not installed"));
+            }
+            let bin = php::dir(&state.paths, &version).join("bin/php");
+            let out = crate::webserver::probe(&bin, &["-n", "-m"]).map_err(|e| e.to_string())?;
+            let bundled: Vec<String> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('['))
+                .map(str::to_string)
+                .collect();
+            let shipped: serde_json::Map<String, Value> = php::EXTENSIONS
+                .iter()
+                .map(|e| (e.to_string(), json!(php::extension_enabled(&state.paths, &version, e))))
+                .collect();
+            let catalog: Vec<Value> = phpext::installed(&state.paths, &version)
+                .into_iter()
+                .map(|i| json!({"name": i.name, "version": i.version}))
+                .collect();
+            Ok(json!({"ok": true, "version": version, "bundled": bundled, "shipped": shipped, "catalog": catalog}))
+        }
         Request::Restart { service } => {
             if !state.supervisor.state().contains_key(&service) {
                 let running: Vec<String> = state.supervisor.state().into_keys().collect();
@@ -418,12 +465,14 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                     unknown.push(format!("php {version}"));
                     continue;
                 };
-                if releases::newer(&a.version, &current) {
+                let php_updated = releases::newer(&a.version, &current);
+                if php_updated {
                     changes.push(json!({"what": format!("php {version}"), "from": current, "to": a.version}));
                     if !check {
                         install_php(state, &version, None, Some(&manifest))?;
                     }
                 }
+                changes.extend(update_extensions(state, &version, &manifest, php_updated, check)?);
             }
             for server in ["nginx", "caddy"] {
                 if !webserver::installed(&state.paths, server) {
@@ -633,6 +682,45 @@ fn install_php(state: &State, version: &str, from: Option<String>, manifest: Opt
     let config = state.config.lock().unwrap();
     state.apply(&config)?;
     Ok(php::full_version(&state.paths, version).unwrap_or_default())
+}
+
+/// Catalog extensions of PHP `version` whose archive in the release differs from the installed one
+/// (a new version, or a rebuild for a new PHP or OpenSSL). Reinstalled unless `check`. One the release
+/// no longer offers stays as it is, unless PHP itself was updated: then it is removed, since it was
+/// built for the old PHP.
+fn update_extensions(
+    state: &State,
+    version: &str,
+    manifest: &Value,
+    php_updated: bool,
+    check: bool,
+) -> Result<Vec<Value>, String> {
+    let catalog = phpext::catalog(manifest, version);
+    let mut changes = Vec::new();
+    for ext in phpext::installed(&state.paths, version) {
+        let what = format!("{} for php {version}", ext.name);
+        match catalog.iter().find(|e| e.name == ext.name) {
+            Some(e) if e.artifact.sha256 != ext.sha256 => {
+                let to =
+                    if e.version == ext.version { format!("{} (new build)", e.version) } else { e.version.clone() };
+                changes.push(json!({"what": what, "from": ext.version, "to": to}));
+                if !check {
+                    phpext::install(&state.paths, version, &ext.name, manifest).map_err(|e| e.to_string())?;
+                }
+            }
+            None if php_updated => {
+                changes.push(json!({"what": what, "from": ext.version, "to": "removed (not in this release)"}));
+                if !check {
+                    phpext::remove(&state.paths, version, &ext.name).map_err(|e| e.to_string())?;
+                }
+            }
+            _ => {}
+        }
+    }
+    if !check && !changes.is_empty() {
+        state.supervisor.restart(&php_service(version));
+    }
+    Ok(changes)
 }
 
 /// Install a web server from `from` or else from the release manifest (Apache: the system httpd).

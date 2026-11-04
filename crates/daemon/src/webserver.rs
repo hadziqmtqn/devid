@@ -74,6 +74,15 @@ pub fn reload(name: &str) -> Reload {
 /// `server install` (e.g. nginx as Caddy, which ignores `version` and starts serving) must not
 /// block the daemon forever.
 pub(crate) fn probe(program: &Path, args: &[&str]) -> io::Result<std::process::Output> {
+    probe_env(program, args, &[])
+}
+
+/// `probe` with extra environment variables. Output stays small (it is read after exit).
+pub(crate) fn probe_env(
+    program: &Path,
+    args: &[&str],
+    env: &[(String, std::path::PathBuf)],
+) -> io::Result<std::process::Output> {
     use std::{
         process::Stdio,
         thread::sleep,
@@ -81,6 +90,7 @@ pub(crate) fn probe(program: &Path, args: &[&str]) -> io::Result<std::process::O
     };
     let mut child = std::process::Command::new(program)
         .args(args)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

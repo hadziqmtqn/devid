@@ -2,7 +2,7 @@
 //! go through `devid helper` (sudo, one password prompt).
 
 use crate::{HelperAction, helper, helper_plan, request};
-use devid_daemon::{ca, config::Config, helper as h, install, paths::Paths, php, protocol::Request, webserver};
+use devid_daemon::{ca, config::Config, helper as h, install, paths::Paths, php, phpext, protocol::Request, webserver};
 use std::{
     net::ToSocketAddrs,
     path::Path,
@@ -218,6 +218,24 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
     let resolves = probe.to_socket_addrs().is_ok_and(|mut a| a.any(|a| a.ip().is_loopback()));
     check(resolves, &format!("*.{} resolves to 127.0.0.1 through macOS", plan.tld), "run `devid helper install`");
     check(ca::ca_cert(paths).is_file(), "Devid CA exists", "start the daemon once");
+
+    for version in php::installed(paths) {
+        let names: Vec<String> = phpext::installed(paths, &version).into_iter().map(|e| e.name).collect();
+        if names.is_empty() {
+            continue;
+        }
+        let want: Vec<&str> = names.iter().map(String::as_str).collect();
+        let loads = phpext::preflight(paths, &version, &want);
+        check(
+            loads.is_ok(),
+            &format!(
+                "PHP {version} loads {}{}",
+                names.join(", "),
+                loads.err().map(|e| format!(" ({e})")).unwrap_or_default()
+            ),
+            &format!("`devid php ext install {version} <name>` again, or `devid php ext remove {version} <name>`"),
+        );
+    }
 
     let valet = std::process::Command::new("pgrep")
         .args(["-f", "/usr/local/opt/dnsmasq"])

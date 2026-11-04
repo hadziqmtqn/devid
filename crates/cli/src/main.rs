@@ -200,12 +200,11 @@ enum PhpAction {
     },
     /// Make a version the default
     Use { version: String },
-    /// Turn xdebug or pcov on/off for a version: `devid php ext 8.5 xdebug on`
+    /// Extensions. `devid php ext 8.5 xdebug on|off` (xdebug, pcov); catalog extensions:
+    /// `available <ver>`, `install <ver> <name>`, `remove <ver> <name>`, `list <ver>`
     Ext {
-        version: String,
-        ext: String,
-        #[arg(value_parser = ["on", "off"])]
-        state: String,
+        #[arg(required = true, num_args = 2..=3, value_name = "ARGS")]
+        args: Vec<String>,
     },
 }
 
@@ -271,10 +270,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
                 println!("PHP {} installed", v["version"].as_str().filter(|s| !s.is_empty()).unwrap_or(&version))
             })
         }
-        Command::Php { action: PhpAction::Ext { version, ext, state } } => {
-            send(Request::PhpExt { version: version.clone(), ext: ext.clone(), enabled: state == "on" })
-                .map(|_| println!("{ext} {state} for PHP {version} (php-fpm restarted)"))
-        }
+        Command::Php { action: PhpAction::Ext { args } } => php_ext(&send, &args),
         Command::Stop { service } if service == "all" => {
             send(Request::StopAll).map(|_| println!("stopped all services"))
         }
@@ -455,6 +451,67 @@ fn print_sites(list: &serde_json::Value, json: bool) {
             (false, _) => format!("PHP {php}"),
         };
         println!("{:<40} {:<26} {}", s["url"].as_str().unwrap_or("?"), note, s["path"].as_str().unwrap_or("?"));
+    }
+}
+
+/// `devid php ext …`: xdebug/pcov on/off, or the catalog commands (Phase 6).
+fn php_ext(send: &dyn Fn(Request) -> Result<serde_json::Value, String>, args: &[String]) -> Result<(), String> {
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    let s = |v: &serde_json::Value| v.as_str().unwrap_or("?").to_string();
+    match a.as_slice() {
+        ["available", version] => send(Request::PhpExtCatalog { version: version.to_string() }).map(|v| {
+            println!("catalog for PHP {version} (release {}):", s(&v["release"]));
+            let list = v["extensions"].as_array().map(Vec::as_slice).unwrap_or_default();
+            if list.is_empty() {
+                println!("  nothing for PHP {version} in this release");
+            }
+            for e in list {
+                let mark = e["installed"].as_str().map_or(String::new(), |i| format!("installed {i}"));
+                println!("  {:<10} {:<9} {:<12} {mark}", s(&e["name"]), s(&e["version"]), s(&e["license"]));
+            }
+        }),
+        ["install", version, name] => {
+            println!("downloading {name} for PHP {version} from Devid's releases (sha256-checked)…");
+            send(Request::PhpExtInstall { version: version.to_string(), name: name.to_string() })
+                .map(|v| println!("{name} {} installed for PHP {version} (php-fpm restarted)", s(&v["installed"])))
+        }
+        ["remove", version, name] => {
+            send(Request::PhpExtRemove { version: version.to_string(), name: name.to_string() })
+                .map(|_| println!("{name} removed from PHP {version} (php-fpm restarted)"))
+        }
+        ["list", version] => send(Request::PhpExtList { version: version.to_string() }).map(|v| {
+            let names = |l: &serde_json::Value| -> Vec<String> {
+                l.as_array().map(Vec::as_slice).unwrap_or_default().iter().map(s).collect()
+            };
+            println!("PHP {version}");
+            println!("  bundled: {}", names(&v["bundled"]).join(", "));
+            let shipped: Vec<String> = v["shipped"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(k, on)| format!("{k} {}", if on == true { "on" } else { "off" }))
+                .collect();
+            println!("  shipped: {}", shipped.join(", "));
+            let catalog: Vec<String> = v["catalog"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .map(|e| format!("{} {}", s(&e["name"]), s(&e["version"])))
+                .collect();
+            if catalog.is_empty() {
+                println!("  catalog: none (see `devid php ext available {version}`)");
+            } else {
+                println!("  catalog: {}", catalog.join(", "));
+            }
+        }),
+        [version, ext, state @ ("on" | "off")] => {
+            send(Request::PhpExt { version: version.to_string(), ext: ext.to_string(), enabled: *state == "on" })
+                .map(|_| println!("{ext} {state} for PHP {version} (php-fpm restarted)"))
+        }
+        _ => Err("usage: devid php ext <ver> xdebug|pcov on|off, or devid php ext available|list <ver>, \
+                  or devid php ext install|remove <ver> <name>"
+            .into()),
     }
 }
 
