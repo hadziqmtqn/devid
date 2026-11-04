@@ -10,7 +10,8 @@ PHP_VER="${PHP_VER:-8.5}"
 SPC_DIR="${SPC_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 cd "$SPC_DIR"
 
-EXT="bcmath,ctype,curl,dom,exif,fileinfo,filter,gd,iconv,intl,mbstring,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,redis,session,simplexml,sockets,sodium,sqlite3,tokenizer,xml,xmlreader,xmlwriter,zip,zlib"
+# Same list as devid-binaries scripts/build-php.sh (mysqli, readline, soap: D-022).
+EXT="bcmath,ctype,curl,dom,exif,fileinfo,filter,gd,iconv,intl,mbstring,mysqli,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,readline,redis,session,simplexml,soap,sockets,sodium,sqlite3,tokenizer,xml,xmlreader,xmlwriter,zip,zlib"
 # Loaded on demand as .so files (D-008), not compiled in.
 SHARED="xdebug,pcov"
 # Pin a stable Xdebug; spc's default source picked 3.6.0alpha1.

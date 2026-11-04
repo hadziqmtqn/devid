@@ -1,8 +1,8 @@
 # Phase 6 Plan: extra PHP extensions from a trusted catalog
 
 > Scope: letting users install PHP extensions that Devid does not bundle, only from verified sources (D-021, which supersedes D-020)
-> Verified against: 2026-11-03
-> Status: E1 in progress: apcu and mongodb pass (2026-11-03, PHP 8.5); ldap, imagick and a vendor loader not tested yet. D-022 (mysqli, readline and soap bundled) shipped in `devid-binaries` 2026.11.03-4
+> Verified against: 2026-11-04
+> Status: E1 done (2026-11-04): apcu, mongodb, ldap and imagick pass on PHP 8.4 and 8.5; the ionCube Loader may be mirrored and loads, but on Intel Macs only for PHP 8.3, and it is not offered (D-025). E2 is next. D-022 (mysqli, readline and soap bundled) shipped in `devid-binaries` 2026.11.03-4
 
 Devid's PHP is a static build with a fixed extension set (D-008). Xdebug and pcov already ship as separate `.so` files, which shows that the static php-fpm can load shared extensions. Phase 6 adds a second, opt-in set: the **extension catalog**.
 
@@ -59,14 +59,14 @@ The catalog is curated, not a copy of every extension. Packagist lists 356 exten
 
 | Priority | Extension | Who needs it | Package (PIE) |
 |---|---|---|---|
-| 1 | imagick | Intervention Image and Spatie Image (Laravel), CodeIgniter 4 Image (ImageMagick handler), WordPress; Sail | `imagick/imagick` |
+| 1 | imagick | Intervention Image and Spatie Image (Laravel), CodeIgniter 4 Image (ImageMagick handler), WordPress; Sail; **E1 passed** (no HEIC writing, no PDF reading; SVG gradients open, D-024) | `imagick/imagick` |
 | 1 | igbinary | Laravel Redis and cache serializer; Sail | `igbinary/igbinary` |
 | 1 | msgpack | Redis serializer option; Sail | `msgpack/msgpack-php` |
 | 1 | memcached | cache drivers in Laravel, CodeIgniter 4, Symfony; Sail | `php-memcached/php-memcached` |
 | 1 | mongodb | `mongodb/laravel-mongodb`, Doctrine MongoDB ODM; Sail; **E1 passed** | `mongodb/mongodb-extension` |
 | 1 | swoole | Laravel Octane (Swoole server); Sail | `swoole/swoole` |
 | 1 | apcu | Symfony, Drupal, Yii, CakePHP caches; **E1 passed** | `apcu/apcu` |
-| 1 | ldap | LdapRecord (Laravel), Symfony Ldap; Sail. In php-src, needs OpenLDAP built in | php-src |
+| 1 | ldap | LdapRecord (Laravel), Symfony Ldap; Sail. In php-src, needs OpenLDAP built in; **E1 passed** | php-src |
 | 2 | amqp | Symfony Messenger, Laravel RabbitMQ queues | `php-amqp/php-amqp` |
 | 2 | grpc, protobuf | Google Cloud clients, OpenTelemetry | `pie-extensions/grpc`, `pie-extensions/protobuf` |
 | 2 | imap | Sail installs it; removed from php-src in 8.4 and barely maintained | `sirlouen/imap` (unofficial) |
@@ -95,10 +95,10 @@ This table goes into the README when Phase 6 ships (E5). The E1 spike confirms o
 | Already bundled | redis, intl, gd, pdo_pgsql, Xdebug, pcov | Nothing to install. Turn Xdebug and pcov on with `devid php ext <ver> xdebug on`. |
 | Open source (PIE or PECL), no extra library | apcu, igbinary, msgpack, ds, uuid | Yes. Confirmed with apcu 5.1.28 (E1). |
 | Open source, bundles its own libraries | mongodb, grpc | Yes. Confirmed with mongodb 2.5.5 (E1): it carries its own OpenSSL copy, with no clash with PHP's. TLS to a server with a Devid (`.test`) certificate needs `tlsCAFile=~/.devid/ca/cacert.pem`; public certificates work as is. |
-| Open source, needs an open-source C library | imagick (ImageMagick), memcached (libmemcached) | Yes. CI builds the library into the extension, so nothing else is installed. |
-| In php-src but not in Devid's build | ldap, xsl, gmp, tidy (mysqli, readline and soap are bundled since 2026-11-03, D-022) | Yes, built from the same php-src as the PHP release (with the C library they need built in). |
+| Open source, needs an open-source C library | imagick (ImageMagick), memcached (libmemcached) | Yes. CI builds the library into the extension, so nothing else is installed. Confirmed with imagick 3.8.1 and ImageMagick 7.1.2 (E1): JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF and SVG (D-024; gradients still render black); HEIC can be read but not written (the HEVC encoder, x265, is GPL); reading PDF needs Ghostscript, which Devid does not ship. |
+| In php-src but not in Devid's build | ldap, xsl, gmp, tidy (mysqli, readline and soap are bundled since 2026-11-03, D-022) | Yes, built from the same php-src as the PHP release (with the C library they need built in). Confirmed with ldap and OpenLDAP 2.7.2 (E1): binds over LDAPS and verifies the server certificate. |
 | Swoole / OpenSwoole | swoole, openswoole | Yes, for CLI use (`php artisan octane:start`). They do not change how php-fpm serves `.test` sites. |
-| Closed-source loaders | ionCube Loader, SourceGuardian | Depends on the vendor's license: from `devid-binaries` (mirroring allowed), directly from the vendor with a pinned SHA-256 (only vendor downloads allowed), or not available. See "Closed-source vendor loaders". |
+| Closed-source loaders | ionCube Loader, SourceGuardian | Depends on the vendor's license: from `devid-binaries` (mirroring allowed), directly from the vendor with a pinned SHA-256 (only vendor downloads allowed), or not available. See "Closed-source vendor loaders". ionCube (E1): its license allows mirroring, but ionCube's last Intel Mac loader (14.0.0) covers PHP up to 8.3; its loaders for 8.4 and 8.5 are for Apple silicon only. Devid does not offer it (D-025). |
 | APM and profiler agents | New Relic, Datadog, Blackfire | Case by case: closed source, and most need their own background agent. Not planned for Phase 6. |
 
 **Cannot be added, and why:**
@@ -110,7 +110,8 @@ This table goes into the README when Phase 6 ships (E5). The E1 spike confirms o
 | Needs thread-safe PHP (ZTS); Devid builds non-thread-safe PHP for php-fpm | parallel, pthreads |
 | No support for PHP 8.3 or newer | Zend Guard Loader, pthreads |
 | Windows only | com_dotnet |
-| Clashes with a library already built into Devid's static PHP | to be found in the E1 spike |
+| The vendor no longer builds it for Intel Macs | ionCube Loader: its Intel loaders stop at PHP 8.3 and are not maintained (D-025) |
+| Clashes with a library already built into Devid's static PHP | none found in E1: imagick next to gd (each with its own libpng) and mongodb next to PHP's OpenSSL both work |
 
 ## Milestones
 
@@ -118,31 +119,56 @@ This table goes into the README when Phase 6 ships (E5). The E1 spike confirms o
 |---|---|---|
 | E1 | **Spike:** build apcu (no deps), mongodb (bundles libraries, uses OpenSSL), ldap (php-src, needs OpenLDAP) and imagick (external library) as shared extensions against Devid's static PHP 8.4 and 8.5; load each in the CLI and php-fpm, with Xdebug on and off. Check one closed-source loader's license and loading. Record results in PROJECT_CONTEXT and correct the table above. | each case is shown to work or the reason it cannot is known |
 | E2 | **Catalog in `devid-binaries`:** CI builds the first extensions per PHP version, publishes them with checksums and adds the `extensions` section to `manifest.json`. | the manifest lists apcu (and the other E1 successes) for 8.3, 8.4 and 8.5 |
-| E3 | **Daemon and CLI:** `devid php ext available / install / remove / list` with verify, load check and rollback; `devid update` and `doctor` cover catalog extensions. Vendor entries: the license prompt (`--accept-license`) and, for `source: vendor`, the direct download with the pinned SHA-256 and the `.so` path inside the vendor's archive. | `devid php ext install 8.4 apcu` works on the owner's Mac; a failing extension is rolled back and PHP keeps running |
+| E3 | **Daemon and CLI:** `devid php ext available / install / remove / list` with verify, load check and rollback; `devid update` and `doctor` cover catalog extensions. Vendor entries (license prompt, `source: vendor` downloads) wait until a vendor loader is accepted into the catalog; none is (D-025). | `devid php ext install 8.4 apcu` works on the owner's Mac; a failing extension is rolled back and PHP keeps running |
 | E4 | **TUI:** the PHP page's Extensions section shows catalog extensions with install and remove (with confirmation). | the same from the TUI |
 | E5 | **Docs and release:** the README section "PHP extensions" with the tables above, a release. | `devid self-update` brings it to the owner's Mac |
 | E6 | **Adding catalog entries later (GitHub Actions, `devid-binaries`):** a workflow that takes a new recipe (a PR or a manual run with the package name and version), builds it for every PHP version, runs the load and smoke tests, and publishes it with a new `manifest.json`. A scheduled job lists PIE candidates (darwin + NTS) and new releases of catalog entries for review; it never adds an entry by itself. | a new extension reaches the catalog through one reviewed recipe PR, without a Devid release |
 
-### E1 results so far (2026-11-03)
+### E1 results (2026-11-03, 2026-11-04)
 
-Script and method: `spike/ext/` (README). Built against the PHP 8.5.12 build root of `spike/php`, loaded into the installed PHP 8.5.12 from the Devid release (CLI and php-fpm, `-n -d extension=…`). Nothing was installed.
+Script and method: `spike/ext/` (README). Built against the PHP build root of `spike/php` (8.5.12, then 8.4.27), loaded into the installed PHP of the same version from the Devid release (CLI and php-fpm, `-n -d extension=…`). Nothing was installed.
 
-| | apcu 5.1.28 | mongodb 2.5.5 |
-|---|---|---|
-| Build time on the owner's Mac (2 cores) | 6 s | 3 min 53 s |
-| Size | 91 KB | 8.7 MB |
-| Linked libraries | `libSystem` only | `libSystem`, `libresolv` (both in `/usr/lib`) |
-| Loads in `php -m` / `php-fpm -m` | yes / yes | yes / yes |
-| Works | store, fetch, inc | BSON, TLS: verifies certificates and host names |
-| Together with Xdebug, apcu, PHP's own OpenSSL (HTTPS, `.test` TLS) | yes | yes |
+| | apcu 5.1.28 | mongodb 2.5.5 | ldap (php-src) | imagick 3.8.1 |
+|---|---|---|---|---|
+| Kind | no library | bundles its libraries | php-src, OpenLDAP 2.7.2 | ImageMagick 7.1.2-35 |
+| Build time of the extension (2 cores) | 6–8 s | 3 min 53 s (8.5), 4 min 39 s (8.4) | 3 s | 10–16 s |
+| Build time of its C library (spc `build:libs`, once per release) | none | none | 5.5 min (with gmp) | 29 min (libaom 9.3, libjxl 7.1, libheif 4.7, ImageMagick 4.1) |
+| Size | 91 KB | 8.7 MB | 388 KB | 21 MB (20 MB stripped); 24 MB with SVG |
+| Linked libraries (all in `/usr/lib`) | `libSystem` | `libSystem`, `libresolv` | `libSystem` | `libSystem`, `libresolv`, `libc++` |
+| Loads in `php -m` / `php-fpm -m`, 8.5.12 and 8.4.27 | yes | yes | yes | yes |
+| Works | store, fetch, inc | BSON; TLS verifies certificates and host names | LDAPS bind; refuses an unknown CA and a wrong host name | JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF: write, read, thumbnail; HEIC: read only; SVG without gradients |
+| Together with Xdebug, the other three and PHP's own OpenSSL and gd | yes | yes | yes | yes |
 
 Findings that shape E2 (the catalog build):
-- **Symbols:** shared extensions use `-undefined dynamic_lookup` and take PHP's symbols from the static binary (146 for apcu, 358 for mongodb). This works, as it does for Xdebug.
-- **Second OpenSSL copy:** mongodb links the build root's static OpenSSL into the `.so` (no OpenSSL symbol left undefined). The two copies do not interfere. Consequence: an OpenSSL security fix means rebuilding such extensions together with PHP, in the same release.
-- **CA trust:** mongodb's OpenSSL reads `/etc/ssl/cert.pem` (macOS system bundle) and ignores `openssl.cafile`. Public TLS works. A server with a Devid certificate needs `tlsCAFile` (document it).
-- **Build paths leak:** mongodb.so has an `LC_RPATH` to the build root and OpenSSL's `ENGINESDIR`/`MODULESDIR` point there. Harmless for the default provider, but the catalog build must drop the rpath (`install_name_tool -delete_rpath`) and use neutral paths.
-- **Test method:** public "bad certificate" hosts (badssl.com) gave random "connection closed" results, so TLS checks use a local `openssl s_server` with a throwaway CA, which is deterministic.
-- **Still to test:** PHP 8.3 and 8.4 (the build root holds 8.5 only), ldap (php-src with OpenLDAP; soap moved to the bundled build, D-022), imagick (ImageMagick build), and one vendor loader.
+- **Symbols:** shared extensions use `-undefined dynamic_lookup` and take PHP's symbols from the static binary (146 for apcu, 358 for mongodb, 350 for ldap, 469 for imagick). This works, as it does for Xdebug. The `.so` files are flat-namespace bundles with lazy binding, so a missing symbol may fail only when the code reaches it. The spike checks that every undefined symbol is exported by `php` and `php-fpm` or by a system library the `.so` links: 0 missing for all eight builds, while the same check against a binary without PHP's exports finds 80–227. The catalog build must run this check.
+- **Static libraries:** an extension built against a static library (libldap, libMagickWand) gets that library's own dependencies only through `LIBS=$(pkg-config --static --libs …)`; without it configure's link checks fail.
+- **Which OpenSSL:** it depends on the extension's build system, not on Devid. mongodb links its own static OpenSSL into the `.so`. ldap links only libldap and liblber, so OpenSSL and zlib bind to PHP's copies at load time (113 OpenSSL symbols). Both work. Either way an extension only matches the PHP build of the same release, so every PHP update rebuilds the catalog, and an OpenSSL security fix means a new release of PHP and its extensions together.
+- **CA trust:** mongodb's OpenSSL reads `/etc/ssl/cert.pem` (macOS system bundle), not `openssl.cafile`, and public TLS works. libldap uses PHP's OpenSSL, whose default bundle is the same file (a public LDAPS server was not tested). A server with a Devid certificate needs `tlsCAFile` (mongodb) or `LDAP_OPT_X_TLS_CACERTFILE` (ldap); document both.
+- **Build paths leak:** mongodb.so and imagick.so have an `LC_RPATH` to the build root; OpenSSL's `ENGINESDIR`/`MODULESDIR` and ImageMagick's `CONFIGURE_PATH`, `CODER_PATH` and `SHARE_PATH` point there too. The catalog build must drop the rpath (`install_name_tool -delete_rpath`) and set neutral paths. For ImageMagick that matters: without its config files there is no `policy.xml` (security policy) and no `type.xml`, so text needs an explicit font file (`ImagickDraw::setFont('/System/Library/Fonts/Supplemental/Arial.ttf')` works; the default font fails).
+- **imagick formats:** spc's recipe builds ImageMagick `--without-xml --without-zip --without-lzma --without-zstd --without-jbig --disable-openmp`, so SVG cannot be read. Rebuilt with `--with-xml` (libxml2 from the build root, 3.8 min), SVG works through ImageMagick's internal renderer (MSVG): shapes, paths, strokes, opacity, `viewBox` and density scaling. SVG `<text>` draws nothing without a `type.xml`. **Gradients (linear and radial) render black**, also as MVG and with ImageMagick's own `magick` command; the draw log shows the pattern is never drawn, cause not found (D-024 makes this an E2 task). HEIC writing needs x265, which is GPL, so it stays out. Reading PDF needs Ghostscript (`gs`, AGPL), which Devid does not ship; writing PDF works.
+- **imagick cost:** `php -r ''` takes 0.21–0.25 s warm with imagick loaded, against 0.06 s without it and 0.11 s with mongodb (cold: 0.61 s); RSS grows by 2 MB. php-fpm loads extensions once in the master, so requests to `.test` sites do not pay this, but every `php artisan` run does. AVIF, JPEG XL and HEIC (libaom, libjxl, libheif) are most of the size and the build time.
+- **Test method:** public "bad certificate" hosts (badssl.com) gave random "connection closed" results, so TLS checks use a local server with a throwaway CA, which is deterministic: `openssl s_server` for mongodb, and for ldap a small Python TLS stub that answers one LDAP BindRequest.
+- PHP 8.3 was not part of the four builds above; E2 builds it in CI.
+
+#### Vendor loader: ionCube (2026-11-04)
+
+- **License: case 1, mirroring allowed.** The Loader EULA (`ioncube.com/legal/loaders/eula`, the same text as `LICENSE.txt` in the package, last revised 2015-04-23):
+  - 2.1: "The Loader may be freely distributed to third parties alone or as part of a distribution containing other items provided that this license is also included."
+  - 2.2: it "may under no circumstances be branded as another product".
+  - 3.1: no reverse engineering, and no modification of its behaviour.
+  So `devid-binaries` may republish it unmodified with `LICENSE.txt`, under the name "ionCube Loader".
+- **Intel Macs: PHP 8.3 only.** ionCube's download page lists the macOS x86-64 package as a "legacy" package that is no longer maintained. Its newest loader is 14.0.0 (2024-10-14), for PHP 4.4 to 8.3. Loader 15.5.1, with PHP 8.4 and 8.5, is built for macOS arm64 only. Devid's PHP 8.4 and 8.5 on the owner's Mac cannot use ionCube.
+- **The vendor repacks the archive.** `ioncube_loaders_mac_x86-64.tar.gz` is dated 2026-09-18, while the loaders inside are from 2024-10-14. A pinned SHA-256 of the vendor's archive (case 2) would break on a repack that changes nothing. A mirrored copy (case 1) keeps its own checksum.
+- **Loads** into the released PHP 8.3.36 (`devid-binaries` 2026.11.03-4, checksum matches `manifest.json`), in the CLI and php-fpm (`-v`: "with the ionCube PHP Loader v14.0.0"). It also loads next to OPcache. Startup and memory cost are negligible (0.04–0.06 s, +0.7 MB). It links only `libSystem`, and 0 of its 479 undefined symbols are missing.
+- **Load order:** ionCube must be the first Zend extension. With Xdebug before it, PHP stops: "The Loader must appear as the first entry in the php.ini file". Ordered ionCube then Xdebug, both load. A vendor entry for it would need its ini to sort before Xdebug's.
+- **Version check:** the 8.3 loader in PHP 8.4 is refused with a clear message (API420230831 against API420240924), so a wrong file cannot load silently.
+- **Not tested:** running an encoded file, which needs the ionCube Encoder. Also whether loader 14.0 runs files from the newer V15 encoder. The download page only says it runs files from the V14 encoder.
+
+Decided (D-025, 2026-11-04): ionCube is not offered. The owner does not use it, and on Intel it covers PHP 8.3 only with an unmaintained loader.
+
+Decided for E2 (D-024, 2026-11-04):
+- imagick keeps spc's full format set and adds SVG (`--with-xml`). Before SVG counts as supported, E2 finds why gradients render black; librsvg is the fallback.
+- The catalog entry ships ImageMagick's default `policy.xml` and a `type.xml` with fonts that come with macOS. With `MAGICK_CONFIGURE_PATH` pointing at them, text with the default font and SVG `<text>` work (checked in the spike). ImageMagick's own `type-apple.xml` is out of date: 60 of its 193 font paths exist on macOS 14.
 
 Each milestone is one worktree and one PR. After E6, new catalog entries are reviewed recipe PRs in `devid-binaries` only.
 
