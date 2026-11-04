@@ -152,6 +152,10 @@ pub fn write_config(paths: &Paths, version: &str) -> io::Result<()> {
     }
 
     let t = tag(version);
+    // php-fpm starts workers with a cleared environment, so catalog extensions that need a variable
+    // (imagick: MAGICK_CONFIGURE_PATH) get it through the pool.
+    let env: String =
+        crate::phpext::env(paths, version).iter().map(|(k, v)| format!("env[{k}] = \"{}\"\n", v.display())).collect();
     fs::write(
         etc.join("php-fpm.conf"),
         format!(
@@ -167,7 +171,8 @@ pub fn write_config(paths: &Paths, version: &str) -> io::Result<()> {
              pm = ondemand\n\
              pm.max_children = 4\n\
              pm.process_idle_timeout = 10s\n\
-             catch_workers_output = yes\n",
+             catch_workers_output = yes\n\
+             {env}",
             pid = pid_file(paths, version).display(),
             log = paths.log_dir().join(format!("php{t}-fpm.log")).display(),
             sock = socket(paths, version).display(),
@@ -188,7 +193,10 @@ pub fn spec(paths: &Paths, version: &str) -> Spec {
             etc.join("php.ini").into(),
         ],
         // D-008: never fall back to compiled-in ini paths.
-        env: vec![("PHPRC".into(), etc.clone().into()), ("PHP_INI_SCAN_DIR".into(), etc.join("conf.d").into())],
+        env: [("PHPRC".into(), etc.clone().into()), ("PHP_INI_SCAN_DIR".into(), etc.join("conf.d").into())]
+            .into_iter()
+            .chain(crate::phpext::env(paths, version).into_iter().map(|(k, v)| (k, v.into())))
+            .collect(),
         pid_file: pid_file(paths, version),
         comm: "php-fpm",
         stop_signal: libc::SIGQUIT,

@@ -24,6 +24,23 @@ pub enum Request {
         ext: String,
         enabled: bool,
     },
+    /// Catalog extensions (Phase 6) the release offers for a PHP version, marked installed or not.
+    PhpExtCatalog {
+        version: String,
+    },
+    /// Download, verify and turn on a catalog extension (restarts that version's php-fpm).
+    PhpExtInstall {
+        version: String,
+        name: String,
+    },
+    PhpExtRemove {
+        version: String,
+        name: String,
+    },
+    /// Bundled extensions (`php -m`), xdebug/pcov on or off, and installed catalog extensions.
+    PhpExtList {
+        version: String,
+    },
     /// Restart one service: "php-8.4", "nginx", "caddy" or "apache".
     Restart {
         service: String,

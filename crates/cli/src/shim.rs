@@ -2,7 +2,7 @@
 //! the site containing the current folder (if isolated), otherwise the default. Works without the
 //! daemon, reading config.toml directly, so it stays fast and usable when the daemon is down.
 
-use devid_daemon::{config::Config, install, paths::Paths, php, sites};
+use devid_daemon::{config::Config, install, paths::Paths, php, phpext, sites};
 use std::{
     ffi::OsString,
     os::unix::process::CommandExt,
@@ -49,6 +49,8 @@ fn run(name: &str, args: Vec<OsString>, paths: &Paths) -> String {
     let mut cmd = Command::new(&bin);
     // D-008: the same ini as php-fpm, never the compiled-in paths.
     cmd.env("PHPRC", &etc).env("PHP_INI_SCAN_DIR", etc.join("conf.d"));
+    // What catalog extensions need, e.g. imagick's MAGICK_CONFIGURE_PATH (the same as php-fpm gets).
+    cmd.envs(phpext::env(paths, &version));
     if name == "composer" {
         let phar = install::composer_phar(paths);
         if !phar.is_file() {
