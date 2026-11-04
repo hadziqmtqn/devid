@@ -312,3 +312,26 @@ See ARCHITECTURE, "PHP runtime".
   - D-019: the desktop app's technology and timing are decided.
   - D-003 stays superseded. Only its "Tauri v2, menu bar first, no Electron" returns.
 - **Not in Phase 7:** arm64, Linux and Windows builds (D-010, D-019), and notarization.
+
+## D-024: imagick in the catalog keeps every format and adds SVG; Devid ships its ImageMagick config (accepted 2026-11-04, Phase 6)
+
+- **Context:** the E1 spike (`docs/roadmap/phase-6.md`, "E1 results") built imagick 3.8.1 against ImageMagick 7.1.2-35 from static-php-cli. spc's recipe builds ImageMagick `--without-xml`, so SVG could not be read. ImageMagick also looks for its config files (`policy.xml`, `type.xml`) in the build root, which does not exist on a user's Mac, so text without an explicit font file fails.
+- **Decision:**
+  - **Formats:** keep spc's full format set: JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF, and HEIC for reading. AVIF, JPEG XL and HEIC (libaom, libjxl, libheif) are most of the size and the library build time (21 MB and 29 min on the owner's Mac), but phones send HEIC and AVIF is common on the web.
+  - **SVG:** build ImageMagick with libxml2 (`--with-xml`), which is already in the PHP build root, so SVG is read through ImageMagick's internal renderer (MSVG). The owner rates SVG as important. Cost: imagick.so grows from 21 MB to 24 MB.
+  - **Config files:** the catalog entry ships ImageMagick's own default `policy.xml` (its "open" policy, the same as having none) and a `type.xml` that lists fonts that come with macOS (`/System/Library/Fonts`, `/System/Library/Fonts/Supplemental`), so text and SVG `<text>` work with the default font. ImageMagick's own `type-apple.xml` is out of date: only 60 of its 193 font paths exist on macOS 14.
+- **Left out:** writing HEIC (needs the x265 encoder, which is GPL) and reading PDF (needs Ghostscript, AGPL); both stay unavailable.
+- **Open for E2 and E3:**
+  - **Gradients:** in the spike, SVG gradients (linear and radial) render black, also as MVG and with ImageMagick's own `magick` command, so it is not imagick. The draw log shows the gradient pattern is never drawn; the cause is not found. E2 must find it (another ImageMagick release, a fix, or an upstream report) before SVG counts as supported. If MSVG cannot do it, librsvg is the fallback, at the cost of cairo, pango and glib in the build.
+  - **How ImageMagick finds the files:** proposal: Devid sets `MAGICK_CONFIGURE_PATH` for php-fpm and the CLI, as it sets `PHPRC` for `php.ini`. The spike confirmed that this variable makes ImageMagick read the shipped `type.xml`.
+- **Accepted:** by the owner on 2026-11-04.
+
+## D-025: no ionCube Loader in the catalog (accepted 2026-11-04, Phase 6)
+
+- **Context:** the E1 spike checked one closed-source loader (`docs/roadmap/phase-6.md`, "Vendor loader: ionCube"). Its license allows mirroring (D-021 case 1) and loader 14.0.0 loads into Devid's PHP 8.3. But ionCube no longer maintains its Intel Mac loaders: they stop at PHP 8.3, and the 8.4 and 8.5 loaders exist for Apple silicon only. D-021 asks for a maintained release for PHP 8.3–8.5.
+- **Decision:** the catalog does not offer the ionCube Loader. The owner has not used it on this Mac and expects to need it rarely, if ever.
+- **Consequences:**
+  - The README's "cannot be added" list names ionCube on Intel Macs, with the reason.
+  - E3 builds no vendor-entry support (license prompt, `--accept-license`, `source: vendor` downloads) until a vendor loader is accepted. D-021's rules for vendor loaders stay as written for that case.
+- **Revisit:** if a user asks for it, or when Devid supports Apple silicon (D-019), where ionCube still ships PHP 8.4 and 8.5 loaders.
+- **Accepted:** by the owner on 2026-11-04.

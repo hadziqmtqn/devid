@@ -43,7 +43,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 3 | nginx and Apache adapters | done 2026-11-02 (folded into Phase 2 M7, with Caddy) |
 | 4 | TUI (ratatui) on top of the daemon API; colors per D-017; plan in `docs/roadmap/phase-4.md` | done 2026-11-03 (T1–T5, released as v0.2.0) |
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | done 2026-11-02 (R1–R5) |
-| 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | E1 spike in progress (apcu and mongodb pass, 2026-11-03) |
+| 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | E1 spike done (2026-11-04): apcu, mongodb, ldap and imagick pass on 8.4 and 8.5; ionCube loads on 8.3 only (Intel); E2 next |
 | 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023); plan in `docs/roadmap/phase-7.md` | planned, starts after Phase 6 is released |
 
 ## Open risks (Phase 1 must prove)
@@ -125,13 +125,16 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - ✅ (2026-11-02) HTTPS calls from PHP succeed, including site-to-site through the Devid CA.
 - ✅ (2026-11-02) erdbpro-saas loads through the static php-fpm on Caddy, nginx and Apache.
 
-### Phase 6 E1 spike (2026-11-03)
+### Phase 6 E1 spike (2026-11-03, 2026-11-04)
 
-Shared extensions built separately against the static PHP build root load into Devid's released PHP 8.5.12, in the CLI and php-fpm (script `spike/ext/build.sh`):
-- **apcu 5.1.28:** builds in 6 s, 91 KB, links only `libSystem`; works.
-- **mongodb 2.5.5:** builds in 3 min 53 s, 8.7 MB, carries its own static OpenSSL; BSON and TLS verification work, also next to PHP's OpenSSL, Xdebug and apcu.
+Shared extensions built separately against the static PHP build root load into Devid's released PHP 8.5.12 and 8.4.27, in the CLI and php-fpm, next to each other and to Xdebug (script `spike/ext/build.sh`):
+- **apcu 5.1.28:** builds in 6–8 s, 91 KB, links only `libSystem`; works.
+- **mongodb 2.5.5:** builds in about 4–5 min, 8.7 MB, carries its own static OpenSSL; BSON and TLS verification work, also next to PHP's OpenSSL.
+- **ldap (php-src):** OpenLDAP 2.7.2 from spc (5.5 min), extension 388 KB; uses PHP's own OpenSSL; LDAPS bind verifies the certificate and host name.
+- **imagick 3.8.1:** ImageMagick 7.1.2 from spc (29 min, mostly AVIF, JPEG XL and HEIC libraries), extension 21 MB; JPEG, PNG, GIF, WebP, AVIF, JPEG XL and TIFF work next to gd; HEIC read only, no PDF reading (needs Ghostscript); SVG works once ImageMagick is built with libxml2 (24 MB), except gradients, which render black (open, D-024); adds about 0.15 s to every CLI start.
+- **ionCube Loader 14.0.0:** its license allows mirroring; loads into the released PHP 8.3.36 (CLI and php-fpm), and must come before Xdebug. ionCube's Intel Mac loaders stop at PHP 8.3 and are no longer maintained; 8.4 and 8.5 loaders exist for Apple silicon only.
 
-Details, findings for the catalog build (OpenSSL rebuilds, CA trust, build-path rpath) and what is still untested are in `docs/roadmap/phase-6.md`, "E1 results so far".
+Details, findings for the catalog build (load-time symbol check, which OpenSSL, CA trust, build paths, ImageMagick config files), open questions for E2 and what is still untested are in `docs/roadmap/phase-6.md`, "E1 results". After the spike, the gitignored build root in `spike/php` holds PHP 8.4.27 with OpenLDAP and ImageMagick.
 
 ## Machine state
 
