@@ -2,7 +2,7 @@
 
 > Scope: letting users install PHP extensions that Devid does not bundle, only from verified sources (D-021, which supersedes D-020)
 > Verified against: 2026-11-04
-> Status: E1 done (2026-11-04): apcu, mongodb, ldap and imagick pass on PHP 8.4 and 8.5; the ionCube Loader may be mirrored and loads, but on Intel Macs only for PHP 8.3, and it is not offered (D-025). E2 is next. D-022 (mysqli, readline and soap bundled) shipped in `devid-binaries` 2026.11.03-4
+> Status: E1 done and E2 done (2026-11-04). Release `2026.11.04-6` of `devid-binaries` carries apcu, mongodb, ldap and imagick for PHP 8.3, 8.4 and 8.5. E3 is next; its design (below) was accepted on 2026-11-04. ionCube is not offered (D-025). D-022 (mysqli, readline and soap bundled) shipped in `devid-binaries` 2026.11.03-4
 
 Devid's PHP is a static build with a fixed extension set (D-008). Xdebug and pcov already ship as separate `.so` files, which shows that the static php-fpm can load shared extensions. Phase 6 adds a second, opt-in set: the **extension catalog**.
 
@@ -72,7 +72,7 @@ The catalog is curated, not a copy of every extension. Packagist lists 356 exten
 | 2 | imap | Sail installs it; removed from php-src in 8.4 and barely maintained | `sirlouen/imap` (unofficial) |
 | 2 | excimer, event, zstd, brotli, rdkafka, yaml, uuid, ds, ast, mailparse | profiling, ReactPHP/Reverb event loops, compression, Kafka, others | on PIE |
 
-Priority 1 is built in E2. Priority 2 and anything else waits for a request.
+E2 shipped the four that passed E1 (apcu, mongodb, ldap, imagick). igbinary, msgpack, memcached and swoole follow as recipe PRs in `devid-binaries`, which need no Devid release. Priority 2 and anything else waits for a request.
 
 ### Gaps in the bundled build (D-022, shipped 2026-11-03)
 
@@ -118,11 +118,53 @@ This table goes into the README when Phase 6 ships (E5). The E1 spike confirms o
 | # | Milestone | Done when |
 |---|---|---|
 | E1 | **Spike:** build apcu (no deps), mongodb (bundles libraries, uses OpenSSL), ldap (php-src, needs OpenLDAP) and imagick (external library) as shared extensions against Devid's static PHP 8.4 and 8.5; load each in the CLI and php-fpm, with Xdebug on and off. Check one closed-source loader's license and loading. Record results in PROJECT_CONTEXT and correct the table above. | each case is shown to work or the reason it cannot is known |
-| E2 | **Catalog in `devid-binaries`:** CI builds the first extensions per PHP version, publishes them with checksums and adds the `extensions` section to `manifest.json`. | the manifest lists apcu (and the other E1 successes) for 8.3, 8.4 and 8.5 |
+| E2 | **Catalog in `devid-binaries`:** CI builds the first extensions per PHP version, publishes them with checksums and adds the `extensions` section to `manifest.json`. | the manifest lists apcu (and the other E1 successes) for 8.3, 8.4 and 8.5. **Done 2026-11-04** (release `2026.11.04-6`; record in `docs/implementation-timeline/extensions/`) |
 | E3 | **Daemon and CLI:** `devid php ext available / install / remove / list` with verify, load check and rollback; `devid update` and `doctor` cover catalog extensions. Vendor entries (license prompt, `source: vendor` downloads) wait until a vendor loader is accepted into the catalog; none is (D-025). | `devid php ext install 8.4 apcu` works on the owner's Mac; a failing extension is rolled back and PHP keeps running |
 | E4 | **TUI:** the PHP page's Extensions section shows catalog extensions with install and remove (with confirmation). | the same from the TUI |
 | E5 | **Docs and release:** the README section "PHP extensions" with the tables above, a release. | `devid self-update` brings it to the owner's Mac |
 | E6 | **Adding catalog entries later (GitHub Actions, `devid-binaries`):** a workflow that takes a new recipe (a PR or a manual run with the package name and version), builds it for every PHP version, runs the load and smoke tests, and publishes it with a new `manifest.json`. A scheduled job lists PIE candidates (darwin + NTS) and new releases of catalog entries for review; it never adds an entry by itself. | a new extension reaches the catalog through one reviewed recipe PR, without a Devid release |
+
+### E3 design (accepted 2026-11-04)
+
+What the daemon and CLI do with the catalog that E2 publishes (`manifest.json`, `extensions.<php minor>.<name>`; see the `devid-binaries` README).
+
+**Commands.** The CLI's `devid php ext` keeps `devid php ext 8.5 xdebug on|off`. A first word of `available`, `install`, `remove` or `list` selects the new commands instead:
+
+| Command | Request | What it does |
+|---|---|---|
+| `devid php ext available <ver>` | `PhpExtCatalog` | the catalog entries for that PHP version, marked installed or not |
+| `devid php ext install <ver> <name>` | `PhpExtInstall` | see "Install" below |
+| `devid php ext remove <ver> <name>` | `PhpExtRemove` | removes the ini, restarts php-fpm, then deletes the files |
+| `devid php ext list <ver>` | `PhpExtList` | bundled extensions (`php -m`), Xdebug and pcov on or off, installed catalog extensions |
+
+**Files.**
+- The archive unpacks to `~/.devid/php-ext/<ver>/<name>/` (`<name>.so`, `ext.json`, `LICENSES/`, `etc/`), outside `~/.devid/php/<ver>/`. `install_php` replaces that folder on every PHP install or update and keeps only `etc/`, so files inside it would be deleted.
+- Devid records the archive's SHA-256 next to it (`.sha256`). That lets `devid update` find a rebuild of the same version, for example one with a new OpenSSL.
+- Turning an extension on writes `~/.devid/php/<ver>/etc/conf.d/devid-<name>.ini` (`extension=<absolute path>`), the same way Xdebug and pcov work.
+
+**Environment** (imagick: `MAGICK_CONFIGURE_PATH`).
+- php-fpm starts workers with a cleared environment (`clear_env = yes`), so the variable goes into the pool as `env[MAGICK_CONFIGURE_PATH] = …` in the generated `php-fpm.conf`.
+- The `php` shim sets it too. It reads the `env` of each installed extension from its `ext.json`: a few small files, so the shim stays fast.
+
+**Install.**
+1. Read the manifest. Refuse when the entry is missing for that PHP version, or when its `php_api` differs from the installed PHP's ("run `devid update` first").
+2. Download and verify with the code `devid update` uses (`releases::download`: the trusted prefix and SHA-256).
+3. Unpack into a temporary folder, then rename it into place.
+4. Write the ini, then a **preflight before touching the running PHP**: `php -m` and `php-fpm -m` with the real `php.ini` and `conf.d` must list the extension and print no warning or error.
+   - If the preflight fails, Devid deletes the ini and the files and shows PHP's output. The running php-fpm was never restarted, so the sites never notice.
+5. Only then regenerate `php-fpm.conf` (for `env[]`) and restart that version's php-fpm.
+
+**`devid update`.** After it installs a new PHP build, it reinstalls every installed catalog extension of that version from the same manifest. With `--check`, it also lists extensions whose manifest SHA-256 differs from the recorded one. An extension that the new release no longer offers is turned off and reported, never left half-loaded.
+
+**`devid doctor`.** For each installed PHP version, every installed catalog extension must load (`php -m`); otherwise the fix is `devid php ext install <ver> <name>` again or `remove`.
+
+**Not in E3:**
+- vendor entries (license prompt, `source: vendor`), because the catalog has none (D-025);
+- the TUI, which is E4.
+
+**Tests:**
+- unit tests for reading catalog entries, the `php_api` check, the ini and the `env[]` lines;
+- an integration test with a local `file://` release (as `tests/releases.rs` does), whose archives hold fake `.so` files and whose fake `php`/`php-fpm` list or refuse them. This covers the preflight, the rollback and the reinstall after `update`.
 
 ### E1 results (2026-11-03, 2026-11-04)
 
