@@ -28,7 +28,7 @@ Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revi
   - The window opens at 1080×680, clamped to the visible screen area, with a minimum of 760×520 and no narrow layout (D-026).
   - Icons: the padlock-and-prompt logo. `icon.icns` comes from per-size PNGs through `iconutil`, and the menu-bar icon is the outline padlock as a template image (D-026).
 - **Resources:**
-  - At idle only the menu-bar icon runs; there is no Dock icon.
+  - At idle only the menu-bar icon runs; there is no Dock icon. While the window is open, Devid is also in the Dock and Cmd+Tab (D-030).
   - The window and its web view are created when opened and destroyed when closed. Then the app restarts itself in place as icon-only, which frees the memory the window left behind (D-027).
   - While the window is visible, the app polls `status` every 2 s, as the TUI does. When the window is hidden, it stops.
 - **Builds:**
@@ -52,7 +52,7 @@ Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revi
 |---|---|---|
 | G1 | **Spike:** `crates/gui` with a menu-bar icon and one read-only Sites window filled from the daemon. Measure on the owner's Mac (see "Spike limits"). Decide how CI builds the app: Ubuntu with the WebKitGTK dev packages, or a macOS job. | the numbers are in PROJECT_CONTEXT, and the limits pass or the fallback is decided |
 | G2 | **Window pages:** Sites, PHP (with the Phase 6 extensions), Server, Logs and Settings from the prototype. Every action uses an existing daemon request; destructive actions ask first. | the app does everything the TUI does, on the owner's Mac |
-| G3 | **Menu bar:** state icon, Start All, Stop All, Restart, Open Devid and Quit. Launch at login is opt-in. | the menu works with the window closed, and idle stays within the G1 limits |
+| G3 | **Menu bar:** state icon, Start All, Stop All, Restart, Open Devid and Quit. Launch at login is opt-in. Automatic update checks with a dot on the icon (D-028). | the menu works with the window closed, and idle stays within the G1 limits |
 | G4 | **Packaging and install:**<br>• `Devid.app`, ad-hoc signed (D-010), built in the devid release workflow on `macos-15-intel` and published with the `devid` binary in `devid-binaries`<br>• `devid setup --gui` installs it into `~/Applications` (no sudo)<br>• `devid self-update` updates it<br>• `devid uninstall` removes it<br>• if the daemon reports another version, the app says to run `devid self-update` | the owner gets `Devid.app` through `devid self-update` and opens it from Finder |
 | G5 | **Docs and release:** a README section for the desktop app, the timeline record, and a release. | released and installed on the owner's Mac |
 
@@ -140,7 +140,10 @@ The window has the five pages, with every action the TUI has.
 
 - **Messages:** results use the CLI's and TUI's wording in sentence case (D-026). The update summary, the extension progress line and the install summary follow `tui/mod.rs` and `cli/src/main.rs` line by line.
 - **Not in G2:** launch at login (G3) and the menu-bar menu (G3).
-- **Known bug:** after Cancel in the folder picker, the window goes behind other apps. It is fixed in the next task.
+- **Fixed after G2 (v0.5.0):**
+  - The folder picker gives the focus back to the window.
+  - macOS actions run `/usr/bin/open`, `osascript` and `pbcopy` by full path, because a terminal's PATH can put its own `open` first.
+- **Added after G2 (v0.5.0):** Remove site for parked sites, with a Served / Removed filter (D-029).
 
 ## Open questions
 

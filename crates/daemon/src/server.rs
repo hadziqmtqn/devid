@@ -576,7 +576,9 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                     })
                 })
                 .collect();
-            Ok(json!({"ok": true, "sites": list, "parked": config.parked}))
+            let ignored: Vec<Value> =
+                config.ignored.iter().map(|p| json!({"name": sites::ignored_name(p), "path": p})).collect();
+            Ok(json!({"ok": true, "sites": list, "parked": config.parked, "ignored": ignored}))
         }
         Request::Link { name, path } => {
             let path = existing_dir(&path)?;
@@ -612,6 +614,24 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 return Err(format!("{path} is not parked"));
             }
             Ok(json!({"ok": true}))
+        }),
+        Request::Ignore { site } => state.mutate(|c, sites| {
+            let s = sites.iter().find(|s| s.name == site).ok_or(format!("no site named {site}"))?;
+            if s.linked {
+                return Err(format!("{site} is linked; use `devid unlink {site}`"));
+            }
+            let path = s.path.display().to_string();
+            let parked = c.parked.iter().find(|p| s.path.starts_with(p)).cloned().unwrap_or_default();
+            c.ignored.push(path.clone());
+            Ok(json!({"ok": true, "site": site, "path": path, "parked": parked}))
+        }),
+        Request::Unignore { site } => state.mutate(|c, _| {
+            let before = c.ignored.len();
+            c.ignored.retain(|p| sites::ignored_name(p) != site && *p != site);
+            if c.ignored.len() == before {
+                return Err(format!("{site} is not an ignored site"));
+            }
+            Ok(json!({"ok": true, "site": site}))
         }),
         Request::Isolate { version, site, cwd } => {
             php::check_supported(&version).map_err(|e| e.to_string())?;

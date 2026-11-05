@@ -45,7 +45,8 @@ pub fn resolve(config: &Config) -> Vec<Site> {
         for entry in entries.flatten() {
             let path = entry.path();
             let hidden = entry.file_name().to_string_lossy().starts_with('.');
-            if hidden || !path.is_dir() {
+            let ignored = config.ignored.iter().any(|i| Path::new(i) == path);
+            if hidden || ignored || !path.is_dir() {
                 continue;
             }
             if let Some(name) = name_from_folder(&entry.file_name().to_string_lossy()) {
@@ -73,6 +74,12 @@ pub fn resolve(config: &Config) -> Vec<Site> {
             }
         })
         .collect()
+}
+
+/// The site name an ignored folder had (D-029): its folder name as a site name.
+pub fn ignored_name(path: &str) -> String {
+    let folder = Path::new(path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    name_from_folder(&folder).unwrap_or(folder)
 }
 
 /// The site whose folder contains `dir` (deepest match), for commands run inside a project.
@@ -129,6 +136,12 @@ mod tests {
 
         assert_eq!(find_by_dir(&sites, &root.join("parked/blog/public/css")).unwrap().name, "blog");
         assert!(find_by_dir(&sites, &root).is_none());
+
+        // An ignored parked folder is skipped (D-029); a link of the same name still wins.
+        let ignored = Config { ignored: vec![root.join("parked/blog").display().to_string()], ..config.clone() };
+        let names: Vec<String> = resolve(&ignored).into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["api", "shop"]);
+        assert_eq!(ignored_name(&root.join("parked/My_App").display().to_string()), "my-app");
 
         fs::remove_dir_all(&root).unwrap();
     }

@@ -299,7 +299,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         None => {
             let keys = match (app.page, app.focus) {
                 (Page::Sites, Focus::Page) => {
-                    " enter actions · a link folder · p park folder · U unpark · tab sidebar · ? help · q quit"
+                    " enter actions · a link folder · p park folder · U unpark · I unignore · tab sidebar · ? help · q quit"
                 }
                 (Page::Server, _) => {
                     " enter actions (use, install, restart, stop/start, view config) · S stop all · A start all · ? help · q quit"
@@ -312,7 +312,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                     " enter actions (extensions, default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
                 }
                 (Page::Sites, Focus::Sidebar) => {
-                    " ↑↓ pages · enter open · a link folder · p park folder · U unpark · ? help · q quit"
+                    " ↑↓ pages · enter open · a link folder · p park folder · U unpark · I unignore · ? help · q quit"
                 }
             };
             Line::styled(keys, Style::default().add_modifier(Modifier::DIM))
@@ -373,6 +373,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
             let title = match purpose {
                 PickFor::Isolate(site) => format!("PHP version for {site}"),
                 PickFor::Unpark => "Unpark which folder?".to_string(),
+                PickFor::Unignore => "Serve which ignored site again?".to_string(),
             };
             let mut lines: Vec<Line> = options
                 .iter()
@@ -465,8 +466,8 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("r                refresh now (also every 2 s)"),
         Line::raw("q  esc  ctrl-c   quit"),
         Line::raw(""),
-        Line::raw("Sites: enter = actions (open, Terminal, copy, PHP, unlink)"),
-        Line::raw("       a link · p park · U unpark"),
+        Line::raw("Sites: enter = actions (open, Terminal, copy, PHP, remove, unlink)"),
+        Line::raw("       a link · p park · U unpark · I unignore"),
         Line::raw("PHP:   enter = actions · u check updates · U update"),
         Line::raw("       Extensions…: space tick · enter install · r remove"),
         Line::raw("Server: enter = actions · S stop all · A start all"),

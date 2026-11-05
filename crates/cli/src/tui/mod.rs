@@ -21,6 +21,10 @@ fn refresh(app: &mut App, paths: &Paths) {
                 .as_array()
                 .map(|l| l.iter().filter_map(|p| p.as_str().map(String::from)).collect())
                 .unwrap_or_default();
+            app.ignored = sites["ignored"]
+                .as_array()
+                .map(|l| l.iter().filter_map(|i| i["name"].as_str().map(String::from)).collect())
+                .unwrap_or_default();
             app.servers = request(paths, &Request::ServerList)
                 .ok()
                 .and_then(|v| v["servers"].as_array().cloned())
