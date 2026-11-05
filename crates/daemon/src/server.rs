@@ -40,6 +40,40 @@ struct State {
     /// Services the owner stopped on purpose; `apply` leaves them stopped. Not persisted: a
     /// daemon restart (e.g. login) brings everything back.
     paused: Mutex<BTreeSet<String>>,
+    /// The running catalog install, for `PhpExtProgress`; one at a time.
+    ext_job: Mutex<Option<ExtJob>>,
+}
+
+/// Progress of a `PhpExtInstall`. Downloads count for 0–90 % by bytes (the archive's size on disk
+/// while it arrives), then each finished extension and the final restart share the last 10 %.
+struct ExtJob {
+    version: String,
+    total: usize,
+    index: usize,
+    name: String,
+    phase: &'static str,
+    done_bytes: u64,
+    total_bytes: u64,
+    current: Option<(std::path::PathBuf, u64)>,
+    finished: usize,
+}
+
+impl ExtJob {
+    fn percent(&self) -> u64 {
+        let current = match (&self.current, self.phase) {
+            (Some((path, size)), "downloading") => std::fs::metadata(path).map_or(0, |m| m.len()).min(*size),
+            (Some((_, size)), _) => *size,
+            (None, _) => 0,
+        };
+        let bytes = (90 * (self.done_bytes + current)).checked_div(self.total_bytes).unwrap_or(0);
+        let steps = 10 * self.finished as u64 / (self.total as u64 + 1);
+        (bytes + steps).min(99)
+    }
+
+    fn json(&self) -> Value {
+        json!({"version": self.version, "index": self.index, "total": self.total, "name": self.name,
+               "phase": self.phase, "percent": self.percent()})
+    }
 }
 
 fn php_service(version: &str) -> String {
@@ -202,6 +236,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         started: Instant::now(),
         stopping: AtomicBool::new(false),
         paused: Mutex::new(BTreeSet::new()),
+        ext_job: Mutex::new(None),
     });
     spawn_signal_thread(Arc::clone(&state));
     if let Err(e) = state.apply(&config) {
@@ -350,16 +385,15 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 .into_iter()
                 .map(|e| {
                     let have = installed.iter().find(|i| i.name == e.name).map(|i| i.version.clone());
-                    json!({"name": e.name, "version": e.version, "license": e.license, "installed": have})
+                    json!({"name": e.name, "version": e.version, "license": e.license, "size": e.size, "installed": have})
                 })
                 .collect();
             Ok(json!({"ok": true, "version": version, "release": manifest["tag"], "extensions": list}))
         }
-        Request::PhpExtInstall { version, name } => {
-            let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
-            let installed = phpext::install(&state.paths, &version, &name, &manifest).map_err(|e| e.to_string())?;
-            state.supervisor.restart(&php_service(&version));
-            Ok(json!({"ok": true, "version": version, "name": name, "installed": installed}))
+        Request::PhpExtInstall { version, names } => install_extensions(state, &version, &names),
+        Request::PhpExtProgress => {
+            let job = state.ext_job.lock().unwrap();
+            Ok(json!({"ok": true, "progress": job.as_ref().map(ExtJob::json)}))
         }
         Request::PhpExtRemove { version, name } => {
             phpext::remove(&state.paths, &version, &name).map_err(|e| e.to_string())?;
@@ -684,6 +718,72 @@ fn install_php(state: &State, version: &str, from: Option<String>, manifest: Opt
     Ok(php::full_version(&state.paths, version).unwrap_or_default())
 }
 
+/// Install catalog extensions one after another, each verified and preflighted on its own, then
+/// restart php-fpm once. One failing does not undo the others; the reply has a result per name.
+fn install_extensions(state: &State, version: &str, names: &[String]) -> Result<Value, String> {
+    if names.is_empty() {
+        return Err("name at least one extension".into());
+    }
+    let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
+    let catalog = phpext::catalog(&manifest, version);
+    let entry = |n: &str| catalog.iter().find(|e| e.name == n);
+    {
+        let mut job = state.ext_job.lock().unwrap();
+        if job.is_some() {
+            return Err("another extension install is running; wait for it to finish".into());
+        }
+        *job = Some(ExtJob {
+            version: version.to_string(),
+            total: names.len(),
+            index: 0,
+            name: String::new(),
+            phase: "starting",
+            done_bytes: 0,
+            total_bytes: names.iter().filter_map(|n| entry(n)).map(|e| e.size).sum(),
+            current: None,
+            finished: 0,
+        });
+    }
+    // Clears the job however this returns, so a failure never blocks the next install.
+    struct Clear<'a>(&'a Mutex<Option<ExtJob>>);
+    impl Drop for Clear<'_> {
+        fn drop(&mut self) {
+            *self.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+    let _clear = Clear(&state.ext_job);
+    let update = |f: &dyn Fn(&mut ExtJob)| {
+        if let Some(job) = state.ext_job.lock().unwrap().as_mut() {
+            f(job);
+        }
+    };
+    let mut results = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        let current = entry(name).map(|e| (releases::archive_path(&state.paths, &e.artifact), e.size));
+        update(&|j| {
+            j.index = i + 1;
+            j.name = name.clone();
+            j.phase = "downloading";
+            j.current = current.clone();
+        });
+        let result = phpext::install(&state.paths, version, name, &manifest, &|| update(&|j| j.phase = "checking"));
+        update(&|j| {
+            j.done_bytes += j.current.take().map_or(0, |(_, size)| size);
+            j.finished += 1;
+        });
+        results.push(match result {
+            Ok(v) => json!({"name": name, "ok": true, "installed": v}),
+            Err(e) => json!({"name": name, "ok": false, "error": e.to_string()}),
+        });
+    }
+    let restarted = results.iter().any(|r| r["ok"] == true);
+    if restarted {
+        update(&|j| j.phase = "restarting");
+        state.supervisor.restart(&php_service(version));
+    }
+    Ok(json!({"ok": true, "version": version, "results": results, "restarted": restarted}))
+}
+
 /// Catalog extensions of PHP `version` whose archive in the release differs from the installed one
 /// (a new version, or a rebuild for a new PHP or OpenSSL). Reinstalled unless `check`. One the release
 /// no longer offers stays as it is, unless PHP itself was updated: then it is removed, since it was
@@ -705,7 +805,7 @@ fn update_extensions(
                     if e.version == ext.version { format!("{} (new build)", e.version) } else { e.version.clone() };
                 changes.push(json!({"what": what, "from": ext.version, "to": to}));
                 if !check {
-                    phpext::install(&state.paths, version, &ext.name, manifest).map_err(|e| e.to_string())?;
+                    phpext::install(&state.paths, version, &ext.name, manifest, &|| {}).map_err(|e| e.to_string())?;
                 }
             }
             None if php_updated => {
@@ -752,4 +852,37 @@ fn install_server(state: &State, server: &str, from: Option<String>, manifest: O
     state.supervisor.restart(server);
     let config = state.config.lock().unwrap();
     state.apply(&config)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn extension_progress_counts_bytes_then_steps() {
+        let dir = std::env::temp_dir().join(format!("devid-extjob-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("ext-b.tar.gz");
+        std::fs::write(&file, vec![0u8; 300]).unwrap();
+        // Two extensions of 100 and 900 bytes: the first is done, 300 bytes of the second arrived.
+        let mut job = super::ExtJob {
+            version: "8.4".into(),
+            total: 2,
+            index: 2,
+            name: "b".into(),
+            phase: "downloading",
+            done_bytes: 100,
+            total_bytes: 1000,
+            current: Some((file.clone(), 900)),
+            finished: 1,
+        };
+        assert_eq!(job.percent(), 36 + 3); // 90 % of 400/1000, plus 10 % of 1 in 3 steps
+        job.phase = "checking";
+        assert_eq!(job.percent(), 90 + 3);
+        job.current = None;
+        job.done_bytes = 1000;
+        job.finished = 2;
+        job.phase = "restarting";
+        assert_eq!(job.percent(), 96);
+        assert_eq!(job.json()["name"], "b");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

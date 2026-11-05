@@ -45,7 +45,7 @@ The script downloads `devid`, checks its sha256 and starts `devid setup`. The sc
    - trust for the Devid certificate authority.
 6. Downloads PHP 8.5 and nginx (both sha256-checked), unless PHP or the web server is already installed.
 
-To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version of Devid, run `DEVID_VERSION=0.3.0 sh install.sh`.
+To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version of Devid, run `DEVID_VERSION=0.4.0 sh install.sh`.
 
 To choose PHP versions and the web server, pass options to setup. With the install script, put them after `sh -s --`:
 
@@ -91,7 +91,7 @@ devid php install 8.4          # add another version
 devid php use 8.4              # make it the default
 devid php ext 8.5 xdebug on    # turn Xdebug (or pcov) on/off for a version
 devid php ext available 8.4    # extra extensions from Devid's catalog
-devid php ext install 8.4 imagick
+devid php ext install 8.4 imagick mongodb   # one or more; php-fpm restarts once
 devid php ext remove 8.4 imagick
 devid php ext list 8.4         # bundled, Xdebug/pcov, and installed catalog extensions
 ```
@@ -149,7 +149,8 @@ Run `devid` with no arguments, or run `devid tui`. The TUI has five pages: Sites
 |---|---|
 | Everywhere | `↑ ↓` or `j k` move · `tab` switch sidebar/page · `1`–`5` jump to a page · `r` refresh · `?` help · `q` quit |
 | Sites | `enter` actions (open in browser, open in Terminal, copy URL, PHP version, unlink) · `a` link a folder · `p` park a folder · `U` unpark |
-| PHP | `enter` actions (make default, Xdebug, pcov, edit php.ini, restart, install) · `u` check for updates · `U` update |
+| PHP | `enter` actions (extensions, make default, Xdebug, pcov, edit php.ini, restart, install) · `u` check for updates · `U` update |
+| PHP → Extensions… | `space` tick catalog extensions · `tab` to the Install button · `enter` install the ticked ones (after a confirmation, with an `installing 2/3 imagick… 52%` line) · `r` remove one (after a confirmation) · `x` Xdebug · `c` pcov |
 | Server | `enter` actions (use, install, restart, stop/start, view config) · `S` stop all · `A` start all |
 | Logs | `f` follow · `c` clear |
 | Settings | `d` health check · `u` check for updates · `U` update PHP/nginx · `D` update devid · `s` setup · `X` uninstall |
@@ -251,8 +252,8 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
 ### Now: more PHP extensions (Phase 6)
 
 - **Done in v0.3.0:** `devid php ext install <version> <name>` adds an extension from Devid's catalog: apcu, mongodb, ldap and imagick (D-021, `docs/roadmap/phase-6.md`). See [PHP](#php).
+- **Done in v0.4.0:** the TUI's PHP page installs several catalog extensions at once and removes them one at a time; the CLI takes several names too.
 - **Next:**
-  - the extensions in the TUI's PHP page;
   - igbinary, msgpack, memcached and swoole in the catalog;
   - a list in these docs of which extensions can be added and why some cannot.
 

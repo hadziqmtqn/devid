@@ -141,7 +141,8 @@ fn catalog_extensions_install_update_remove() {
     assert!(!available.contains("installed"), "{available}");
 
     // Install: files outside the PHP folder, the ini in conf.d, the archive's sha256 recorded.
-    assert!(ok(&["php", "ext", "install", "8.5", "apcu"]).contains("apcu 5.1.28 installed for PHP 8.5"));
+    let o = ok(&["php", "ext", "install", "8.5", "apcu"]);
+    assert!(o.contains("installed apcu 5.1.28 · php-fpm 8.5 restarted"), "{o}");
     let dir = home.join("php-ext/8.5/apcu");
     assert!(dir.join("apcu.so").is_file());
     let ini = fs::read_to_string(home.join("php/8.5/etc/conf.d/devid-apcu.ini")).unwrap();
@@ -151,8 +152,14 @@ fn catalog_extensions_install_update_remove() {
     assert!(fs::read_dir(home.join("downloads")).unwrap().flatten().all(|e| e.file_name() == "manifest.json"));
     wait_for("8.5 running after the install", || fpm_pid(&home).is_some());
 
+    // Several at once: each on its own, one php-fpm restart; a failure does not undo the others.
+    let o = devid(&home, &["php", "ext", "install", "8.5", "imagick", "broken"]);
+    assert!(!o.status.success(), "a failed extension makes the command fail");
+    assert!(out(&o).contains("installed imagick 3.8.1 · php-fpm 8.5 restarted · failed: broken"), "{}", out(&o));
+    assert!(stderr(&o).contains("broken: broken does not load in PHP 8.5") && stderr(&o).contains("Unable to load"));
+    assert!(home.join("php-ext/8.5/imagick/imagick.so").is_file() && !home.join("php-ext/8.5/broken").exists());
+
     // imagick's environment reaches the php-fpm pool and the php shim.
-    ok(&["php", "ext", "install", "8.5", "imagick"]);
     let conf = fs::read_to_string(home.join("php/8.5/etc/php-fpm.conf")).unwrap();
     let magick = home.join("php-ext/8.5/imagick/etc");
     assert!(conf.contains(&format!("env[MAGICK_CONFIGURE_PATH] = \"{}\"", magick.display())), "{conf}");

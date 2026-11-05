@@ -43,6 +43,17 @@ fn refresh(app: &mut App, paths: &Paths) {
     }
 }
 
+/// Fetch a PHP version's catalog (from the release manifest) and extension list, and show them.
+/// Only when the view opens, never on the 2 s refresh: the catalog needs the network.
+fn load_extensions(app: &mut App, paths: &Paths, version: &str) {
+    let catalog = request(paths, &Request::PhpExtCatalog { version: version.to_string() });
+    let list = request(paths, &Request::PhpExtList { version: version.to_string() });
+    match (catalog, list) {
+        (Ok(c), Ok(l)) => app.open_extensions(version, &c, &l),
+        (Err(e), _) | (_, Err(e)) => app.message = Some((format!("extensions: {e}"), true)),
+    }
+}
+
 /// Carry out an effect; the result becomes the message line.
 fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
     use std::process::{Command, Stdio};
@@ -98,9 +109,11 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
             Err(e) => (e, true),
         },
         // Handled in the loop, which owns the terminal.
-        Effect::EditThenRestart { .. } | Effect::View(_) | Effect::Doctor => {
-            ("internal: handled by the loop".into(), true)
-        }
+        Effect::EditThenRestart { .. }
+        | Effect::View(_)
+        | Effect::Doctor
+        | Effect::LoadExtensions(_)
+        | Effect::ExtInstall { .. } => ("internal: handled by the loop".into(), true),
         Effect::CheckUpdates => {
             let current = devid_daemon::VERSION;
             let devid = match crate::setup::latest_devid(paths) {
@@ -162,6 +175,27 @@ pub fn run(paths: &Paths) -> Result<Option<Vec<String>>, String> {
                         });
                     }
                     Action::Refresh => last = None,
+                    Action::Do(Effect::LoadExtensions(version)) => {
+                        app.message = Some(("⏳ loading the catalog…".into(), false));
+                        terminal.draw(|frame| ui::draw(frame, &app))?;
+                        app.message = None;
+                        load_extensions(&mut app, paths, &version);
+                    }
+                    Action::Do(Effect::ExtInstall { version, names }) => {
+                        // The install runs in another thread; show its progress line until it replies.
+                        let reply = crate::ext_install_with_progress(paths, &version, &names, |line| {
+                            app.message = Some((format!("⏳ {line}"), false));
+                            let _ = terminal.draw(|frame| ui::draw(frame, &app));
+                        });
+                        app.message = Some(match reply {
+                            Ok(v) => crate::ext_install_summary(&v),
+                            Err(e) => (e, true),
+                        });
+                        if let Some(v) = app.reopen.take() {
+                            load_extensions(&mut app, paths, &v);
+                        }
+                        last = None;
+                    }
                     Action::Do(Effect::View(path)) => {
                         ratatui::restore();
                         let _ = std::process::Command::new("sh")
@@ -198,6 +232,10 @@ pub fn run(paths: &Paths) -> Result<Option<Vec<String>>, String> {
                             terminal.draw(|frame| ui::draw(frame, &app))?;
                         }
                         app.message = Some(perform(effect, paths));
+                        // An action from the Extensions view returns to it, with fresh data.
+                        if let Some(v) = app.reopen.take() {
+                            load_extensions(&mut app, paths, &v);
+                        }
                         last = None; // show the change right away
                     }
                     Action::None => {}
@@ -338,6 +376,41 @@ mod tests {
         assert!(render(&a).0.contains("✗ PHP 8.3 is not installed"));
         a.message = None;
         assert!(render(&a).0.contains("enter actions"), "Sites keys when the page has focus");
+    }
+
+    #[test]
+    fn extensions_view_and_its_confirmation() {
+        use super::app::Mode;
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut a = app(false);
+        a.page = Page::Php;
+        a.focus = Focus::Page;
+        let catalog = json!({"release": "2026.11.04-6", "extensions": [
+            {"name": "apcu", "version": "5.1.28", "license": "PHP-3.01", "size": 33_000, "installed": null},
+            {"name": "imagick", "version": "3.8.1", "license": "PHP-3.01", "size": 9_500_000, "installed": "3.8.1"}
+        ]});
+        let list = json!({"bundled": ["Core", "gd", "intl"], "shipped": {"pcov": false, "xdebug": true}});
+        a.open_extensions("8.5", &catalog, &list);
+        a.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        let (text, _) = render(&a);
+        for want in [
+            "PHP 8.5 · Extensions",
+            "Catalog (release 2026.11.04-6)",
+            "[x] apcu",
+            "available  33 KB",
+            "✓  imagick",
+            "installed 3.8.1",
+            "[ Install selected (1) ]",
+            "xdebug on",
+            "Core, gd, intl",
+        ] {
+            assert!(text.contains(want), "{want:?} missing from:\n{text}");
+        }
+        a.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::ConfirmExt { .. }));
+        let (text, _) = render(&a);
+        assert!(text.contains("Install apcu 5.1.28 for PHP 8.5?") && text.contains("y yes · n back"), "{text}");
     }
 
     #[test]

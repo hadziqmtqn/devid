@@ -1,7 +1,7 @@
 //! Rendering. D-017: the terminal's 16 colors, used only for meaning; every state also has a
 //! symbol and text; NO_COLOR drops colors entirely (selection still shows through REVERSED).
 
-use super::app::{App, Focus, InputFor, Mode, Page, PickFor};
+use super::app::{App, ExtView, Focus, InputFor, Mode, Page, PickFor, human_size};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -309,7 +309,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 }
                 (Page::Logs, _) => " ↑↓ pick a log · f follow · c clear · tab sidebar · ? help · q quit",
                 (Page::Php, _) => {
-                    " enter actions (default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
+                    " enter actions (extensions, default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
                 }
                 (Page::Sites, Focus::Sidebar) => {
                     " ↑↓ pages · enter open · a link folder · p park folder · U unpark · ? help · q quit"
@@ -394,7 +394,62 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
                 vec![Line::styled(format!(" {question}"), warn(app)), hint(" y yes · n no")],
             );
         }
+        Mode::Extensions(v) => draw_extensions(frame, app, v),
+        Mode::ConfirmExt { question, .. } => {
+            popup(
+                frame,
+                64,
+                7,
+                "Confirm",
+                vec![Line::styled(format!(" {question}"), warn(app)), Line::raw(""), hint(" y yes · n back")],
+            );
+        }
     }
+}
+
+/// The Extensions view: catalog rows with checkboxes, the Install button under a rule, then
+/// Xdebug/pcov and the bundled extensions.
+fn draw_extensions(frame: &mut Frame, app: &App, v: &ExtView) {
+    let hint = |t: &str| Line::styled(t.to_string(), Style::default().add_modifier(Modifier::DIM));
+    let mut lines =
+        vec![Line::styled(format!(" Catalog (release {})", v.release), Style::default().add_modifier(Modifier::BOLD))];
+    if v.rows.is_empty() {
+        lines.push(Line::raw(format!("   nothing for PHP {} in this release", v.version)));
+    }
+    for (i, r) in v.rows.iter().enumerate() {
+        let (mark, state) = match &r.installed {
+            Some(have) => (" ✓ ".to_string(), format!("installed {have}")),
+            None if v.selected.contains(&r.name) => ("[x]".to_string(), format!("available  {}", human_size(r.size))),
+            None => ("[ ]".to_string(), format!("available  {}", human_size(r.size))),
+        };
+        let text = format!(
+            " {} {mark} {:<10} {:<9} {:<11} {state}",
+            if i == v.index { "›" } else { " " },
+            r.name,
+            r.version,
+            r.license
+        );
+        lines.push(if i == v.index {
+            Line::styled(text, selected())
+        } else if r.installed.is_some() {
+            Line::styled(text, ok(app))
+        } else {
+            Line::raw(text)
+        });
+    }
+    lines.push(Line::raw(format!(" {}", "─".repeat(66))));
+    let button = format!("   [ Install selected ({}) ]", v.selected.len());
+    lines.push(if v.index == v.rows.len() { Line::styled(button, selected()) } else { Line::raw(button) });
+    lines.push(Line::raw(""));
+    let shipped: Vec<String> =
+        v.shipped.iter().map(|(k, on)| format!("{k} {}", if *on { "on" } else { "off" })).collect();
+    lines.push(Line::raw(format!(" Shipped  {}", shipped.join(" · "))));
+    lines.push(Line::raw(format!(" Bundled  {}", v.bundled.join(", "))));
+    lines.push(Line::raw(""));
+    lines.push(hint(" space tick · tab to the button · enter install the ticked ones"));
+    lines.push(hint(" r remove · x Xdebug · c pcov · esc close"));
+    let height = lines.len() as u16 + 2 + (v.bundled.join(", ").len() as u16 / 60);
+    popup(frame, 72, height, &format!("PHP {} · Extensions", v.version), lines);
 }
 
 fn draw_help(frame: &mut Frame, app: &App) {
@@ -413,6 +468,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("Sites: enter = actions (open, Terminal, copy, PHP, unlink)"),
         Line::raw("       a link · p park · U unpark"),
         Line::raw("PHP:   enter = actions · u check updates · U update"),
+        Line::raw("       Extensions…: space tick · enter install · r remove"),
         Line::raw("Server: enter = actions · S stop all · A start all"),
         Line::raw("Logs:  f follow · c clear"),
         Line::raw("Settings: d doctor · u/U updates · D devid · s setup · X uninstall"),

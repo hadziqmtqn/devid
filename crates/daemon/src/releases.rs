@@ -110,6 +110,11 @@ pub fn sha256_hex(path: &Path) -> io::Result<String> {
     Ok(ctx.finish().as_ref().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Where `download` writes `artifact`'s archive while it arrives (its size there is the progress).
+pub fn archive_path(paths: &crate::paths::Paths, artifact: &Artifact) -> PathBuf {
+    paths.home.join("downloads").join(format!("{}-{}.tar.gz", artifact.tool, artifact.version))
+}
+
 /// Download, verify and unpack `artifact`; returns the unpacked folder (deleted and recreated per call).
 pub fn download(paths: &crate::paths::Paths, artifact: &Artifact) -> io::Result<PathBuf> {
     let prefix = trusted_prefix(&manifest_url());
@@ -122,7 +127,7 @@ pub fn download(paths: &crate::paths::Paths, artifact: &Artifact) -> io::Result<
     let dir = paths.home.join("downloads");
     fs::create_dir_all(&dir)?;
     let name = format!("{}-{}", artifact.tool, artifact.version);
-    let archive = dir.join(format!("{name}.tar.gz"));
+    let archive = archive_path(paths, artifact);
     fetch(&artifact.url, &archive)?;
     let actual = sha256_hex(&archive)?;
     if actual != artifact.sha256 {
