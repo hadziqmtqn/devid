@@ -2,7 +2,7 @@
 
 > Scope: letting users install PHP extensions that Devid does not bundle, only from verified sources (D-021, which supersedes D-020)
 > Verified against: 2026-11-04
-> Status: E1, E2 and E3 done (2026-11-04). Release `2026.11.04-6` of `devid-binaries` carries apcu, mongodb, ldap and imagick for PHP 8.3, 8.4 and 8.5; Devid v0.3.0 installs them (`devid php ext install`). E4 (TUI) is next. ionCube is not offered (D-025).
+> Status: E1–E4 done (2026-11-05). Release `2026.11.04-6` of `devid-binaries` carries apcu, mongodb, ldap and imagick for PHP 8.3, 8.4 and 8.5. Devid v0.3.0 installs them from the CLI, v0.4.0 also from the TUI (several at once, with progress). E5 (docs and release) is next. ionCube is not offered (D-025).
 
 Devid's PHP is a static build with a fixed extension set (D-008). Xdebug and pcov already ship as separate `.so` files, which shows that the static php-fpm can load shared extensions. Phase 6 adds a second, opt-in set: the **extension catalog**.
 
@@ -120,7 +120,7 @@ This table goes into the README when Phase 6 ships (E5). The E1 spike confirms o
 | E1 | **Spike:** build apcu (no deps), mongodb (bundles libraries, uses OpenSSL), ldap (php-src, needs OpenLDAP) and imagick (external library) as shared extensions against Devid's static PHP 8.4 and 8.5; load each in the CLI and php-fpm, with Xdebug on and off. Check one closed-source loader's license and loading. Record results in PROJECT_CONTEXT and correct the table above. | each case is shown to work or the reason it cannot is known |
 | E2 | **Catalog in `devid-binaries`:** CI builds the first extensions per PHP version, publishes them with checksums and adds the `extensions` section to `manifest.json`. | the manifest lists apcu (and the other E1 successes) for 8.3, 8.4 and 8.5. **Done 2026-11-04** (release `2026.11.04-6`; record in `docs/implementation-timeline/extensions/`) |
 | E3 | **Daemon and CLI:** `devid php ext available / install / remove / list` with verify, load check and rollback; `devid update` and `doctor` cover catalog extensions. Vendor entries (license prompt, `source: vendor` downloads) wait until a vendor loader is accepted into the catalog; none is (D-025). | `devid php ext install 8.4 apcu` works on the owner's Mac; a failing extension is rolled back and PHP keeps running. **Done 2026-11-04** (v0.3.0; record in `docs/implementation-timeline/extensions/`) |
-| E4 | **TUI:** the PHP page's Extensions section shows catalog extensions with install and remove (with confirmation). | the same from the TUI |
+| E4 | **TUI:** the PHP page's Extensions section shows catalog extensions with install and remove (with confirmation). | the same from the TUI. **Done 2026-11-05** (v0.4.0; see "E4 design") |
 | E5 | **Docs and release:** the README section "PHP extensions" with the tables above, a release. | `devid self-update` brings it to the owner's Mac |
 | E6 | **Adding catalog entries later (GitHub Actions, `devid-binaries`):** a workflow that takes a new recipe (a PR or a manual run with the package name and version), builds it for every PHP version, runs the load and smoke tests, and publishes it with a new `manifest.json`. A scheduled job lists PIE candidates (darwin + NTS) and new releases of catalog entries for review; it never adds an entry by itself. | a new extension reaches the catalog through one reviewed recipe PR, without a Devid release |
 
@@ -165,6 +165,20 @@ What the daemon and CLI do with the catalog that E2 publishes (`manifest.json`, 
 **Tests:**
 - unit tests for reading catalog entries, the `php_api` check, the ini and the `env[]` lines;
 - an integration test with a local `file://` release (as `tests/releases.rs` does), whose archives hold fake `.so` files and whose fake `php`/`php-fpm` list or refuse them. This covers the preflight, the rollback and the reinstall after `update`.
+
+### E4 design (accepted 2026-11-05)
+
+The owner chose these on 2026-11-05:
+- **Several at once, removal one at a time.** The PHP menu's "Extensions…" lists the catalog for that version. `space` ticks extensions that are not installed. The Install button sits under a rule, and `enter` on it asks for confirmation, naming each extension and the download size. An installed row has no checkbox: `r` removes it after its own confirmation. `x` and `c` switch Xdebug and pcov from the same view.
+- **A progress line, not a bar:** `installing 2/3 imagick… 52%`, then `checking …` and `restarting php-fpm …`. The percentage is real, not animated:
+  - downloads count for 0–90 %, by bytes: the archive's size on disk against its size in the manifest;
+  - each finished extension and the final restart share the last 10 %.
+- **The daemon:**
+  - `PhpExtInstall` takes several names and installs them one after another, each verified and preflighted on its own;
+  - php-fpm restarts once at the end, and one failure does not undo the others; the reply has a result per name;
+  - `PhpExtProgress` reports the running install; a second install is refused while one runs.
+- **The CLI** takes several names too (`devid php ext install 8.5 apcu mongodb`, D-012). It prints the same progress line when stdout is a terminal, the summary, and each failure's full message.
+- **Network use:** the catalog is fetched only when the Extensions view opens, never on the 2 s refresh. Nothing is downloaded until the owner confirms an install.
 
 ### E1 results (2026-11-03, 2026-11-04)
 

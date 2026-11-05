@@ -201,9 +201,9 @@ enum PhpAction {
     /// Make a version the default
     Use { version: String },
     /// Extensions. `devid php ext 8.5 xdebug on|off` (xdebug, pcov); catalog extensions:
-    /// `available <ver>`, `install <ver> <name>`, `remove <ver> <name>`, `list <ver>`
+    /// `available <ver>`, `install <ver> <name>...`, `remove <ver> <name>`, `list <ver>`
     Ext {
-        #[arg(required = true, num_args = 2..=3, value_name = "ARGS")]
+        #[arg(required = true, num_args = 2.., value_name = "ARGS")]
         args: Vec<String>,
     },
 }
@@ -270,7 +270,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
                 println!("PHP {} installed", v["version"].as_str().filter(|s| !s.is_empty()).unwrap_or(&version))
             })
         }
-        Command::Php { action: PhpAction::Ext { args } } => php_ext(&send, &args),
+        Command::Php { action: PhpAction::Ext { args } } => php_ext(paths, &send, &args),
         Command::Stop { service } if service == "all" => {
             send(Request::StopAll).map(|_| println!("stopped all services"))
         }
@@ -454,8 +454,74 @@ fn print_sites(list: &serde_json::Value, json: bool) {
     }
 }
 
+/// One line for a running `PhpExtInstall` (`PhpExtProgress`), e.g. "installing 2/3 imagick… 52%".
+pub fn ext_progress_text(p: &serde_json::Value) -> String {
+    let s = |v: &serde_json::Value| v.as_str().unwrap_or("?").to_string();
+    let (i, n, pct) = (&p["index"], &p["total"], &p["percent"]);
+    match p["phase"].as_str() {
+        Some("downloading") => format!("installing {i}/{n} {}… {pct}%", s(&p["name"])),
+        Some("checking") => format!("checking {i}/{n} {}… {pct}%", s(&p["name"])),
+        Some("restarting") => format!("restarting php-fpm {}… {pct}%", s(&p["version"])),
+        _ => format!("starting… {pct}%"),
+    }
+}
+
+/// Summary of a `PhpExtInstall` reply; true when any extension failed.
+pub fn ext_install_summary(reply: &serde_json::Value) -> (String, bool) {
+    let results = reply["results"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let name = |r: &serde_json::Value| r["name"].as_str().unwrap_or("?").to_string();
+    let ok: Vec<String> = results
+        .iter()
+        .filter(|r| r["ok"] == true)
+        .map(|r| format!("{} {}", name(r), r["installed"].as_str().unwrap_or("")))
+        .collect();
+    let failed: Vec<String> = results
+        .iter()
+        .filter(|r| r["ok"] != true)
+        .map(|r| format!("{} ({})", name(r), r["error"].as_str().unwrap_or("?").lines().next().unwrap_or("?")))
+        .collect();
+    let mut parts = Vec::new();
+    if !ok.is_empty() {
+        parts.push(format!("installed {}", ok.join(", ")));
+    }
+    if reply["restarted"] == true {
+        parts.push(format!("php-fpm {} restarted", reply["version"].as_str().unwrap_or("?")));
+    }
+    if !failed.is_empty() {
+        parts.push(format!("failed: {}", failed.join(", ")));
+    }
+    (parts.join(" · "), !failed.is_empty())
+}
+
+/// Send `PhpExtInstall` from another thread and report its progress every 200 ms until it replies.
+pub fn ext_install_with_progress(
+    paths: &Paths,
+    version: &str,
+    names: &[String],
+    mut on_progress: impl FnMut(&str),
+) -> Result<serde_json::Value, String> {
+    let req = Request::PhpExtInstall { version: version.to_string(), names: names.to_vec() };
+    let worker = {
+        let paths = paths.clone();
+        std::thread::spawn(move || request(&paths, &req))
+    };
+    while !worker.is_finished() {
+        if let Ok(v) = request(paths, &Request::PhpExtProgress)
+            && v["progress"].is_object()
+        {
+            on_progress(&ext_progress_text(&v["progress"]));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    worker.join().map_err(|_| "the install thread panicked".to_string())?
+}
+
 /// `devid php ext …`: xdebug/pcov on/off, or the catalog commands (Phase 6).
-fn php_ext(send: &dyn Fn(Request) -> Result<serde_json::Value, String>, args: &[String]) -> Result<(), String> {
+fn php_ext(
+    paths: &Paths,
+    send: &dyn Fn(Request) -> Result<serde_json::Value, String>,
+    args: &[String],
+) -> Result<(), String> {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let s = |v: &serde_json::Value| v.as_str().unwrap_or("?").to_string();
     match a.as_slice() {
@@ -470,10 +536,27 @@ fn php_ext(send: &dyn Fn(Request) -> Result<serde_json::Value, String>, args: &[
                 println!("  {:<10} {:<9} {:<12} {mark}", s(&e["name"]), s(&e["version"]), s(&e["license"]));
             }
         }),
-        ["install", version, name] => {
-            println!("downloading {name} for PHP {version} from Devid's releases (sha256-checked)…");
-            send(Request::PhpExtInstall { version: version.to_string(), name: name.to_string() })
-                .map(|v| println!("{name} {} installed for PHP {version} (php-fpm restarted)", s(&v["installed"])))
+        ["install", version, names @ ..] if !names.is_empty() => {
+            use std::io::IsTerminal;
+            let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+            println!("downloading {} for PHP {version} from Devid's releases (sha256-checked)…", names.join(", "));
+            let tty = std::io::stdout().is_terminal();
+            let reply = ext_install_with_progress(paths, version, &names, |line| {
+                if tty {
+                    print!("\r\x1b[K{line}");
+                    let _ = std::io::stdout().flush();
+                }
+            });
+            if tty {
+                print!("\r\x1b[K");
+            }
+            let reply = reply?;
+            let (summary, failed) = ext_install_summary(&reply);
+            println!("{summary}");
+            for r in reply["results"].as_array().into_iter().flatten().filter(|r| r["ok"] != true) {
+                eprintln!("{}: {}", s(&r["name"]), s(&r["error"]));
+            }
+            if failed { Err("not every extension was installed".into()) } else { Ok(()) }
         }
         ["remove", version, name] => {
             send(Request::PhpExtRemove { version: version.to_string(), name: name.to_string() })
@@ -510,7 +593,7 @@ fn php_ext(send: &dyn Fn(Request) -> Result<serde_json::Value, String>, args: &[
                 .map(|_| println!("{ext} {state} for PHP {version} (php-fpm restarted)"))
         }
         _ => Err("usage: devid php ext <ver> xdebug|pcov on|off, or devid php ext available|list <ver>, \
-                  or devid php ext install|remove <ver> <name>"
+                  or devid php ext install <ver> <name>..., or devid php ext remove <ver> <name>"
             .into()),
     }
 }

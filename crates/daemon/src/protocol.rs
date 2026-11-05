@@ -28,11 +28,14 @@ pub enum Request {
     PhpExtCatalog {
         version: String,
     },
-    /// Download, verify and turn on a catalog extension (restarts that version's php-fpm).
+    /// Download, verify and turn on catalog extensions, one after another; php-fpm restarts once at
+    /// the end. Replies with one result per name.
     PhpExtInstall {
         version: String,
-        name: String,
+        names: Vec<String>,
     },
+    /// The running `PhpExtInstall`, if any: which extension, phase and percent.
+    PhpExtProgress,
     PhpExtRemove {
         version: String,
         name: String,

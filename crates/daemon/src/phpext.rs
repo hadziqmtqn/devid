@@ -26,6 +26,8 @@ pub struct Entry {
     pub kind: String,
     pub php_api: String,
     pub license: String,
+    /// Archive size in bytes, from the manifest (0 if missing); for progress only.
+    pub size: u64,
     pub artifact: Artifact,
 }
 
@@ -71,6 +73,7 @@ pub fn catalog(manifest: &Value, version: &str) -> Vec<Entry> {
                 kind,
                 php_api: s(&e["php_api"])?,
                 license: s(&e["license"]).unwrap_or_default(),
+                size: a["size"].as_u64().unwrap_or(0),
                 artifact: Artifact {
                     tool: format!("ext-{name}-php{version}"),
                     version: s(&e["version"])?,
@@ -172,8 +175,15 @@ fn ini_body(version: &str, name: &str, kind: &str, so: &Path) -> String {
 
 /// Download, verify and turn on `name` for PHP `version` from `manifest`; returns its version.
 /// Nothing changes unless `php -m` and `php-fpm -m` load it cleanly: on failure the previous state
-/// (files and ini) comes back. The caller restarts php-fpm.
-pub fn install(paths: &Paths, version: &str, name: &str, manifest: &Value) -> io::Result<String> {
+/// (files and ini) comes back. `downloaded` runs once the archive is verified, before the checks
+/// (for progress). The caller restarts php-fpm.
+pub fn install(
+    paths: &Paths,
+    version: &str,
+    name: &str,
+    manifest: &Value,
+    downloaded: &dyn Fn(),
+) -> io::Result<String> {
     php::check_supported(version)?;
     check_name(name)?;
     if !php::installed(paths).iter().any(|v| v == version) {
@@ -191,6 +201,7 @@ pub fn install(paths: &Paths, version: &str, name: &str, manifest: &Value) -> io
     }
 
     let unpacked = releases::download(paths, &entry.artifact)?;
+    downloaded();
     let result = place(paths, version, &entry, &unpacked);
     let _ = fs::remove_dir_all(&unpacked);
     result?;
@@ -280,7 +291,7 @@ mod tests {
     #[test]
     fn catalog_reads_the_manifest() {
         let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
-        let a = json!({arch: {"url": "u", "sha256": "AB"}});
+        let a = json!({arch: {"url": "u", "sha256": "AB", "size": 2048}});
         let m = json!({"extensions": {"8.4": {
             "mongodb": {"version": "2.5.5", "type": "extension", "php_api": "20240924", "license": "Apache-2.0", "arch": a},
             "apcu": {"version": "5.1.28", "type": "extension", "php_api": "20240924", "arch": a},
@@ -294,6 +305,7 @@ mod tests {
         assert_eq!(c[1].artifact.sha256, "ab");
         assert_eq!(c[1].artifact.tool, "ext-mongodb-php8.4");
         assert_eq!(c[1].license, "Apache-2.0");
+        assert_eq!(c[1].size, 2048);
         assert!(catalog(&m, "8.5").is_empty());
         assert!(catalog(&json!({}), "8.4").is_empty());
     }
