@@ -6,7 +6,7 @@ Native local PHP development app for macOS (Herd-like, no Homebrew, no VM). Rust
 
 - `docs/README.md` is the entry point. Start with `docs/structure-of-app/PROJECT_CONTEXT.md`, then `ARCHITECTURE.md` and `DECISIONS.md`.
 - The docs are the source of truth for plans and decisions. Update them instead of this file.
-- The approved UI prototype lives outside this repo at `/Users/meowpush/Projects/devid-prototype/index.html`.
+- The approved UI prototype lives outside this repo at `/Users/meowpush/Projects/devid-prototype/redesign/` (D-026).
 
 ## Current stage
 
