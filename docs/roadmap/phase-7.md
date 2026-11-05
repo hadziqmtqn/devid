@@ -2,7 +2,7 @@
 
 > Scope: a menu-bar desktop app for macOS, built with Tauri v2 and plain HTML ported from the revised prototype, as another client of the daemon (D-023, D-026)
 > Verified against: 2026-11-05
-> Status: planned; starts after Phase 6 is released (E5)
+> Status: in progress; G1 (spike) done 2026-11-05, see "G1 results"
 
 Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revised prototype (D-026: the Claude Design board "Devid — macOS style", copied to `devid-prototype/redesign/`): a menu-bar icon plus a window with the same pages as the TUI. The daemon does the work, as it does for the CLI and the TUI.
 
@@ -29,7 +29,7 @@ Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revi
   - Icons: the padlock-and-prompt logo. `icon.icns` comes from per-size PNGs through `iconutil`, and the menu-bar icon is the outline padlock as a template image (D-026).
 - **Resources:**
   - At idle only the menu-bar icon runs; there is no Dock icon.
-  - The window and its web view are created when opened and destroyed when closed.
+  - The window and its web view are created when opened and destroyed when closed. Then the app restarts itself in place as icon-only, which frees the memory the window left behind (D-027).
   - While the window is visible, the app polls `status` every 2 s, as the TUI does. When the window is hidden, it stops.
 - **Builds:**
   - `crates/gui` is a workspace member, but not one of the `default-members`. A plain `cargo build` or `cargo test` of the daemon and CLI never compiles Tauri, which matters on a 2-core Mac.
@@ -73,12 +73,47 @@ Also recorded:
 - the size of `Devid.app`;
 - confirmation that `cargo build` of the daemon and CLI is unchanged.
 
-**If the limits fail:** the fallback keeps Tauri but drops the resident icon. The app runs only while its window is open, like the TUI, so its idle cost is zero. That would be a new decision; a Swift menu-bar app is the other way out.
+**If the limits had failed:** the fallback keeps Tauri but drops the resident icon. The app runs only while its window is open, like the TUI, so its idle cost is zero. That would be a new decision; a Swift menu-bar app is the other way out.
+
+### G1 results (2026-11-05)
+
+Measured on the owner's Mac (Intel, 2 cores, macOS 14.8) with the release build of `crates/gui`: Tauri 2.12.5, the system WKWebView, a template menu-bar icon (Open Devid, Quit Devid) and a read-only Sites window filled by the `status` and `sites` requests. "Footprint" is `footprint`'s figure, the one Activity Monitor shows. RSS also counts system frameworks shared with every app.
+
+| State | Result | Limit |
+|---|---|---|
+| Icon only, window never opened | 21 MB footprint (41 MB RSS), 3 threads. CPU time 0.00 s over 5 minutes. No WebKit process. | ✅ at most 30 MB, about 0% CPU |
+| Window open on Sites | app 41–46 MB, WebContent 39–67 MB, Networking 2.5 MB: about 82–115 MB in total | recorded |
+| 30 s after the window closes, app only keeps running | WebContent has exited, Networking (2.5 MB) stays, the app stays at 41–46 MB. About 43–48 MB in total, still the same two minutes later. | ❌ within 5 MB of icon only |
+| 30 s after the window closes, app restarts itself (D-027) | 21 MB, then 22 MB after two minutes, same pid. No WebKit process. | ✅ |
+
+- **What the closed window leaves behind:** about +20 MB in the app process:
+  - IOKit 7.9 MB, IOAccelerator 4.0 MB and 2.0 MB of other graphics memory;
+  - malloc 3.6 MB;
+  - CoreUI images 0.9 MB.
+  Hence D-027: the app `exec`s a fresh `devid-gui --background` when its last window closes.
+- **Builds:**
+  - **Cold:** debug 8 min 26 s; release 10 min 39 s (`lto = true`, `opt-level = "s"`).
+  - **Incremental release** after a `main.rs` change: 2 min 7 s – 2 min 50 s.
+  - **First clippy** of the crate: 3 min 52 s.
+- **Size:** the release binary is 8.2 MB and links only `/usr/lib` and `/System` libraries. `Devid.app` (G4) adds `icon.icns` and `Info.plist`.
+- **Daemon and CLI builds are unchanged:** `crates/gui` is not a default member, so `cargo build`, `cargo clippy` and `cargo test` do not compile Tauri (`cargo tree -i tauri` finds no Tauri without `-p devid-gui`).
+- **The ground rules hold:**
+  - The web view calls `status` and `sites` only. They are the only app commands, through the app manifest in `build.rs` and `capabilities/main.json`. The capability also allows dragging the window by its toolbar.
+  - The CSP is `default-src 'self'`.
+  - No Tauri plugin and no network port.
+  - The page polls `status` every 2 s while visible, and refetches `sites` when the count changes.
+- **Shared client:** the socket client (`protocol::request`) moved from the CLI into `crates/daemon`, so the CLI, the TUI and the app use one implementation.
+- **CI:** a `gui` job on `ubuntu-latest` installs `libwebkit2gtk-4.1-dev` and runs clippy and the tests for `-p devid-gui`. A macOS job would cost ten times the minutes. The app ships for macOS only, so the `cfg(target_os = "macos")` lines (Dock icon, title bar, reopen) are checked on the owner's Mac and in the release build (G4).
+- **Icons:** `crates/gui/icons/render.swift` draws `icon.png` (1024 px, logo C) and `tray.png` (40×44 px, the outline template) from the logo's SVG geometry with CoreGraphics. The per-size `.icns` (D-026) comes in G4.
+- **Not measured yet:**
+  - the cold start of `Devid.app` from Finder;
+  - the window on a second screen;
+  - the menu-bar position after the restart (G3).
 
 ## Open questions
 
 - **Install by default or opt-in?** Proposal: opt-in (`devid setup --gui`), so CLI-only users get nothing new.
-- **Tauri's CLI (`cargo tauri build`) or a small bundling script for the `.app`?** The Tauri CLI is another large `cargo install`. Decide in G1 or G4.
+- **Tauri's CLI (`cargo tauri build`) or a small bundling script for the `.app`?** The Tauri CLI is another large `cargo install`. G1 needed neither (`cargo build -p devid-gui` runs the app unbundled). Decide in G4.
 - **Gatekeeper:** a file downloaded with `curl` carries no quarantine attribute, so an ad-hoc signed app should open without a prompt. Verify in G4.
 
 ## Out of scope

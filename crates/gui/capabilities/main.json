@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "The Devid window: read daemon state and drag the window by its toolbar. Nothing else.",
+  "windows": ["main"],
+  "permissions": ["allow-status", "allow-sites", "core:window:allow-start-dragging"]
+}

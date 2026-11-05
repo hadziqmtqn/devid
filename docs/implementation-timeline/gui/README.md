@@ -1,0 +1,5 @@
+# GUI
+
+| Date | Record |
+|---|---|
+| 2026-11-05 | [Phase 7 G1: Tauri spike, menu-bar icon and a read-only Sites window](2026-11-05-g1-spike.md) |

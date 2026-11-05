@@ -5,13 +5,12 @@ mod shim;
 mod tui;
 
 use clap::{Parser, Subcommand};
-use devid_daemon::{paths::Paths, protocol::Request, server};
-use std::{
-    io::{BufRead, BufReader, Write},
-    os::unix::net::UnixStream,
-    path::PathBuf,
-    process::ExitCode,
+use devid_daemon::{
+    paths::Paths,
+    protocol::{Request, request},
+    server,
 };
+use std::{io::Write, path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
 #[command(name = "devid", version, about = "Local PHP development for macOS")]
@@ -388,25 +387,6 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Unisolate { site } => send(Request::Unisolate { site, cwd: cwd()? })
             .map(|v| println!("{} uses the default PHP again", v["site"].as_str().unwrap_or("?"))),
     }
-}
-
-/// Send one request and return the daemon's JSON reply.
-fn request(paths: &Paths, req: &Request) -> Result<serde_json::Value, String> {
-    let sock = paths.socket();
-    let mut stream = UnixStream::connect(&sock).map_err(|_| {
-        format!("daemon is not running (no socket at {}); start it with `devid daemon run`", sock.display())
-    })?;
-    let mut line = serde_json::to_string(req).expect("request serializes");
-    line.push('\n');
-    stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-
-    let mut reply = String::new();
-    BufReader::new(stream).read_line(&mut reply).map_err(|e| e.to_string())?;
-    let value: serde_json::Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from daemon: {e}"))?;
-    if value["ok"] == false {
-        return Err(value["error"].as_str().unwrap_or("daemon returned an error").to_string());
-    }
-    Ok(value)
 }
 
 fn print_status(v: &serde_json::Value, json: bool) {

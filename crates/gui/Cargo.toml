@@ -1,0 +1,18 @@
+[package]
+name = "devid-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The desktop app (Phase 7, D-023/D-026). Not a default member: a plain
+# `cargo build` or `cargo test` never compiles Tauri. Build it with `-p devid-gui`.
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", default-features = false }
+
+[dependencies]
+devid-daemon = { path = "../daemon" }
+serde_json.workspace = true
+# No default features: no asset compression, no runtime ACL, no Linux X11/D-Bus.
+tauri = { version = "2.12.5", default-features = false, features = ["wry", "tray-icon"] }

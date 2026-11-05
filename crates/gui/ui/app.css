@@ -1,0 +1,96 @@
+/* Ported from the prototype's macOS variant (D-026). Light and dark follow the system. */
+:root {
+  color-scheme: light dark;
+  --bg: #F5F5F7; --surface: #FFFFFF; --surface-2: rgba(0,0,0,.055);
+  --border: rgba(0,0,0,.09); --border-strong: rgba(0,0,0,.17);
+  --text: #1D1D1F; --text-2: #6E6E73; --text-3: #6E6E73;
+  --accent: #1C8350; --accent-ink: #17734A; --accent-soft: rgba(52,199,123,.16);
+  --ok: #15803D; --ok-soft: #E3F4E8; --warn: #B45309; --warn-soft: #FDF1DF;
+  --danger: #C81E1E; --danger-bg: #DC2626; --danger-soft: #FDECEC;
+  --sidebar: #EAEAEF;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1E1E20; --surface: #2A2A2D; --surface-2: rgba(255,255,255,.08);
+    --border: rgba(255,255,255,.08); --border-strong: rgba(255,255,255,.17);
+    --text: #F5F5F7; --text-2: #A1A1A6; --text-3: #8E8E93;
+    --accent-ink: #5EDC98; --accent-soft: rgba(52,199,123,.2);
+    --ok: #4ADE80; --ok-soft: #143020; --warn: #FBBF24; --warn-soft: #33270F;
+    --danger: #F87171; --danger-soft: #3A1717;
+    --sidebar: #2A2A30;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; } /* the classes below set display */
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  -webkit-user-select: none; user-select: none; cursor: default;
+}
+button { font: inherit; color: inherit; }
+button:disabled { opacity: .45; }
+
+.dv-app { display: flex; height: 100%; }
+.dv-grow { flex: 1 1 auto; min-width: 0; }
+.dv-strong { font-weight: 600; }
+.dv-light { font-weight: 400; }
+.dv-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.dv-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dv-sub { font-size: 11px; color: var(--text-2); }
+.dv-note { margin: 2px 4px 8px; }
+p.dv-note { margin: 10px 4px 0; }
+
+.dv-ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.dv-ico .f { fill: currentColor; stroke: none; }
+
+/* Sidebar: room for the traffic lights, then the sections and the status card. */
+.dv-side { width: 200px; flex: none; display: flex; flex-direction: column; gap: 1px; padding: 0 10px 10px; background: var(--sidebar); border-right: .5px solid var(--border); }
+.dv-lights { height: 52px; flex: none; }
+.dv-side nav { display: flex; flex-direction: column; gap: 2px; }
+.dv-nav { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; text-align: left; }
+.dv-nav.is-active { background: var(--accent); color: #fff; }
+.dv-nav .dv-ico { width: 20px; height: 20px; padding: 3.5px; border-radius: 5px; color: #fff; stroke-width: 1.7; background: #8E8E93; }
+.dv-side nav button:nth-child(1) .dv-ico { background: #0A84FF; }
+.dv-side nav button:nth-child(2) .dv-ico { background: #5E5CE6; }
+.dv-side nav button:nth-child(3) .dv-ico { background: #30B158; }
+.dv-nav .dv-chip { background: none; color: var(--text-2); font-weight: 400; }
+.dv-nav.is-active .dv-chip { color: rgba(255,255,255,.85); }
+.dv-statuscard { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 10px; background: var(--surface-2); }
+
+/* Main column: toolbar, then content at most 720 wide, centered. */
+.dv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dv-toolbar { height: 52px; flex: none; display: flex; flex-direction: column; justify-content: center; padding: 0 14px 0 20px; border-bottom: .5px solid var(--border); }
+.dv-toolbar h1 { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.25; }
+.dv-toolbar .dv-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.dv-wrap { max-width: 720px; margin: 0 auto; padding: 4px 24px 32px; }
+
+.dv-h2 { margin: 20px 4px 4px; font-size: 13px; font-weight: 600; }
+.dv-card { background: var(--surface); border: .5px solid var(--border); border-radius: 10px; }
+.dv-card:empty { display: none; }
+.dv-row { display: flex; align-items: center; gap: 8px 10px; min-height: 42px; padding: 7px 12px; }
+.dv-row + .dv-row { box-shadow: inset 12px .5px 0 var(--surface), inset 0 .5px 0 var(--border); }
+.dv-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dv-host { font-weight: 500; }
+.dv-empty { padding: 24px 20px; text-align: center; }
+
+.dv-avatar { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 7px; background: var(--surface-2); color: var(--text-2); font-weight: 700; font-size: 12px; }
+.dv-avatar.folder { background: none; }
+.dv-avatar.folder .dv-ico { width: 26px; height: 26px; fill: #5EB0F5; stroke: #3B9BEF; stroke-width: .8; }
+.dv-vbadge { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 7px; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, #8c95cf, #4f5b93); color: #fff; }
+.dv-vbadge.off { background: var(--surface-2); color: var(--text-2); }
+
+.dv-chip { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 4px; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.dv-chip.accent { background: var(--accent-soft); color: var(--accent-ink); }
+.dv-chip.warn { background: var(--warn-soft); color: var(--warn); }
+.dv-chip.muted { background: var(--surface-2); color: var(--text-2); }
+.dv-chip:empty { display: none; }
+
+.dv-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--text-3); }
+.dv-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.dv-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.dv-dot.bad { background: var(--danger-bg); box-shadow: 0 0 0 3px var(--danger-soft); }
+
+.dv-banner { display: flex; align-items: center; gap: 12px; margin-top: 20px; padding: 12px 14px; border-radius: 10px; background: var(--danger-soft); }

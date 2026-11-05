@@ -34,6 +34,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-024 | 2026-11-04 | accepted | imagick in the catalog keeps every format and adds SVG; Devid ships its ImageMagick config |
 | D-025 | 2026-11-04 | accepted | No ionCube Loader in the catalog |
 | D-026 | 2026-11-05 | accepted (Phase 7) | The revised prototype is the desktop app's reference, ported to plain HTML; English UI, a 1080×680 window, the padlock-and-prompt logo |
+| D-027 | 2026-11-05 | accepted (Phase 7, from the G1 spike) | When its window closes, the desktop app restarts itself in place as icon-only, so the window's memory goes back to the system |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -374,3 +375,26 @@ See ARCHITECTURE, "PHP runtime".
   - **Wordmark:** if the "devid" wordmark is used (the README, an About window), it is converted to SVG paths, so no font loads from the network. App text uses the system font.
 - **Amends:** D-023. Its reference file changes, and "the prototype is reused as it is" becomes "ported from the prototype". Everything else in D-023 stands.
 - **Accepted:** by the owner on 2026-11-05.
+
+## D-027: the desktop app restarts itself as icon-only when its window closes (accepted 2026-11-05, Phase 7)
+
+- **Context:** the G1 spike (`docs/roadmap/phase-7.md`, "G1 results") measured the app on the owner's Mac.
+  - Icon only: 21 MB footprint and no CPU at idle, within the 30 MB limit.
+  - After the window has been open once and is closed, the web view's processes exit, but the app process keeps about 20 MB more (41 to 46 MB). Most of it is graphics memory (IOKit 7.9 MB, IOAccelerator 4.0 MB, 2.0 MB other graphics), the rest malloc. It stayed for the two minutes measured. WebKit's Networking process (2.5 MB) also stays.
+  - The limit was "within 5 MB of icon only". The total after closing missed it by about 22 to 27 MB.
+- **Decision:**
+  - When the last window closes, the app replaces itself with a fresh `devid-gui --background` (`exec`, so the pid stays the same).
+  - Measured: 21 to 22 MB, 30 s and 120 s after the window closed, and no WebKit process left.
+  - If the restart fails, the app keeps running as before, with that memory. Quit is not affected.
+- **Safety:**
+  - **Only on window close:** the restart runs only when the last window is destroyed. Tauri (tauri-runtime-wry 2.12.3) sends `ExitRequested` without an exit code only then. Quit Devid passes an exit code, and Cmd+Q, logout and shutdown end through AppKit's terminate. None of them restarts the app.
+  - **The restart touches only `devid-gui`:** the daemon, php-fpm and the web server are separate processes, so sites keep running.
+  - **Requests in flight:** a daemon request in flight when the window closes still completes, because the daemon runs each connection on its own thread. Only the reply is lost, and the next window shows the new state.
+  - **Failure:** if `exec` fails, the app keeps running with the extra memory.
+- **Cost:** the menu-bar icon disappears and comes back in about a second when the window closes. macOS should keep its position (status items are restored by order); G3 confirms this with `Devid.app`.
+- **Rejected:**
+  - **Keep the memory:** about 45 MB from the first time the window opens until logout.
+  - **No resident icon** (the fallback in `phase-7.md`): the app runs only while its window is open. It is not needed, because icon-only passes its limit.
+  - **A separate process for the window:** the same effect, with more code. The menu-bar process would have to start, track and focus a second process.
+- **Amends:** the "30 s after the window closes" limit in `phase-7.md` is met by the restart, not by the process freeing memory.
+- **Accepted:** by the owner on 2026-11-05, after seeing the icon blink for about a second, on the condition that the restart stays safe (see Safety).

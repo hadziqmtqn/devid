@@ -27,3 +27,22 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+
+  gui:
+    # The desktop app (crates/gui, Phase 7) is not a default member, so the job above skips it.
+    # It ships for macOS only, but Linux compiles and lints all of it except a few
+    # `cfg(target_os = "macos")` lines, at a tenth of the cost. Those lines build on the
+    # owner's Mac and in the release build (G4).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gui
+      - run: cargo clippy -p devid-gui --all-targets -- -D warnings
+      - run: cargo test -p devid-gui

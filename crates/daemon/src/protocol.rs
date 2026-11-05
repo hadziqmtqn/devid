@@ -108,3 +108,24 @@ pub enum Request {
         cwd: String,
     },
 }
+
+/// Send one request to the daemon's socket and return its JSON reply.
+/// Shared by every client: the CLI, the TUI and the desktop app.
+pub fn request(paths: &crate::paths::Paths, req: &Request) -> Result<serde_json::Value, String> {
+    use std::io::{BufRead, BufReader, Write};
+    let sock = paths.socket();
+    let mut stream = std::os::unix::net::UnixStream::connect(&sock).map_err(|_| {
+        format!("daemon is not running (no socket at {}); start it with `devid daemon run`", sock.display())
+    })?;
+    let mut line = serde_json::to_string(req).expect("request serializes");
+    line.push('\n');
+    stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply).map_err(|e| e.to_string())?;
+    let value: serde_json::Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from daemon: {e}"))?;
+    if value["ok"] == false {
+        return Err(value["error"].as_str().unwrap_or("daemon returned an error").to_string());
+    }
+    Ok(value)
+}
