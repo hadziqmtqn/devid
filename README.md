@@ -78,6 +78,8 @@ Then open `https://<folder>.test` in your browser. If the folder has a `public/`
 | `devid unpark [path]` | Stops serving a parked folder. |
 | `devid link [name] [--path <dir>]` | Serves one folder (default: the current one) as `<name>.test` (default name: the folder name). |
 | `devid unlink <name>` | Stops serving a linked site. |
+| `devid ignore <name>` | Stops serving one site of a parked folder; its folder is not touched. `devid sites` lists ignored sites. |
+| `devid unignore <name>` | Serves an ignored site again. |
 | `devid sites` | Lists sites with their URL, folder and PHP version. |
 | `devid isolate <version> [--site <name>]` | Pins a site (default: the one containing the current folder) to a PHP version. |
 | `devid unisolate [--site <name>]` | Returns a site to the default PHP version. |

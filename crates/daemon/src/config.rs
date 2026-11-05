@@ -25,6 +25,8 @@ pub struct Config {
     pub links: BTreeMap<String, String>,
     /// Per-site PHP version: site name -> version.
     pub isolated: BTreeMap<String, String>,
+    /// Folders of parked sites the owner removed (D-029): not served; the folders stay as they are.
+    pub ignored: Vec<String>,
 }
 
 impl Default for Config {
@@ -39,6 +41,7 @@ impl Default for Config {
             parked: Vec::new(),
             links: BTreeMap::new(),
             isolated: BTreeMap::new(),
+            ignored: Vec::new(),
         }
     }
 }

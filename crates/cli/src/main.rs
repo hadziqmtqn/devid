@@ -124,6 +124,10 @@ enum Command {
     },
     /// Stop serving a linked site
     Unlink { name: String },
+    /// Stop serving a parked site; its folder is not touched (`unignore` serves it again)
+    Ignore { site: String },
+    /// Serve an ignored parked site again
+    Unignore { site: String },
     /// Serve every subfolder of a folder (default: the current one) as <subfolder>.test
     Park { path: Option<PathBuf> },
     /// Stop serving a parked folder
@@ -373,10 +377,22 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         },
         Command::SelfUpdate { check } => setup::self_update(paths, check),
         Command::Uninstall { dry_run, purge } => setup::uninstall(paths, dry_run, purge),
-        Command::Sites { json } => send(Request::Sites).map(|v| print_sites(&v["sites"], json)),
+        Command::Sites { json } => send(Request::Sites).map(|v| {
+            print_sites(&v["sites"], json);
+            let ignored: Vec<&str> =
+                v["ignored"].as_array().into_iter().flatten().filter_map(|i| i["name"].as_str()).collect();
+            if !json && !ignored.is_empty() {
+                println!("ignored (`devid unignore <name>` serves one again): {}", ignored.join(", "));
+            }
+        }),
         Command::Link { name, path } => send(Request::Link { name, path: abs(path)? })
             .map(|v| println!("linked {}", v["site"].as_str().unwrap_or("?"))),
         Command::Unlink { name } => send(Request::Unlink { name: name.clone() }).map(|_| println!("unlinked {name}")),
+        Command::Ignore { site } => send(Request::Ignore { site: site.clone() })
+            .map(|v| println!("ignored {site}; the folder is still in {}", v["parked"].as_str().unwrap_or("?"))),
+        Command::Unignore { site } => {
+            send(Request::Unignore { site: site.clone() }).map(|_| println!("serving {site} again"))
+        }
         Command::Park { path } => {
             send(Request::Park { path: abs(path)? }).map(|v| println!("parked {}", v["parked"].as_str().unwrap_or("?")))
         }

@@ -29,7 +29,25 @@ pub async fn daemon(req: Request) -> Result<Value, String> {
         Request::ServerInstall { server, .. } => Request::ServerInstall { server, from: None },
         req => req,
     };
-    request(&Paths::from_env(), &req)
+    let paths = Paths::from_env();
+    request(&paths, &req).map_err(|e| {
+        too_old(e, || {
+            let status = request(&paths, &Request::Status).unwrap_or_default();
+            status["version"].as_str().unwrap_or("?").to_string()
+        })
+    })
+}
+
+/// An older daemon rejects a request it does not know with a serde error; say what to do instead.
+fn too_old(err: String, running: impl FnOnce() -> String) -> String {
+    if !err.starts_with("bad request: unknown variant") {
+        return err;
+    }
+    format!(
+        "The running daemon is Devid {}, which does not know this action yet. Update it with `devid self-update` (this app is {}).",
+        running(),
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 #[derive(Deserialize)]
@@ -49,7 +67,9 @@ pub enum Open {
 #[tauri::command]
 pub async fn open(target: Open) -> Result<String, String> {
     let paths = Paths::from_env();
-    let mut cmd = Command::new("open");
+    // Full paths: an app started from a terminal inherits its PATH, where a terminal's own `open`
+    // (cmux puts one first) can send URLs to its in-app browser instead of the default browser.
+    let mut cmd = Command::new("/usr/bin/open");
     let done = match target {
         Open::Site { name } => {
             let url = site_url(&paths, &name)?;
@@ -84,7 +104,7 @@ pub async fn open(target: Open) -> Result<String, String> {
 #[tauri::command]
 pub async fn copy_url(name: String) -> Result<String, String> {
     let url = site_url(&Paths::from_env(), &name)?;
-    let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    let mut child = Command::new("/usr/bin/pbcopy").stdin(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
     child.stdin.take().expect("piped stdin").write_all(url.as_bytes()).map_err(|e| e.to_string())?;
     match child.wait() {
         Ok(s) if s.success() => Ok(format!("Copied {url}")),
@@ -106,7 +126,7 @@ pub async fn server_config(server: String) -> Result<Value, String> {
 
 /// macOS's folder picker. `None` when the user cancels.
 #[tauri::command]
-pub async fn choose_folder(purpose: String) -> Result<Option<String>, String> {
+pub async fn choose_folder(window: tauri::WebviewWindow, purpose: String) -> Result<Option<String>, String> {
     // Fixed prompts: nothing from the page reaches the AppleScript source.
     let prompt = match purpose.as_str() {
         "link" => "Choose a folder to serve as a site",
@@ -114,7 +134,11 @@ pub async fn choose_folder(purpose: String) -> Result<Option<String>, String> {
         _ => return Err(format!("unknown folder purpose {purpose}")),
     };
     let script = format!("POSIX path of (choose folder with prompt \"{prompt}\")");
-    let out = Command::new("osascript").args(["-e", &script]).output().map_err(|e| e.to_string())?;
+    let out = Command::new("/usr/bin/osascript").args(["-e", &script]).output().map_err(|e| e.to_string());
+    // The picker belongs to osascript. When it closes, macOS activates the app that was active
+    // before, never this Accessory app, so bring the window back.
+    let _ = window.set_focus();
+    let out = out?;
     if !out.status.success() {
         return Ok(None); // cancelled
     }
@@ -172,7 +196,7 @@ pub async fn in_terminal(action: String) -> Result<String, String> {
     let quoted = devid_bin().display().to_string().replace('\'', r"'\''");
     std::fs::write(&script, format!("#!/bin/sh\nexec '{quoted}' {action}\n")).map_err(|e| e.to_string())?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
-    run(Command::new("open").arg(&script))?;
+    run(Command::new("/usr/bin/open").arg(&script))?;
     Ok(format!("Opened Terminal for `devid {action}`"))
 }
 
@@ -260,6 +284,18 @@ mod tests {
         assert_eq!(checks.len(), 3);
         assert_eq!(checks[1], json!({"ok": false, "what": "DNS stopped", "fix": "change dns_port"}));
         assert_eq!(checks[2]["fix"], "", "a fix belongs to the problem above it only");
+    }
+
+    #[test]
+    fn an_older_daemon_gets_an_update_hint() {
+        let old = too_old("bad request: unknown variant `ignore`, expected one of `status`".into(), || "0.4.1".into());
+        assert!(old.starts_with("The running daemon is Devid 0.4.1"), "{old}");
+        assert!(old.contains("`devid self-update`"));
+        assert_eq!(
+            too_old("no site named x".into(), || unreachable!()),
+            "no site named x",
+            "other errors pass through"
+        );
     }
 
     #[test]

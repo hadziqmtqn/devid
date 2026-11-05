@@ -29,9 +29,13 @@ fn main() {
             api::in_terminal,
         ])
         .setup(move |app| {
-            // No Dock icon: the app lives in the menu bar.
+            // Menu bar only while no window is open; in the Dock and Cmd+Tab with one (D-030).
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.set_activation_policy(if background {
+                tauri::ActivationPolicy::Accessory
+            } else {
+                tauri::ActivationPolicy::Regular
+            });
             tray(app)?;
             if !background {
                 open_window(app.handle());
@@ -75,6 +79,10 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
 
 /// Shows the window, creating it (and its web view) if it is closed.
 fn open_window(app: &AppHandle) {
+    // With a window, Devid is in the Dock and in Cmd+Tab with its icon (D-030). Closing the window
+    // restarts the app as icon-only (D-027), which takes it out of both again.
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.set_focus();

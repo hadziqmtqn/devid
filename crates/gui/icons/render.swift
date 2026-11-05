@@ -1,7 +1,9 @@
 // Renders Devid's icons from the logo's SVG geometry (D-026) with CoreGraphics.
-// Run from this folder: `swiftc -target x86_64-apple-macos14.0 render.swift -o /tmp/render && /tmp/render`.
+// From this folder:
+//   swiftc -target x86_64-apple-macos14.0 render.swift -o /tmp/render && /tmp/render
+//   iconutil -c icns icon.iconset -o icon.icns && rm -r icon.iconset
 // (`swift render.swift` fails here: its JIT misses CoreGraphics symbols when the SDK is newer
-// than the OS.) Writes icon.png and tray.png.
+// than the OS.) Writes icon.png, icon.iconset/ and tray.png.
 // The shapes are in the SVG's units with y pointing down, as on the logo canvas.
 import CoreGraphics
 import Foundation
@@ -45,21 +47,51 @@ func stroke(_ c: CGContext, _ width: CGFloat, _ rgb: CGColor, _ points: [CGPoint
     c.strokePath()
 }
 
-// App icon, as on the "Ukuran ikon macOS" board: a 824/1024 plate, inset 100.
-render("icon.png", w: 1024, h: 1024, view: CGRect(x: -100 / 8.24, y: -100 / 8.24, width: 1024 / 8.24, height: 1024 / 8.24)) { c in
+/// The app icon's drawings, as on the logo canvas's "Ukuran ikon macOS" board: small sizes get
+/// thicker strokes (32 px) or lose the prompt (16 px), so they stay readable.
+enum Size { case full, px32, px16 }
+
+func appIcon(_ c: CGContext, _ size: Size) {
     let ink = color(0x16151F)
     c.setFillColor(ink)
     c.addPath(CGPath(roundedRect: CGRect(x: 0, y: 0, width: 100, height: 100), cornerWidth: 22.45, cornerHeight: 22.45, transform: nil))
     c.fillPath()
     c.setStrokeColor(color(0x34C77B))
-    c.setLineWidth(8)
+    c.setLineWidth([Size.full: 8, .px32: 9, .px16: 12][size]!)
     shackle(c)
     c.strokePath()
+    let body = [Size.full: CGRect(x: 25, y: 44, width: 50, height: 36),
+                .px32: CGRect(x: 24, y: 44, width: 52, height: 38),
+                .px16: CGRect(x: 22, y: 44, width: 56, height: 40)][size]!
     c.setFillColor(color(0xF4F4FA))
-    c.addPath(CGPath(roundedRect: CGRect(x: 25, y: 44, width: 50, height: 36), cornerWidth: 9, cornerHeight: 9, transform: nil))
+    c.addPath(CGPath(roundedRect: body, cornerWidth: 9, cornerHeight: 9, transform: nil))
     c.fillPath()
-    stroke(c, 5.5, ink, [CGPoint(x: 37, y: 55), CGPoint(x: 45, y: 62), CGPoint(x: 37, y: 69)])
-    stroke(c, 5.5, ink, [CGPoint(x: 51, y: 69), CGPoint(x: 62, y: 69)])
+    switch size {
+    case .full:
+        stroke(c, 5.5, ink, [CGPoint(x: 37, y: 55), CGPoint(x: 45, y: 62), CGPoint(x: 37, y: 69)])
+        stroke(c, 5.5, ink, [CGPoint(x: 51, y: 69), CGPoint(x: 62, y: 69)])
+    case .px32:
+        stroke(c, 7, ink, [CGPoint(x: 37, y: 56), CGPoint(x: 45, y: 63), CGPoint(x: 37, y: 70)])
+    case .px16:
+        break
+    }
+}
+
+/// A 1024-unit canvas with the plate at 824, inset 100 (macOS's icon grid), in SVG units.
+let plate = CGRect(x: -100 / 8.24, y: -100 / 8.24, width: 1024 / 8.24, height: 1024 / 8.24)
+
+render("icon.png", w: 1024, h: 1024, view: plate) { appIcon($0, .full) }
+
+// icon.icns, one PNG per slot (D-026): 16 pt @1x without the prompt, 16 pt @2x and 32 pt @1x
+// with thicker strokes, 32 pt @2x and larger the full icon.
+try? FileManager.default.createDirectory(atPath: "icon.iconset", withIntermediateDirectories: true)
+let slots: [(String, Int, Size)] = [
+    ("16x16", 16, .px16), ("16x16@2x", 32, .px32), ("32x32", 32, .px32), ("32x32@2x", 64, .full),
+    ("128x128", 128, .full), ("128x128@2x", 256, .full), ("256x256", 256, .full),
+    ("256x256@2x", 512, .full), ("512x512", 512, .full), ("512x512@2x", 1024, .full),
+]
+for (slot, px, size) in slots {
+    render("icon.iconset/icon_\(slot).png", w: px, h: px, view: plate) { appIcon($0, size) }
 }
 
 // Menu-bar template: the prototype's outline padlock, black on transparent only, so macOS

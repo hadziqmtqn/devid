@@ -133,6 +133,8 @@ pub enum PickFor {
     /// Isolate this site to the picked PHP version.
     Isolate(String),
     Unpark,
+    /// Serve an ignored parked site again (D-029).
+    Unignore,
 }
 
 /// An overlay that takes the keys until it closes.
@@ -189,6 +191,8 @@ pub struct App {
     pub status: Result<Value, String>,
     pub sites: Vec<Value>,
     pub parked: Vec<String>,
+    /// Names of ignored parked sites (D-029).
+    pub ignored: Vec<String>,
     /// `server_list` entries (nginx, caddy, apache).
     pub servers: Vec<Value>,
     /// Log files (name, size) and the selected log's text.
@@ -219,6 +223,7 @@ impl App {
             status: Err("connecting…".into()),
             sites: Vec::new(),
             parked: Vec::new(),
+            ignored: Vec::new(),
             servers: Vec::new(),
             logs: Vec::new(),
             log_text: String::new(),
@@ -385,6 +390,8 @@ impl App {
         }
         if site["linked"] == true {
             items.push(('d', "Unlink…".to_string()));
+        } else {
+            items.push(('r', "Remove site… (the folder stays)".to_string()));
         }
         items
     }
@@ -553,6 +560,13 @@ impl App {
                     self.mode = Mode::Pick { purpose: PickFor::Unpark, options: self.parked.clone(), index: 0 };
                 }
             }
+            KeyCode::Char('I') if self.page == Page::Sites => {
+                if self.ignored.is_empty() {
+                    self.message = Some(("No ignored sites.".into(), true));
+                } else {
+                    self.mode = Mode::Pick { purpose: PickFor::Unignore, options: self.ignored.clone(), index: 0 };
+                }
+            }
             _ => {}
         }
         Action::None
@@ -602,6 +616,14 @@ impl App {
                 request: Request::Unisolate { site: Some(name.clone()), cwd: String::new() },
                 done: format!("{name} uses the default PHP again"),
             }),
+            'r' => {
+                self.mode = Mode::Confirm {
+                    question: format!("Remove {name}? Devid stops serving it; the folder itself is not touched."),
+                    request: Box::new(Request::Ignore { site: name.clone() }),
+                    done: format!("ignored {name} (I serves it again)"),
+                };
+                Action::None
+            }
             'd' => {
                 self.mode = Mode::Confirm {
                     question: format!("Unlink {name}? The folder itself is not touched."),
@@ -740,6 +762,10 @@ impl App {
                         request: Request::Unpark { path: choice.clone() },
                         done: format!("unparked {choice}"),
                     },
+                    PickFor::Unignore => Effect::Daemon {
+                        request: Request::Unignore { site: choice.clone() },
+                        done: format!("serving {choice} again"),
+                    },
                 })
             }
             _ => {
@@ -848,7 +874,7 @@ mod tests {
     fn site_menu_entries_depend_on_the_site() {
         let app = with_sites();
         let keys = |site: &Value| App::site_menu(site).iter().map(|(k, _)| *k).collect::<String>();
-        assert_eq!(keys(&app.sites[0]), "otci", "parked, default PHP: no unisolate, no unlink");
+        assert_eq!(keys(&app.sites[0]), "otcir", "parked, default PHP: no unisolate, no unlink, remove (D-029)");
         assert_eq!(keys(&app.sites[1]), "otciud", "linked + isolated");
     }
 
@@ -923,6 +949,20 @@ mod tests {
         app.parked.clear();
         app.handle_key(ch('U'));
         assert_eq!(app.message.as_ref().map(|m| m.1), Some(true), "nothing to unpark is reported");
+    }
+
+    #[test]
+    fn remove_and_unignore_a_parked_site() {
+        let mut app = with_sites();
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(app.handle_key(ch('r')), Action::None), "remove asks first");
+        assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "ignore", "site": "blog"}));
+
+        app.handle_key(ch('I'));
+        assert_eq!(app.message.as_ref().map(|m| m.1), Some(true), "nothing to unignore is reported");
+        app.ignored = vec!["api".into()];
+        app.handle_key(ch('I'));
+        assert_eq!(daemon_json(app.handle_key(key(KeyCode::Enter))), json!({"cmd": "unignore", "site": "api"}));
     }
 
     #[test]

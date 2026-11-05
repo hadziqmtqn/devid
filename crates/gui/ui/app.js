@@ -272,14 +272,29 @@ function sitesPage(d) {
   })) : card(h('div.dv-empty', {}, h('div.dv-strong', {}, 'No parked folders'),
     h('div.dv-sub', {}, 'Add a folder like ~/Projects and every project inside is served automatically.'))));
 
-  out.push(h('h2.dv-h2', {}, 'Sites ', h('span.dv-light', {}, '(' + d.sites.length + ')')));
-  out.push(card(d.sites.length ? d.sites.map((s) => siteRow(s, installed)) :
+  // Removed parked sites (D-029) sit behind a filter on the Sites line, not in a section of their own.
+  const ignored = d.ignored || [];
+  if (!ignored.length) S.siteFilter = 'served';
+  const removed = S.siteFilter === 'removed';
+  out.push(h('div.dv-head', {},
+    h('h2.dv-h2', {}, 'Sites ', h('span.dv-light', {}, '(' + (removed ? ignored.length : d.sites.length) + ')')),
+    ignored.length ? dropdown('Show sites', removed ? 'removed' : 'served',
+      [{ value: 'served', label: 'Served (' + d.sites.length + ')' }, { value: 'removed', label: 'Removed (' + ignored.length + ')' }],
+      (v) => { S.siteFilter = v; renderPage(); }) : null));
+  if (removed) {
+    out.push(card(ignored.map((i) => row(h('span.dv-avatar', {}, i.name.charAt(0).toUpperCase()),
+      text(i.name + '.' + st.tld, h('span.dv-mono', {}, i.path)),
+      btn('Restore', () => act('Restoring…', () => daemon({ cmd: 'unignore', site: i.name }), 'Serving ' + i.name + ' again'))))));
+    out.push(h('p.dv-sub.dv-note', {}, 'Removed sites are not served. Their folders are not touched.'));
+    return out;
+  }
+  out.push(card(d.sites.length ? d.sites.map((s) => siteRow(s, installed, d.parked)) :
     h('div.dv-empty', {}, h('div.dv-strong', {}, 'No sites yet'), h('div.dv-sub', {}, 'Park a folder, or link one with the + button.'))));
   out.push(h('p.dv-sub.dv-note', {}, 'Each site picks its PHP version; a change reloads only that site.'));
   return out;
 }
 
-function siteRow(s, installed) {
+function siteRow(s, installed, parked) {
   const host = new URL(s.url).hostname;
   const versions = installed.includes(s.php) ? installed : [...installed, s.php];
   const pick = dropdown('PHP version for ' + host, s.php, versions.map((v) => ({ value: v, label: v })), (version) =>
@@ -303,10 +318,14 @@ function siteRow(s, installed) {
       s.isolated && '-',
       s.isolated && { label: 'Use the default PHP again', kbd: S.status.default_php, run: () =>
         act('Switching ' + s.name + '…', () => daemon({ cmd: 'unisolate', site: s.name, cwd: '/' }), s.name + ' uses the default PHP again') },
-      s.linked && '-',
-      s.linked && { label: 'Unlink…', danger: true, run: async () => {
+      '-',
+      s.linked ? { label: 'Unlink…', danger: true, run: async () => {
         if (await ask('Unlink ' + s.name + '?', 'The folder itself is not touched.', 'Unlink', true))
           act('Unlinking…', () => daemon({ cmd: 'unlink', name: s.name }), 'Unlinked ' + s.name);
+      } } : { label: 'Remove site…', danger: true, run: async () => {
+        const folder = parked.find((f) => s.path.startsWith(f + '/')) || '';
+        if (await ask('Remove ' + host + '?', 'Devid stops serving it and ignores ' + s.path + ' inside ' + folder + '; the folder itself is not touched.', 'Remove', true))
+          act('Removing…', () => daemon({ cmd: 'ignore', site: s.name }), (r) => 'Ignored ' + s.name + '; the folder is still in ' + r.parked);
       } },
     ]));
 }

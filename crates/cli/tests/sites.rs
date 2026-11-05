@@ -10,6 +10,10 @@ fn site<'a>(sites: &'a Value, name: &str) -> &'a Value {
     sites.as_array().unwrap().iter().find(|s| s["name"] == name).unwrap_or_else(|| panic!("site {name} missing"))
 }
 
+fn site_missing(sites: &Value, name: &str) -> bool {
+    !sites.as_array().unwrap().iter().any(|s| s["name"] == name)
+}
+
 fn reloads(home: &Path) -> usize {
     fs::read_to_string(home.join("reloads")).map(|s| s.lines().count()).unwrap_or(0)
 }
@@ -97,6 +101,22 @@ fn park_link_isolate_and_nginx() {
     assert!(stderr(&devid(&home, &["link", "Bad Name", "--path", &s(&projects)])).contains("not a valid site name"));
     assert!(stderr(&devid(&home, &["isolate", "8.3", "--site", "blog"])).contains("not installed"));
     assert!(stderr(&devid(&home, &["isolate", "8.4", "--site", "nope"])).contains("no site named nope"));
+
+    // Ignore a parked site (D-029): not served, listed as ignored, the folder untouched; unignore brings it back.
+    let out = devid(&home, &["ignore", "api"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains(&format!("ignored api; the folder is still in {}", s(&projects)))
+    );
+    assert!(site_missing(&json(&home, &["sites", "--json"]), "api"));
+    assert!(projects.join("api").is_dir(), "the folder stays");
+    let full = request_json(&home, r#"{"cmd":"sites"}"#);
+    assert_eq!(full["ignored"], serde_json::json!([{"name": "api", "path": s(&projects.join("api"))}]));
+    assert!(!fs::read_to_string(home.join("nginx/conf/nginx.conf")).unwrap().contains("server_name api.test;"));
+    assert!(stderr(&devid(&home, &["ignore", "shop"])).contains("shop is linked; use `devid unlink shop`"));
+    assert!(devid(&home, &["unignore", "api"]).status.success());
+    assert_eq!(site(&json(&home, &["sites", "--json"]), "api")["linked"], false);
+    assert!(stderr(&devid(&home, &["unignore", "api"])).contains("api is not an ignored site"));
 
     // Unlink + unpark empty the site list.
     assert!(devid(&home, &["unlink", "shop"]).status.success());

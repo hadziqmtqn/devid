@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-05
+> Verified against: 2026-11-06
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -35,6 +35,9 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-025 | 2026-11-04 | accepted | No ionCube Loader in the catalog |
 | D-026 | 2026-11-05 | accepted (Phase 7) | The revised prototype is the desktop app's reference, ported to plain HTML; English UI, a 1080×680 window, the padlock-and-prompt logo |
 | D-027 | 2026-11-05 | accepted (Phase 7, from the G1 spike) | When its window closes, the desktop app restarts itself in place as icon-only, so the window's memory goes back to the system |
+| D-028 | 2026-11-06 | accepted (built in G3) | The daemon checks for updates every 20 minutes (configurable); the menu-bar icon and Settings show a dot when there are any |
+| D-029 | 2026-11-06 | accepted | A parked site can be removed (ignored) and restored; its folder is never touched |
+| D-030 | 2026-11-06 | accepted (amends D-023's "no Dock icon") | While its window is open, the desktop app is in the Dock and Cmd+Tab with the padlock-and-prompt icon; at idle it is in the menu bar only |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -398,3 +401,52 @@ See ARCHITECTURE, "PHP runtime".
   - **A separate process for the window:** the same effect, with more code. The menu-bar process would have to start, track and focus a second process.
 - **Amends:** the "30 s after the window closes" limit in `phase-7.md` is met by the restart, not by the process freeing memory.
 - **Accepted:** by the owner on 2026-11-05, after seeing the icon blink for about a second, on the condition that the restart stays safe (see Safety).
+
+## D-028: automatic update checks with an indicator in the menu bar (accepted 2026-11-06, Phase 7 G3)
+
+- **Context:** updates are found only when the owner presses "Check for updates" (Settings, `devid update --check`, the TUI). The owner asked for a dot in the menu bar when Devid itself or PHP, a web server or an extension has an update.
+- **Decision:**
+  - **Who checks:** the daemon, every 20 minutes and a few minutes after it starts. It checks Devid's release (`devid-version.txt`) and the binaries manifest, as "Check for updates" does, and keeps the result.
+    - `update_check_minutes` in `config.toml` sets the interval; 0 turns the checks off.
+    - The owner chose 20 minutes and left the number open to change. Each check is two small HTTPS requests, so it adds nothing measurable at idle.
+  - **Where it shows:** `status` carries the result, so the CLI, the TUI and the app read it from one place (D-012).
+    - The menu-bar icon gets a dot. It stays a monochrome template image.
+    - The menu starts with "Updates available (n)…", which opens Settings.
+    - Settings shows a dot in the sidebar and the result in Updates without a click.
+  - **Installing stays manual:** the Update button asks first, because php-fpm and the web server restart.
+- **Not included:** macOS notifications. Phase 7 leaves notifications to the daemon, as a later feature.
+- **When:** G3, with the menu-bar menu.
+- **Accepted:** by the owner on 2026-11-06.
+
+## D-029: removing a parked site from Devid, without touching its folder (accepted 2026-11-06)
+
+- **Context:** a linked site can be unlinked, but a parked site is served for as long as its folder sits in a parked folder. The only way to stop serving one was to unpark the whole folder or move the project. The owner's updated prototype adds "Remove site…" for parked sites. The owner confirmed that it only removes the site from the daemon's list, never the project folder.
+- **Decision:**
+  - **Config:** `ignored` in `config.toml` lists the folders of removed parked sites. Site resolution skips them. A link of the same name still wins, as before.
+  - **CLI:**
+    - `devid ignore <name>` refuses a linked site and points to `devid unlink`.
+    - `devid unignore <name>` serves a site again.
+    - `devid sites` lists the ignored names.
+    - The owner chose these names, after `link`/`unlink` and `park`/`unpark`.
+  - **Daemon:** the `sites` reply lists the ignored sites (name and folder) for the TUI and the app.
+  - **TUI:** "Remove site…" in a parked site's menu asks first. `I` picks an ignored site to serve again.
+  - **App:**
+    - "Remove site…" in a parked site's ⋯ menu asks with the prototype's wording, in red.
+    - A filter on the Sites line switches between Served and Removed, without a section of its own; the owner chose this over a separate area. Removed sites have Restore.
+  - **The folder is never touched:** nothing is deleted or moved on disk.
+- **Accepted:** by the owner on 2026-11-06.
+
+## D-030: the desktop app is in the Dock and Cmd+Tab while its window is open (accepted 2026-11-06, Phase 7)
+
+- **Context:** D-023 and `phase-7.md` keep the app out of the Dock, so it lives in the menu bar only (an Accessory app). The window was then missing from Cmd+Tab and the Dock, and macOS did not bring it back to the front after a dialog (the folder-picker bug). The owner asked for the logo in the Dock and in Cmd+Tab, in the sizes of the logo canvas.
+- **Decision:**
+  - **With a window:** while the window is open, the app is a regular app (`ActivationPolicy::Regular`), in the Dock and in Cmd+Tab.
+  - **At idle:** with no window, it is in the menu bar only, as before. Closing the window restarts it as icon-only (D-027), which takes it out of the Dock again.
+  - **Icon:** `crates/gui/icons/icon.icns`, built with `iconutil` from one PNG per size as D-026 says:
+    - 16 pt @1x without the prompt;
+    - 16 pt @2x and 32 pt @1x with thicker strokes;
+    - 32 pt @2x and up the full icon.
+    `render.swift` draws them from the logo's geometry. Tauri sets it as the app icon for an unbundled run, and `Devid.app` (G4) carries it in its bundle.
+- **Idle cost:** none. Icon-only is still an Accessory app with no window.
+- **Amends:** D-023's "no Dock icon", now "no Dock icon at idle".
+- **Accepted:** by the owner on 2026-11-06.

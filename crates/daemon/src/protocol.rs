@@ -97,6 +97,14 @@ pub enum Request {
     Unpark {
         path: String,
     },
+    /// Stop serving a parked site; its folder is not touched (D-029).
+    Ignore {
+        site: String,
+    },
+    /// Serve an ignored parked site again.
+    Unignore {
+        site: String,
+    },
     /// Pin a site to a PHP version; the site is `site` or the one containing `cwd`.
     Isolate {
         version: String,
