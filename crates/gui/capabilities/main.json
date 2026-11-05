@@ -1,6 +1,16 @@
 {
   "identifier": "main",
-  "description": "The Devid window: read daemon state and drag the window by its toolbar. Nothing else.",
+  "description": "The Devid window: daemon requests, opening Devid's own sites, folders and files, and dragging the window by its toolbar. Nothing else.",
   "windows": ["main"],
-  "permissions": ["allow-status", "allow-sites", "core:window:allow-start-dragging"]
+  "permissions": [
+    "allow-daemon",
+    "allow-open",
+    "allow-copy-url",
+    "allow-server-config",
+    "allow-choose-folder",
+    "allow-doctor",
+    "allow-devid-check",
+    "allow-in-terminal",
+    "core:window:allow-start-dragging"
+  ]
 }

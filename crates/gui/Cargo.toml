@@ -13,6 +13,7 @@ tauri-build = { version = "2.7.4", default-features = false }
 
 [dependencies]
 devid-daemon = { path = "../daemon" }
+serde.workspace = true
 serde_json.workspace = true
 # No default features: no asset compression, no runtime ACL, no Linux X11/D-Bus.
 tauri = { version = "2.12.5", default-features = false, features = ["wry", "tray-icon"] }

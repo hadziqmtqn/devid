@@ -2,7 +2,7 @@
 
 > Scope: a menu-bar desktop app for macOS, built with Tauri v2 and plain HTML ported from the revised prototype, as another client of the daemon (D-023, D-026)
 > Verified against: 2026-11-05
-> Status: in progress; G1 (spike) done 2026-11-05, see "G1 results"
+> Status: in progress; G1 (spike) and G2 (window pages) done 2026-11-05, see "G1 results" and "G2 as built"
 
 Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revised prototype (D-026: the Claude Design board "Devid — macOS style", copied to `devid-prototype/redesign/`): a menu-bar icon plus a window with the same pages as the TUI. The daemon does the work, as it does for the CLI and the TUI.
 
@@ -109,6 +109,38 @@ Measured on the owner's Mac (Intel, 2 cores, macOS 14.8) with the release build 
   - the cold start of `Devid.app` from Finder;
   - the window on a second screen;
   - the menu-bar position after the restart (G3).
+
+### G2 as built (2026-11-05)
+
+The window has the five pages, with every action the TUI has.
+
+**The web view's API** (`crates/gui/src/api.rs`, allowed one by one in `capabilities/main.json`):
+
+| Command | What it does |
+|---|---|
+| `daemon` | Sends any daemon request except `stop` (the daemon itself). PHP and web server installs always download (`from` is forced to none). |
+| `open` | macOS `open` for a site's URL, a site or parked folder in Terminal, a Devid path in Finder, or a php.ini in the default text editor. Each target is looked up in the daemon's own data first, so no other path or URL can be opened. |
+| `copy_url` | Copies a site's URL (`pbcopy`). |
+| `server_config` | Reads the generated config of a web server named by the daemon, read-only. |
+| `choose_folder` | macOS's folder picker (`osascript`, fixed prompts), for Link and Park. |
+| `doctor` | `devid doctor` in the user's interactive login shell. Its PATH checks need PATH as Terminal sees it, which an app started from Finder does not have. The lines are parsed into checks. |
+| `devid_check` | `devid self-update --check`, its one line. |
+| `in_terminal` | `devid setup`, `self-update` or `uninstall` in Terminal (a `.command` file in `~/.devid/run`). They may ask for the sudo password, as from the TUI's handover. |
+
+**TUI to app:**
+
+| Page | TUI | App |
+|---|---|---|
+| Sites | open, Terminal, copy URL, isolate, use the default PHP, unlink (asks), link, park, unpark | the same. Isolating is the row's PHP menu. Link and park use the folder picker. Unpark asks first (D-026). Parked folders also have Show in Finder. |
+| PHP | install, default, Extensions, Xdebug, pcov, php.ini, restart, check and install updates | the same. Updates are on Settings only. php.ini opens in the default editor, and the toast says to restart php-fpm after saving. A GUI editor gives no "editor closed" moment to restart on. |
+| Extensions | catalog install (several, with a progress line), remove (asks), Xdebug and pcov | the same dialog. The install confirmation replaces the button row and the remove confirmation replaces the extension's row (D-026). |
+| Server | install, use, restart, stop and start, view config, stop all (asks), start all | the same. Use asks first. Stop all and start all are on the sidebar card. View config is a read-only dialog. |
+| Logs | pick a log, follow every second, clear (asks) | the same |
+| Settings | domain, ports, storage, doctor, check updates (devid and binaries), update binaries (asks), self-update, setup, uninstall (ask) | the same. Self-update, setup and uninstall open Terminal. Self-update and uninstall ask first. |
+
+- **Messages:** results use the CLI's and TUI's wording in sentence case (D-026). The update summary, the extension progress line and the install summary follow `tui/mod.rs` and `cli/src/main.rs` line by line.
+- **Not in G2:** launch at login (G3) and the menu-bar menu (G3).
+- **Known bug:** after Cancel in the folder picker, the window goes behind other apps. It is fixed in the next task.
 
 ## Open questions
 

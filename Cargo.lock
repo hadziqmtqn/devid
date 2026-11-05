@@ -845,6 +845,7 @@ name = "devid-gui"
 version = "0.4.1"
 dependencies = [
  "devid-daemon",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",
