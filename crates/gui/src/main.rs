@@ -1,11 +1,8 @@
 //! Devid's desktop app (Phase 7, D-023, D-026): a menu-bar icon, plus a window that is
 //! created when opened and destroyed when closed. Like the CLI, it is only a daemon client.
 
-use devid_daemon::{
-    paths::Paths,
-    protocol::{Request, request},
-};
-use serde_json::Value;
+mod api;
+
 use tauri::{
     AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -17,22 +14,20 @@ use tauri::{
 const SIZE: (f64, f64) = (1080.0, 680.0);
 const MIN: (f64, f64) = (760.0, 520.0);
 
-// The web view's whole API. Async, so the socket call runs off the main thread.
-#[tauri::command]
-async fn status() -> Result<Value, String> {
-    request(&Paths::from_env(), &Request::Status)
-}
-
-#[tauri::command]
-async fn sites() -> Result<Value, String> {
-    request(&Paths::from_env(), &Request::Sites)
-}
-
 fn main() {
     // `--background` starts with the menu-bar icon only, for launch at login (G3).
     let background = std::env::args().any(|a| a == "--background");
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![status, sites])
+        .invoke_handler(tauri::generate_handler![
+            api::daemon,
+            api::open,
+            api::copy_url,
+            api::server_config,
+            api::choose_folder,
+            api::doctor,
+            api::devid_check,
+            api::in_terminal,
+        ])
         .setup(move |app| {
             // No Dock icon: the app lives in the menu bar.
             #[cfg(target_os = "macos")]
