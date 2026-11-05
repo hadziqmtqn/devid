@@ -407,12 +407,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             }
             let bin = php::dir(&state.paths, &version).join("bin/php");
             let out = crate::webserver::probe(&bin, &["-n", "-m"]).map_err(|e| e.to_string())?;
-            let bundled: Vec<String> = String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty() && !l.starts_with('['))
-                .map(str::to_string)
-                .collect();
+            let bundled = phpext::module_names(&String::from_utf8_lossy(&out.stdout));
             let shipped: serde_json::Map<String, Value> = php::EXTENSIONS
                 .iter()
                 .map(|e| (e.to_string(), json!(php::extension_enabled(&state.paths, &version, e))))
