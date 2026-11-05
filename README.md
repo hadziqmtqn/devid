@@ -11,6 +11,7 @@ Devid is a local PHP development environment for macOS. Every folder you link or
 - [First steps](#first-steps)
 - [Sites](#sites)
 - [PHP](#php)
+- [PHP extensions](#php-extensions)
 - [Web servers and services](#web-servers-and-services)
 - [The TUI](#the-tui)
 - [HTTPS](#https)
@@ -104,20 +105,61 @@ devid php ext list 8.4         # bundled, Xdebug/pcov, and installed catalog ext
     - readline (for `php -a` and `artisan tinker`), redis, soap, sockets, sodium, zip, and the XML extensions.
   - PHP installed before 2026-11-03 lacks mysqli, readline and soap. `devid update` does not offer the rebuild because the version number is the same, so run `devid php install <version>` (your php.ini is kept).
   - Xdebug and pcov are included but off by default. Xdebug starts in trigger mode on port 9003.
-- **Extra extensions (catalog, since v0.3):** apcu, mongodb, ldap and imagick, for PHP 8.3, 8.4 and 8.5.
-  - Each comes only from Devid's releases. It is built in CI from its official source for that exact PHP release, and its checksum is verified before install. Nothing is compiled on your Mac.
-  - `install` checks that the extension loads in `php` and `php-fpm` before it restarts php-fpm. If it does not load, nothing changes and the sites keep running.
-  - `devid update` updates them together with PHP. `devid doctor` reports one that no longer loads.
-  - **apcu** also works in the CLI (`apc.enable_cli=1`, since v0.4.1), so `php artisan` and tests see the same cache API as the sites. An apcu installed with v0.3 or v0.4.0 gets the setting when installed again: `devid php ext install <version> apcu`.
-  - **imagick:** JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF and SVG. HEIC can be read but not written. PDF cannot be read (that needs Ghostscript). SVG gradients in `objectBoundingBox` units, SVG's default, are not drawn correctly. Text uses macOS fonts.
-  - **mongodb and ldap:** TLS trusts the macOS system certificates. For a server with a Devid `.test` certificate, pass `tlsCAFile` (mongodb) or `LDAP_OPT_X_TLS_CACERTFILE` (ldap) pointing at `~/.devid/ca/cacert.pem`.
-  - **Not available:**
-    - oci8 and sqlsrv, which need proprietary client libraries;
-    - parallel, which needs thread-safe PHP;
-    - the ionCube Loader, whose Intel Mac builds stop at PHP 8.3 (D-025).
-  - Other extensions are added on request (`docs/roadmap/phase-6.md`).
+- **Extra extensions:** see [PHP extensions](#php-extensions).
 - **php.ini:** each version has `~/.devid/php/<version>/etc/php.ini`. Devid writes it once and never overwrites it. After editing it, run `devid restart php-8.5`. The defaults are `memory_limit = 512M`, uploads up to 64 MB, errors displayed, and JIT off.
 - **Processes:** php-fpm uses `pm = ondemand`, so idle versions use almost no memory.
+
+## PHP extensions
+
+```sh
+devid php ext available 8.4                 # what the catalog offers for PHP 8.4
+devid php ext install 8.4 imagick igbinary # one or more; php-fpm restarts once
+devid php ext list 8.4                      # bundled, Xdebug/pcov, and installed catalog extensions
+devid php ext remove 8.4 imagick
+```
+
+In the TUI: PHP page, `enter` on a version, then **Extensions…**: `space` ticks, `enter` on the Install button installs, `r` removes.
+
+**The catalog** (PHP 8.3, 8.4 and 8.5): apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole.
+- Each comes only from Devid's releases. It is built in CI from its official source for that exact PHP release, and its checksum is verified before install. Nothing is compiled on your Mac.
+- `install` checks that the extension loads in `php` and `php-fpm` before it restarts php-fpm. If it does not load, nothing changes and the sites keep running. Several extensions install in one go, with a single php-fpm restart.
+- `devid update` updates them together with PHP. `devid doctor` reports one that no longer loads.
+
+| Extension | Notes |
+|---|---|
+| apcu | Also on in the CLI (`apc.enable_cli=1`, since v0.4.1). An apcu installed with v0.3 or v0.4.0 gets the setting when installed again. |
+| igbinary | Laravel's Redis and cache serializer option. PHP 8.5 gets 3.2.17RC1, the only igbinary release that supports it; 8.3 and 8.4 get the stable 3.2.16. |
+| imagick | JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF and SVG; HEIC can be read but not written. PDF cannot be read (that needs Ghostscript). SVG gradients in `objectBoundingBox` units, SVG's default, are not drawn correctly (ImageMagick/ImageMagick#9093 and D-024). Text uses macOS fonts. |
+| ldap | From PHP's own source, with OpenLDAP built in. |
+| memcached | libmemcached built in. Serializers: PHP's and JSON, plus the session handler. The igbinary and msgpack serializers are left out, so memcached does not depend on loading those first. |
+| mongodb | Carries its own OpenSSL. |
+| msgpack | Redis serializer option. |
+| swoole | For the CLI (`php artisan octane:start`). TLS, HTTP/2, brotli, async DNS and the coroutine curl hook. It does not change how php-fpm serves `.test` sites. |
+
+TLS in mongodb and ldap trusts the macOS system certificates. For a server with a Devid `.test` certificate, pass `tlsCAFile` (mongodb) or `LDAP_OPT_X_TLS_CACERTFILE` (ldap) pointing at `~/.devid/ca/cacert.pem`.
+
+### Which extensions can be added
+
+| Kind | Examples | Can be added? |
+|---|---|---|
+| Bundled in Devid's PHP | bcmath, curl, gd, intl, mbstring, mysqli, pdo_pgsql, redis, soap, sodium, zip | Nothing to install (`devid php ext list`). |
+| Shipped with Devid's PHP, off by default | Xdebug, pcov | `devid php ext <version> xdebug on` |
+| Open source, no extra library | apcu, igbinary, msgpack, ds, uuid | Yes |
+| Open source, with an open-source C library | imagick, memcached, mongodb, swoole, amqp, rdkafka, yaml | Yes. The library is built into the extension, so nothing else is installed. |
+| In PHP's source but not in Devid's build | ldap, xsl, gmp, tidy | Yes, built from the same PHP source as the release. |
+
+**Cannot be added, and why:**
+
+| Reason | Examples |
+|---|---|
+| Needs a proprietary client library | oci8 / pdo_oci (Oracle Instant Client), sqlsrv / pdo_sqlsrv (Microsoft ODBC Driver) |
+| Needs thread-safe PHP; Devid's PHP is non-thread-safe, as php-fpm uses it | parallel |
+| The vendor no longer builds it for Intel Macs | ionCube Loader: its Intel loaders stop at PHP 8.3 (D-025) |
+| Closed source without a license to redistribute | vendor loaders whose license allows neither mirroring nor downloads from the vendor |
+| Windows only, or no support for PHP 8.3 and newer | com_dotnet; Zend Guard Loader, pthreads |
+| A closed-source agent with its own background service | New Relic, Datadog, Blackfire (not planned) |
+
+**Asking for another extension:** open an issue on `devid-binaries`. Each catalog extension is a reviewed recipe (`extensions/<name>.sh`): the official source pinned by checksum, its build options and a smoke test. The pull request builds and tests it for every PHP version, and a merge publishes it in a new release, with no Devid update needed. A weekly check lists newer releases of catalog extensions and popular PIE extensions for review; it never adds one by itself.
 
 ## Web servers and services
 
@@ -254,9 +296,7 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
 
 - **Done in v0.3.0:** `devid php ext install <version> <name>` adds an extension from Devid's catalog: apcu, mongodb, ldap and imagick (D-021, `docs/roadmap/phase-6.md`). See [PHP](#php).
 - **Done in v0.4.0:** the TUI's PHP page installs several catalog extensions at once and removes them one at a time; the CLI takes several names too.
-- **Next:**
-  - igbinary, msgpack, memcached and swoole in the catalog;
-  - a list in these docs of which extensions can be added and why some cannot.
+- **Done 2026-11-05:** igbinary, msgpack, memcached and swoole joined the catalog. A recipe pull request now builds and tests a new extension, and its merge publishes it. See [PHP extensions](#php-extensions).
 
 ### Then: desktop app (Phase 7)
 

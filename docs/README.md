@@ -17,7 +17,7 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 - [Phase 2 plan](roadmap/phase-2.md): milestones M1–M7 and technical choices (done).
 - [Phase 5 plan](roadmap/phase-5.md): build pipeline, releases and updates (R1–R5, done).
 - [Phase 4 plan](roadmap/phase-4.md): the TUI (T1–T5, done).
-- [Phase 6 plan](roadmap/phase-6.md): extra PHP extensions from a trusted catalog (D-021; E1–E4 done, v0.4.0; E5 next).
+- [Phase 6 plan](roadmap/phase-6.md): extra PHP extensions from a trusted catalog (D-021; done 2026-11-05).
 - [Phase 7 plan](roadmap/phase-7.md): the desktop app, Tauri v2 on the daemon API (D-023, planned after Phase 6).
 - [Implementation timeline](implementation-timeline/README.md): one record per merged milestone.
 

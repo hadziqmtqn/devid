@@ -2,7 +2,7 @@
 
 > Scope: letting users install PHP extensions that Devid does not bundle, only from verified sources (D-021, which supersedes D-020)
 > Verified against: 2026-11-04
-> Status: E1–E4 done (2026-11-05). Release `2026.11.04-6` of `devid-binaries` carries apcu, mongodb, ldap and imagick for PHP 8.3, 8.4 and 8.5. Devid v0.3.0 installs them from the CLI, v0.4.0 also from the TUI (several at once, with progress). E5 (docs and release) is next. ionCube is not offered (D-025).
+> Status: Phase 6 done (2026-11-05). The catalog in `devid-binaries` holds apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole for PHP 8.3, 8.4 and 8.5. Devid v0.4.1 installs them from the CLI and the TUI. Recipe PRs are built and tested, and a merge publishes them (E6). ionCube is not offered (D-025).
 
 Devid's PHP is a static build with a fixed extension set (D-008). Xdebug and pcov already ship as separate `.so` files, which shows that the static php-fpm can load shared extensions. Phase 6 adds a second, opt-in set: the **extension catalog**.
 
@@ -72,7 +72,7 @@ The catalog is curated, not a copy of every extension. Packagist lists 356 exten
 | 2 | imap | Sail installs it; removed from php-src in 8.4 and barely maintained | `sirlouen/imap` (unofficial) |
 | 2 | excimer, event, zstd, brotli, rdkafka, yaml, uuid, ds, ast, mailparse | profiling, ReactPHP/Reverb event loops, compression, Kafka, others | on PIE |
 
-E2 shipped the four that passed E1 (apcu, mongodb, ldap, imagick). igbinary, msgpack, memcached and swoole follow as recipe PRs in `devid-binaries`, which need no Devid release. Priority 2 and anything else waits for a request.
+E2 shipped the four that passed E1 (apcu, mongodb, ldap, imagick). igbinary, msgpack, memcached and swoole followed on 2026-11-05. Priority 2 and anything else waits for a request.
 
 ### Gaps in the bundled build (D-022, shipped 2026-11-03)
 
@@ -121,8 +121,8 @@ This table goes into the README when Phase 6 ships (E5). The E1 spike confirms o
 | E2 | **Catalog in `devid-binaries`:** CI builds the first extensions per PHP version, publishes them with checksums and adds the `extensions` section to `manifest.json`. | the manifest lists apcu (and the other E1 successes) for 8.3, 8.4 and 8.5. **Done 2026-11-04** (release `2026.11.04-6`; record in `docs/implementation-timeline/extensions/`) |
 | E3 | **Daemon and CLI:** `devid php ext available / install / remove / list` with verify, load check and rollback; `devid update` and `doctor` cover catalog extensions. Vendor entries (license prompt, `source: vendor` downloads) wait until a vendor loader is accepted into the catalog; none is (D-025). | `devid php ext install 8.4 apcu` works on the owner's Mac; a failing extension is rolled back and PHP keeps running. **Done 2026-11-04** (v0.3.0; record in `docs/implementation-timeline/extensions/`) |
 | E4 | **TUI:** the PHP page's Extensions section shows catalog extensions with install and remove (with confirmation). | the same from the TUI. **Done 2026-11-05** (v0.4.0; see "E4 design") |
-| E5 | **Docs and release:** the README section "PHP extensions" with the tables above, a release. | `devid self-update` brings it to the owner's Mac |
-| E6 | **Adding catalog entries later (GitHub Actions, `devid-binaries`):** a workflow that takes a new recipe (a PR or a manual run with the package name and version), builds it for every PHP version, runs the load and smoke tests, and publishes it with a new `manifest.json`. A scheduled job lists PIE candidates (darwin + NTS) and new releases of catalog entries for review; it never adds an entry by itself. | a new extension reaches the catalog through one reviewed recipe PR, without a Devid release |
+| E5 | **Docs and release:** the README section "PHP extensions" with the tables above, a release. | `devid self-update` brings it to the owner's Mac. **Done 2026-11-05:** the README's "PHP extensions" section; the code shipped in v0.3.0–v0.4.1 |
+| E6 | **Adding catalog entries later (GitHub Actions, `devid-binaries`):** a workflow that takes a new recipe (a PR or a manual run with the package name and version), builds it for every PHP version, runs the load and smoke tests, and publishes it with a new `manifest.json`. A scheduled job lists PIE candidates (darwin + NTS) and new releases of catalog entries for review; it never adds an entry by itself. | a new extension reaches the catalog through one reviewed recipe PR, without a Devid release. **Done 2026-11-05** (see "E6 as built") |
 
 ### E3 design (accepted 2026-11-04)
 
@@ -165,6 +165,32 @@ What the daemon and CLI do with the catalog that E2 publishes (`manifest.json`, 
 **Tests:**
 - unit tests for reading catalog entries, the `php_api` check, the ini and the `env[]` lines;
 - an integration test with a local `file://` release (as `tests/releases.rs` does), whose archives hold fake `.so` files and whose fake `php`/`php-fpm` list or refuse them. This covers the preflight, the rollback and the reinstall after `update`.
+
+### E6 as built, and the second set of recipes (2026-11-05)
+
+**Recipe PRs.** `.github/workflows/catalog.yml` in `devid-binaries`:
+- A pull request that touches `extensions/` or `scripts/build-ext.sh` builds the recipes it changes for PHP 8.3, 8.4 and 8.5, with every `build-ext.sh` check. A change to `build-ext.sh` builds all of them.
+- It restores the release cache read-only, and it publishes nothing.
+- A merge to `main` that touches those paths starts "Build and release", so the extension ships in the next manifest with no Devid release.
+- `workflow_dispatch` builds named recipes on demand.
+
+**Review report.** The weekly "Check upstream" workflow also runs `scripts/upstream.py --catalog`. It lists in the job summary, and never changes a recipe:
+- newer final releases on PECL for each recipe (PECL labels some RCs "stable", for example igbinary 3.2.17RC1, so the version itself must be final too);
+- a newer ImageMagick than the pinned one, whose SVG patch must then be checked;
+- the 25 most downloaded PIE extensions for macOS and NTS PHP that are neither in the catalog nor in Devid's PHP build.
+
+The first run found mongodb 2.5.6 (2026-11-03), and the recipe moved to it.
+
+**New recipes:**
+
+| Recipe | Version | Notes |
+|---|---|---|
+| igbinary | 3.2.16; 3.2.17RC1 for PHP 8.5 | 3.2.16 is the last final release. 3.2.17RC1 (a pre-release on GitHub, the newest on PECL and PIE) is the only one that supports PHP 8.5, so only 8.5 gets it. |
+| msgpack | 3.0.1 | |
+| memcached | 3.4.0 | libmemcached from spc. Its `.pc` lists neither libhashkit nor the C++ runtime, and the symbol check caught both (`_hashkit_create`, `___cxa_begin_catch`). The recipe links them through `LDFLAGS`. Built without the igbinary and msgpack serializers, which would make it load only after those extensions. |
+| swoole | 6.2.4 | TLS (its own static OpenSSL), HTTP/2, brotli, c-ares and the coroutine curl hook. The symbol check caught brotli, which swoole's build does not link, and two framework symbols of the static libcurl (`CFRelease`, `SCDynamicStoreCopyProxies`). The recipe links brotli, CoreFoundation and SystemConfiguration. |
+
+`build-ext.sh` now names license copies by their path (`memcached-fastlz-LICENSE`), so a bundled library's `LICENSE` never overwrites the extension's own.
 
 ### E4 design (accepted 2026-11-05)
 
