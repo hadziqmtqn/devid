@@ -45,7 +45,7 @@ The script downloads `devid`, checks its sha256 and starts `devid setup`. The sc
    - trust for the Devid certificate authority.
 6. Downloads PHP 8.5 and nginx (both sha256-checked), unless PHP or the web server is already installed.
 
-To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version of Devid, run `DEVID_VERSION=0.4.0 sh install.sh`.
+To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version of Devid, run `DEVID_VERSION=0.4.1 sh install.sh`.
 
 To choose PHP versions and the web server, pass options to setup. With the install script, put them after `sh -s --`:
 
@@ -108,6 +108,7 @@ devid php ext list 8.4         # bundled, Xdebug/pcov, and installed catalog ext
   - Each comes only from Devid's releases. It is built in CI from its official source for that exact PHP release, and its checksum is verified before install. Nothing is compiled on your Mac.
   - `install` checks that the extension loads in `php` and `php-fpm` before it restarts php-fpm. If it does not load, nothing changes and the sites keep running.
   - `devid update` updates them together with PHP. `devid doctor` reports one that no longer loads.
+  - **apcu** also works in the CLI (`apc.enable_cli=1`, since v0.4.1), so `php artisan` and tests see the same cache API as the sites. An apcu installed with v0.3 or v0.4.0 gets the setting when installed again: `devid php ext install <version> apcu`.
   - **imagick:** JPEG, PNG, GIF, WebP, AVIF, JPEG XL, TIFF and SVG. HEIC can be read but not written. PDF cannot be read (that needs Ghostscript). SVG gradients in `objectBoundingBox` units, SVG's default, are not drawn correctly. Text uses macOS fonts.
   - **mongodb and ldap:** TLS trusts the macOS system certificates. For a server with a Devid `.test` certificate, pass `tlsCAFile` (mongodb) or `LDAP_OPT_X_TLS_CACERTFILE` (ldap) pointing at `~/.devid/ca/cacert.pem`.
   - **Not available:**

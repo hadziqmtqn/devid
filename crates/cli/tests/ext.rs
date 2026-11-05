@@ -147,6 +147,7 @@ fn catalog_extensions_install_update_remove() {
     assert!(dir.join("apcu.so").is_file());
     let ini = fs::read_to_string(home.join("php/8.5/etc/conf.d/devid-apcu.ini")).unwrap();
     assert!(ini.contains(&format!("extension={}", dir.join("apcu.so").display())), "{ini}");
+    assert!(ini.contains("\napc.enable_cli=1\n"), "apcu is on in the CLI too: {ini}");
     assert_eq!(fs::read_to_string(dir.join(".sha256")).unwrap(), apcu["arch"]["x86_64"]["sha256"].as_str().unwrap());
     assert!(ok(&["php", "ext", "available", "8.5"]).contains("installed 5.1.28"));
     assert!(fs::read_dir(home.join("downloads")).unwrap().flatten().all(|e| e.file_name() == "manifest.json"));
