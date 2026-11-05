@@ -1,10 +1,10 @@
 # Phase 7 Plan: desktop app (Tauri)
 
-> Scope: a menu-bar desktop app for macOS, built with Tauri v2 and the prototype's HTML, as another client of the daemon (D-023)
-> Verified against: 2026-11-04
+> Scope: a menu-bar desktop app for macOS, built with Tauri v2 and plain HTML ported from the revised prototype, as another client of the daemon (D-023, D-026)
+> Verified against: 2026-11-05
 > Status: planned; starts after Phase 6 is released (E5)
 
-Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the approved prototype (`devid-prototype/index.html`): a menu-bar icon plus a window with the same pages as the TUI. The daemon does the work, as it does for the CLI and the TUI.
+Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revised prototype (D-026: the Claude Design board "Devid — macOS style", copied to `devid-prototype/redesign/`): a menu-bar icon plus a window with the same pages as the TUI. The daemon does the work, as it does for the CLI and the TUI.
 
 ## Ground rules
 
@@ -18,12 +18,15 @@ Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the appr
   - The app loads only its own bundled files, with a strict CSP.
   - Devid opens no network port for it.
 - **Frontend:**
-  - The prototype's plain HTML, CSS and JS, wired to real data.
+  - Plain HTML, CSS and JS ported from the prototype's markup and macOS CSS, wired to real data. Claude Design's runtime is not shipped (D-026).
   - No Node, npm, bundler, React, Tailwind or shadcn (D-023, D-014).
 - **Look:**
   - The prototype's, which follows macOS System Settings (D-007).
   - Light and dark follow the system; the prototype already has both.
   - D-017 (terminal palette) is for the TUI only.
+  - UI text is English. Results and errors use the CLI's wording and say only what the daemon reported (D-026).
+  - The window opens at 1080×680, clamped to the visible screen area, with a minimum of 760×520 and no narrow layout (D-026).
+  - Icons: the padlock-and-prompt logo. `icon.icns` comes from per-size PNGs through `iconutil`, and the menu-bar icon is the outline padlock as a template image (D-026).
 - **Resources:**
   - At idle only the menu-bar icon runs; there is no Dock icon.
   - The window and its web view are created when opened and destroyed when closed.

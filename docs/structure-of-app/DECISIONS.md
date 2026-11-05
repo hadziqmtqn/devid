@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-04
+> Verified against: 2026-11-05
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -30,7 +30,10 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-020 | 2026-11-03 | superseded by D-021 | Users add PHP extensions that are not bundled: prebuilt loaders such as ionCube first, PECL builds second |
 | D-021 | 2026-11-03 | accepted (direction; the Phase 6 spike confirms feasibility) | Extra PHP extensions come only from a Devid catalog built from trusted sources; no user-supplied `.so`, no compiling on the user's Mac |
 | D-022 | 2026-11-03 | accepted | Add mysqli, readline and soap to the bundled PHP build (CodeIgniter 4 and WordPress need mysqli) |
-| D-023 | 2026-11-04 | accepted (Phase 7, after Phase 6; the G1 spike confirms idle RAM) | The desktop app is a Tauri v2 menu-bar app with the prototype's plain HTML, no Node; another daemon client |
+| D-023 | 2026-11-04 | accepted (Phase 7, after Phase 6; the G1 spike confirms idle RAM; reference and frontend source amended by D-026) | The desktop app is a Tauri v2 menu-bar app with the prototype's plain HTML, no Node; another daemon client |
+| D-024 | 2026-11-04 | accepted | imagick in the catalog keeps every format and adds SVG; Devid ships its ImageMagick config |
+| D-025 | 2026-11-04 | accepted | No ionCube Loader in the catalog |
+| D-026 | 2026-11-05 | accepted (Phase 7) | The revised prototype is the desktop app's reference, ported to plain HTML; English UI, a 1080×680 window, the padlock-and-prompt logo |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -336,3 +339,38 @@ See ARCHITECTURE, "PHP runtime".
   - E3 builds no vendor-entry support (license prompt, `--accept-license`, `source: vendor` downloads) until a vendor loader is accepted. D-021's rules for vendor loaders stay as written for that case.
 - **Revisit:** if a user asks for it, or when Devid supports Apple silicon (D-019), where ionCube still ships PHP 8.4 and 8.5 loaders.
 - **Accepted:** by the owner on 2026-11-04.
+
+## D-026: the revised prototype is the desktop app's reference, ported to plain HTML, with the padlock-and-prompt logo (accepted 2026-11-05, Phase 7)
+
+- **Context:** D-023 names `devid-prototype/index.html` (2026-11-01) as the frontend to reuse. On 2026-11-05 the owner redesigned it in Claude Design and revised it over three review rounds: English text, a fixed window size, one confirmation pattern, and real Devid data (catalog sizes, versions, ports, paths). The owner also chose a logo on a separate canvas: concept C, a padlock whose body holds a `>_` prompt, for local HTTPS and the CLI.
+- **Decision:**
+  - **Reference:** the "Devid — macOS style" board of the Design artifact <https://claude.ai/code/artifact/d60fcdfc-9d87-4c41-9329-01ce1d0acccf> (version `1793875833-a8f0`). Its source files are copied to `devid-prototype/redesign/` (`Main.dc.html`, sha256 `cdd1f0e95d61…`).
+    - Only the board's `mac` variant counts.
+    - The canvas's "Prototype lama" page, the old `index.html` and the earlier export `Devid Redesign.html` are history.
+  - **Frontend source:** the new prototype is a Claude Design file, not plain HTML. It uses `{{…}}` bindings, `<sc-if>` and `<sc-for>` tags and a `DCLogic` class, and Claude Design's own runtime renders it.
+    - The app does not ship that runtime.
+    - It ports the markup and the `variant-mac` CSS to plain HTML, CSS and JS, with small render functions in place of the template tags.
+    - There is still no framework, Node or bundler (D-023).
+  - **Language:** all UI text is English.
+  - **Messages:** results and errors use the wording the CLI and TUI already print, in sentence case, and say only what the daemon reported. Where the prototype has its own text, the CLI's wording wins.
+    - Example: restarting PHP 8.5's php-fpm shows "Restarted php-8.5", as `devid restart php-8.5` prints `restarted php-8.5`.
+    - The prototype's "php-fpm 8.5 di-restart / Berjalan normal." is dropped, because the daemon does not report "running normally".
+  - **Window:**
+    - It opens at 1080×680, clamped to the screen's visible area (without the menu bar and Dock).
+    - The minimum size is 760×520.
+    - The sidebar is 200 wide, and the content column is at most 720 wide, centered.
+    - There is no narrow or mobile layout.
+  - **Confirmations:** a short title, one sentence on the effect, then Cancel and the action button. The action button is red when it deletes something.
+    - Inside the Extensions dialog, the confirmation does not open a second dialog. It replaces the button row (install) or the extension's own row (remove).
+  - **App icon:** logo C as drawn on the logo canvas's "Ukuran ikon macOS" board (<https://claude.ai/code/artifact/7f3d8221-223e-43b1-8e79-e6ab5935cf05>, version `1793874755-7971`, copied to `devid-prototype/logo/`). The plate is 824 of 1024, inset 100, corner radius 185.
+    - `icon.icns` is built with macOS's own `iconutil` from one PNG per size, so the small sizes keep their own drawings:
+      - 16 pt @1x: without the prompt;
+      - 16 pt @2x and 32 pt @1x: thicker strokes;
+      - 32 pt @2x and larger: the full icon.
+    - `tauri icon` is not used, because it scales one image to every size. The canvas's `npx` note is not followed either (no Node).
+  - **Menu-bar icon:** the prototype's outline padlock with the prompt, as a template image (black and transparent only), so macOS colors it for light, dark and highlighted menu bars.
+    - The logo canvas's filled menu-bar version is not used. As a template its white prompt takes the body's color and disappears.
+  - **macOS only:** no Windows or Linux icon files (D-023, "Not in Phase 7").
+  - **Wordmark:** if the "devid" wordmark is used (the README, an About window), it is converted to SVG paths, so no font loads from the network. App text uses the system font.
+- **Amends:** D-023. Its reference file changes, and "the prototype is reused as it is" becomes "ported from the prototype". Everything else in D-023 stands.
+- **Accepted:** by the owner on 2026-11-05.

@@ -44,7 +44,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 4 | TUI (ratatui) on top of the daemon API; colors per D-017; plan in `docs/roadmap/phase-4.md` | done 2026-11-03 (T1–T5, released as v0.2.0) |
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | done 2026-11-02 (R1–R5) |
 | 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | done (2026-11-05): apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole for 8.3–8.5; Devid v0.4.1 installs them (CLI and TUI); recipe PRs are built, tested and published (E6) |
-| 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023); plan in `docs/roadmap/phase-7.md` | planned, starts after Phase 6 is released |
+| 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | planned, starts after Phase 6 is released |
 
 ## Open risks (Phase 1 must prove)
 

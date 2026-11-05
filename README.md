@@ -301,7 +301,7 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
 ### Then: desktop app (Phase 7)
 
 - A menu-bar app with a window, based on the approved prototype. It starts after Phase 6 is released.
-- Built with Tauri v2 and the prototype's plain HTML, with no Node. It is another client of the daemon's API, so the daemon needs no rework.
+- Built with Tauri v2 and plain HTML ported from the prototype, with no Node. It is another client of the daemon's API, so the daemon needs no rework.
 - The first step measures its idle memory on an Intel Mac. If only the menu-bar icon costs too much, the app runs only while its window is open, like the TUI (D-023, `docs/roadmap/phase-7.md`).
 
 ### v2 and later: planned, not scheduled
