@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/daemon", "crates/cli"]
+members = ["crates/daemon", "crates/cli", "crates/gui"]
+# The desktop app builds only on request (`-p devid-gui`), so the daemon and CLI stay fast to build.
+default-members = ["crates/daemon", "crates/cli"]
 
 [workspace.package]
 version = "0.4.1"

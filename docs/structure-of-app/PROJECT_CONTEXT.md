@@ -44,7 +44,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 4 | TUI (ratatui) on top of the daemon API; colors per D-017; plan in `docs/roadmap/phase-4.md` | done 2026-11-03 (T1–T5, released as v0.2.0) |
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | done 2026-11-02 (R1–R5) |
 | 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | done (2026-11-05): apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole for 8.3–8.5; Devid v0.4.1 installs them (CLI and TUI); recipe PRs are built, tested and published (E6) |
-| 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | planned, starts after Phase 6 is released |
+| 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | in progress: G1 spike done 2026-11-05 |
 
 ## Open risks (Phase 1 must prove)
 
@@ -135,6 +135,20 @@ Shared extensions built separately against the static PHP build root load into D
 - **ionCube Loader 14.0.0:** its license allows mirroring; loads into the released PHP 8.3.36 (CLI and php-fpm), and must come before Xdebug. ionCube's Intel Mac loaders stop at PHP 8.3 and are no longer maintained; 8.4 and 8.5 loaders exist for Apple silicon only.
 
 Details, findings for the catalog build (load-time symbol check, which OpenSSL, CA trust, build paths, ImageMagick config files), open questions for E2 and what is still untested are in `docs/roadmap/phase-6.md`, "E1 results". After the spike, the gitignored build root in `spike/php` holds PHP 8.4.27 with OpenLDAP and ImageMagick.
+
+### Phase 7 G1 spike (2026-11-05)
+
+Release build of `crates/gui` (Tauri 2.12.5, system WKWebView) on the owner's Mac. Footprint as `footprint` and Activity Monitor show it. Details in `docs/roadmap/phase-7.md`, "G1 results".
+- **Icon only:** 21 MB footprint (41 MB RSS), 0.00 s CPU in 5 minutes, no WebKit process. That is within the 30 MB limit, and about as much as the web server and php-fpm (nginx 7.8 MB plus a php-fpm master of 15 MB).
+- **Window open on Sites:** about 82–115 MB in total. The app takes 41–46 MB, WebKit's WebContent process 39–67 MB and its Networking process 2.5 MB.
+- **After the window closes:**
+  - WebContent exits, but the app keeps about 20 MB, mostly graphics memory.
+  - Restarting in place as icon-only (D-027) brings it back to 21 MB.
+- **Builds:**
+  - **Cold:** 8.5 min debug, 10.7 min release.
+  - **Incremental release:** 2–3 min.
+  - **Release binary:** 8.2 MB.
+  - **Daemon and CLI builds:** unaffected (not a default member).
 
 ## Machine state
 
