@@ -34,6 +34,12 @@ Devid is a local PHP development environment for macOS. Every folder you link or
 curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
 ```
 
+With the desktop app as well (see [The desktop app](#the-desktop-app)):
+
+```sh
+curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh -s -- --gui
+```
+
 The script downloads `devid`, checks its sha256 and starts `devid setup`. The script itself never uses sudo. Setup lists every step as it runs it:
 
 1. Copies `devid` to `~/.devid/bin`, and adds the `php` and `composer` commands there.
@@ -45,6 +51,7 @@ The script downloads `devid`, checks its sha256 and starts `devid setup`. The sc
    - ports 80/443 redirected to Devid (a pf rule);
    - trust for the Devid certificate authority.
 6. Downloads PHP 8.5 and nginx (both sha256-checked), unless PHP or the web server is already installed.
+7. With `--gui`, installs Devid.app into `~/Applications` (sha256-checked).
 
 To see the steps without changing anything, run `devid setup --dry-run`. To install a specific version of Devid, run `DEVID_VERSION=0.4.1 sh install.sh`.
 
@@ -193,9 +200,14 @@ devid logs nginx-error.log --clear
 Devid.app is a menu-bar icon with a window that has the same pages as the TUI (Phase 7). It is optional: your sites run without it.
 
 ```sh
-devid setup --gui              # install it into ~/Applications (no sudo); open it from Spotlight
+# at the first install, in one command (no sudo for the app itself):
+curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh -s -- --gui
+# or later, in a new terminal:
+devid setup --gui              # install it into ~/Applications; open it from Spotlight
 devid login-item on            # show its menu-bar icon after every login (default: off)
 ```
+
+Without `--gui`, Devid installs no app.
 
 - **Updates:** `devid self-update` updates the app together with devid once the app is installed. An open window keeps the old version until you close it.
 - **Removal:** `devid uninstall` removes the app.
