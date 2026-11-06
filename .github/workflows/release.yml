@@ -63,7 +63,7 @@ jobs:
         run: |
           ASSETS="dist/devid-darwin-x86_64 dist/install.sh dist/devid-version.txt dist/Devid-darwin-x86_64.zip dist/checksums.txt"
           # D-010's notice, on the page the landing page links to (D-032).
-          NOTES="devid $VERSION and the Devid desktop app for macOS on Intel (x86_64). A personal project, provided as is, without warranty; tested on Intel macOS 14 only. Ad-hoc signed, not notarized: install with the command below, then run 'devid setup --gui' for the app; a browser download needs 'xattr -dr com.apple.quarantine Devid.app'. 'devid setup' asks for sudo once to add /etc/resolver/test, trust Devid's CA and forward ports 80/443; 'devid uninstall' undoes it. Install: curl -fsSL https://github.com/$BINARIES_REPO/releases/download/devid-latest/install.sh | sh"
+          NOTES="devid $VERSION and the Devid desktop app for macOS on Intel (x86_64). A personal project, provided as is, without warranty; tested on Intel macOS 14 only. Ad-hoc signed, not notarized: install with the command below (no Gatekeeper prompt), adding '-s -- --gui' after 'sh' for the desktop app; a browser download needs 'xattr -dr com.apple.quarantine Devid.app'. 'devid setup' asks for sudo once to add /etc/resolver/test, trust Devid's CA and forward ports 80/443; 'devid uninstall' undoes it. Install: curl -fsSL https://github.com/$BINARIES_REPO/releases/download/devid-latest/install.sh | sh"
           if gh release view "devid-v$VERSION" -R "$BINARIES_REPO" >/dev/null 2>&1; then
             gh release upload "devid-v$VERSION" $ASSETS -R "$BINARIES_REPO" --clobber
           else
