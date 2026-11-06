@@ -26,7 +26,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - PHP 8.3, 8.4 and 8.5 (D-009), multiple versions side by side, with a per-site version.
 - `.test` DNS, a local CA and HTTPS.
 - One global web server: nginx (default, D-015), Caddy or Apache.
-- A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012); a Tauri desktop app follows in Phase 7 (D-023).
+- A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012); the Tauri desktop app came in Phase 7 (D-023) and is opt-in (`devid setup --gui`).
 
 **Non-goals:**
 - Databases. The owner uses DBngin for PostgreSQL and MySQL.
@@ -44,7 +44,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 4 | TUI (ratatui) on top of the daemon API; colors per D-017; plan in `docs/roadmap/phase-4.md` | done 2026-11-03 (T1–T5, released as v0.2.0) |
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | done 2026-11-02 (R1–R5) |
 | 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | done (2026-11-05): apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole for 8.3–8.5; Devid v0.4.1 installs them (CLI and TUI); recipe PRs are built, tested and published (E6) |
-| 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | in progress: G1 spike and G2 window pages done 2026-11-05, G3 menu bar and G4 Devid.app 2026-11-06 |
+| 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | done 2026-11-06 (G1–G5): Devid.app ships with v0.7.0, installed with `devid setup --gui` |
 
 ## Open risks (Phase 1 must prove)
 
@@ -151,6 +151,8 @@ Release build of `crates/gui` (Tauri 2.12.5, system WKWebView) on the owner's Ma
   - **Daemon and CLI builds:** unaffected (not a default member).
 
 ## Machine state
+
+**2026-11-06: devid 0.7.0 and Devid.app installed** (owner ran `devid self-update`, then `devid setup --gui`). `~/Applications/Devid.app` runs as a menu-bar icon after its window closes. At login, sites are served and the app does not open (the app's login item is off).
 
 **2026-11-04: PHP 8.4 and 8.5 reinstalled with the D-022 build** (owner ran `devid php install 8.5` and `devid php install 8.4`, release `2026.11.03-4`). Both now include mysqli, readline and soap in the CLI and php-fpm; `php.ini` was kept; php-fpm 8.5 restarted on the new binary; `erdbpro-saas.test/login` 200 (0.1 s warm) and `:8000` unaffected.
 
