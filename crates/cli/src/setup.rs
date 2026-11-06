@@ -396,57 +396,63 @@ pub fn self_update(paths: &Paths, check: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{checksum_for, php_plan, place_app};
-    use std::{fs, path::Path, process::Command};
+    use super::php_plan;
 
-    /// A fake Devid.app holding `marker`, zipped as the release does; returns the zip's SHA-256.
-    fn app_zip(dir: &Path, marker: &str, with_binary: bool) -> (std::path::PathBuf, String) {
-        let src = dir.join(format!("src-{marker}"));
-        let bin_dir = src.join("Devid.app/Contents/MacOS");
-        fs::create_dir_all(&bin_dir).unwrap();
-        if with_binary {
-            fs::write(bin_dir.join("devid-gui"), marker).unwrap();
+    /// Devid.app is macOS only, and these tests use macOS's `ditto` (CI's Linux job has none).
+    #[cfg(target_os = "macos")]
+    mod app {
+        use super::super::{checksum_for, place_app};
+        use std::{fs, path::Path, process::Command};
+
+        /// A fake Devid.app holding `marker`, zipped as the release does; returns the zip's SHA-256.
+        fn app_zip(dir: &Path, marker: &str, with_binary: bool) -> (std::path::PathBuf, String) {
+            let src = dir.join(format!("src-{marker}"));
+            let bin_dir = src.join("Devid.app/Contents/MacOS");
+            fs::create_dir_all(&bin_dir).unwrap();
+            if with_binary {
+                fs::write(bin_dir.join("devid-gui"), marker).unwrap();
+            }
+            let zip = dir.join(format!("{marker}.zip"));
+            let ok = Command::new("/usr/bin/ditto")
+                .args(["-c", "-k", "--keepParent"])
+                .arg(src.join("Devid.app"))
+                .arg(&zip)
+                .status()
+                .unwrap();
+            assert!(ok.success());
+            let sum = devid_daemon::releases::sha256_hex(&zip).unwrap();
+            (zip, sum)
         }
-        let zip = dir.join(format!("{marker}.zip"));
-        let ok = Command::new("/usr/bin/ditto")
-            .args(["-c", "-k", "--keepParent"])
-            .arg(src.join("Devid.app"))
-            .arg(&zip)
-            .status()
-            .unwrap();
-        assert!(ok.success());
-        let sum = devid_daemon::releases::sha256_hex(&zip).unwrap();
-        (zip, sum)
-    }
 
-    #[test]
-    fn the_app_is_checked_unpacked_and_swapped_in_whole() {
-        let dir = std::env::temp_dir().join(format!("devid-app-test-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let dest = dir.join("Applications/Devid.app");
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        let binary = |d: &Path| fs::read_to_string(d.join("Contents/MacOS/devid-gui")).unwrap();
+        #[test]
+        fn the_app_is_checked_unpacked_and_swapped_in_whole() {
+            let dir = std::env::temp_dir().join(format!("devid-app-test-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            let dest = dir.join("Applications/Devid.app");
+            fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            let binary = |d: &Path| fs::read_to_string(d.join("Contents/MacOS/devid-gui")).unwrap();
 
-        let (v1, sum1) = app_zip(&dir, "v1", true);
-        place_app(&v1, &sum1, &dest).unwrap();
-        assert_eq!(binary(&dest), "v1");
+            let (v1, sum1) = app_zip(&dir, "v1", true);
+            place_app(&v1, &sum1, &dest).unwrap();
+            assert_eq!(binary(&dest), "v1");
 
-        let (v2, sum2) = app_zip(&dir, "v2", true);
-        place_app(&v2, &sum2, &dest).unwrap();
-        assert_eq!(binary(&dest), "v2", "an update replaces the bundle");
-        let left: Vec<_> = fs::read_dir(dest.parent().unwrap()).unwrap().flatten().map(|e| e.file_name()).collect();
-        assert_eq!(left, ["Devid.app"], "no staging or backup folders left");
+            let (v2, sum2) = app_zip(&dir, "v2", true);
+            place_app(&v2, &sum2, &dest).unwrap();
+            assert_eq!(binary(&dest), "v2", "an update replaces the bundle");
+            let left: Vec<_> = fs::read_dir(dest.parent().unwrap()).unwrap().flatten().map(|e| e.file_name()).collect();
+            assert_eq!(left, ["Devid.app"], "no staging or backup folders left");
 
-        assert!(place_app(&v1, &sum2, &dest).unwrap_err().contains("checksum mismatch"));
-        let (empty, sum) = app_zip(&dir, "empty", false);
-        assert!(place_app(&empty, &sum, &dest).unwrap_err().contains("does not hold Devid.app"));
-        assert_eq!(binary(&dest), "v2", "a failed install keeps the app that was there");
+            assert!(place_app(&v1, &sum2, &dest).unwrap_err().contains("checksum mismatch"));
+            let (empty, sum) = app_zip(&dir, "empty", false);
+            assert!(place_app(&empty, &sum, &dest).unwrap_err().contains("does not hold Devid.app"));
+            assert_eq!(binary(&dest), "v2", "a failed install keeps the app that was there");
 
-        assert_eq!(
-            checksum_for(&format!("{sum1}  Devid-darwin-x86_64.zip\n"), "Devid-darwin-x86_64.zip").unwrap(),
-            sum1
-        );
-        fs::remove_dir_all(&dir).unwrap();
+            assert_eq!(
+                checksum_for(&format!("{sum1}  Devid-darwin-x86_64.zip\n"), "Devid-darwin-x86_64.zip").unwrap(),
+                sum1
+            );
+            fs::remove_dir_all(&dir).unwrap();
+        }
     }
 
     fn s(v: &[&str]) -> Vec<String> {
