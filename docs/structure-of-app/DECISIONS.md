@@ -496,3 +496,16 @@ See ARCHITECTURE, "PHP runtime".
 - **Cost:** macOS minutes in a private repository count 10x. With Devid.app, a release takes about 10–15 macOS minutes, or 100–150 of the 2,000 free monthly minutes.
 - **Still to do from D-010:** the notice at first launch, a signing approach, and an arm64 test plan.
 - **Accepted:** by the owner on 2026-11-06.
+
+## D-033: the user guide is public, in devid-binaries (accepted 2026-11-06)
+
+- **Context:**
+  - Devid's usage docs (install options, sites, PHP, extensions, web servers, the desktop app, the TUI, HTTPS, updates, troubleshooting, uninstall, files) were in this repository's README, which is private (D-032).
+  - The landing page's visitors and the `devid-binaries` README had only the install commands. The owner asked whether a separate docs page is needed.
+- **Decision:**
+  - **One user guide:** `GUIDE.md` in the public `devid-binaries`. It names no private files or decisions.
+  - **No second copy:** this README keeps the overview, the install commands, the roadmap and development, and links to the guide.
+  - **Links:** the `devid-binaries` README and the landing page ("Docs") point to it.
+  - **Keeping it current:** a change users can see updates the guide in a `devid-binaries` pull request, merged when the release ships.
+- **Not now:** a docs site (GitHub Pages or a generator). It is worth it once the guide outgrows one page, or users ask for search.
+- **Accepted:** by the owner on 2026-11-06.
