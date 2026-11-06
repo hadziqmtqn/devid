@@ -22,9 +22,10 @@ env:
 
 jobs:
   release:
-    # Private repo: macOS minutes count 10x, but this build takes only a few minutes.
+    # Private repo: macOS minutes count 10x. devid builds in a few minutes; Devid.app (Tauri) adds
+    # about ten on a cold cache.
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -51,15 +52,18 @@ jobs:
           otool -L dist/devid-darwin-x86_64
           cp install.sh dist/install.sh
           echo "$VERSION" > dist/devid-version.txt
-          (cd dist && shasum -a 256 devid-darwin-x86_64 install.sh devid-version.txt > checksums.txt)
+          # Devid.app (Phase 7 G4), ad-hoc signed; `devid setup --gui` and self-update install it.
+          scripts/bundle-app.sh dist
+          (cd dist && shasum -a 256 devid-darwin-x86_64 install.sh devid-version.txt Devid-darwin-x86_64.zip > checksums.txt)
           cat dist/checksums.txt
 
       - name: Publish to devid-binaries
         env:
           GH_TOKEN: ${{ secrets.DEVID_BINARIES_TOKEN }}
         run: |
-          ASSETS="dist/devid-darwin-x86_64 dist/install.sh dist/devid-version.txt dist/checksums.txt"
-          NOTES="devid $VERSION for macOS x86_64 (ad-hoc signed, not notarized). Install: curl -fsSL https://github.com/$BINARIES_REPO/releases/download/devid-latest/install.sh | sh"
+          ASSETS="dist/devid-darwin-x86_64 dist/install.sh dist/devid-version.txt dist/Devid-darwin-x86_64.zip dist/checksums.txt"
+          # D-010's notice, on the page the landing page links to (D-032).
+          NOTES="devid $VERSION and the Devid desktop app for macOS on Intel (x86_64). A personal project, provided as is, without warranty; tested on Intel macOS 14 only. Ad-hoc signed, not notarized: install with the command below, then run 'devid setup --gui' for the app; a browser download needs 'xattr -dr com.apple.quarantine Devid.app'. 'devid setup' asks for sudo once to add /etc/resolver/test, trust Devid's CA and forward ports 80/443; 'devid uninstall' undoes it. Install: curl -fsSL https://github.com/$BINARIES_REPO/releases/download/devid-latest/install.sh | sh"
           if gh release view "devid-v$VERSION" -R "$BINARIES_REPO" >/dev/null 2>&1; then
             gh release upload "devid-v$VERSION" $ASSETS -R "$BINARIES_REPO" --clobber
           else
@@ -69,3 +73,4 @@ jobs:
             gh release create devid-latest -R "$BINARIES_REPO" --latest=false --title "devid (latest)" --notes "Always the newest devid. $NOTES"
           fi
           gh release upload devid-latest $ASSETS -R "$BINARIES_REPO" --clobber
+          gh release edit devid-latest -R "$BINARIES_REPO" --notes "Always the newest devid. $NOTES"

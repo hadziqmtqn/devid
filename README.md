@@ -188,6 +188,19 @@ devid logs php85-fpm.log -n 50 --follow
 devid logs nginx-error.log --clear
 ```
 
+## The desktop app
+
+Devid.app is a menu-bar icon with a window that has the same pages as the TUI (Phase 7). It is optional: your sites run without it.
+
+```sh
+devid setup --gui              # install it into ~/Applications (no sudo); open it from Spotlight
+devid login-item on            # show its menu-bar icon after every login (default: off)
+```
+
+- **Updates:** `devid self-update` updates the app together with devid once the app is installed. An open window keeps the old version until you close it.
+- **Removal:** `devid uninstall` removes the app.
+- **Dock:** the app is in the Dock and in Cmd+Tab only while its window is open. At other times it is a menu-bar icon (about 10 MB, no CPU at idle).
+
 ## The TUI
 
 Run `devid` with no arguments, or run `devid tui`. The TUI has five pages: Sites, PHP, Server, Logs and Settings. Every action in it is also a CLI command.
@@ -307,6 +320,7 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
 - A menu-bar app with a window, based on the approved prototype. It starts after Phase 6 is released.
 - Built with Tauri v2 and plain HTML ported from the prototype, with no Node. It is another client of the daemon's API, so the daemon needs no rework.
 - **Done 2026-11-05:** the first step (G1) measured it on an Intel Mac. The menu-bar icon alone uses 21 MB and no CPU, and closing the window brings it back to that (D-027, `docs/roadmap/phase-7.md`).
+- **Done 2026-11-06:** the window pages (G2), the menu-bar menu with login settings and update checks (G3), and Devid.app with `devid setup --gui` (G4). See [The desktop app](#the-desktop-app).
 
 ### v2 and later: planned, not scheduled
 

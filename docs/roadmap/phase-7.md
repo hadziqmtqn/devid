@@ -2,7 +2,7 @@
 
 > Scope: a menu-bar desktop app for macOS, built with Tauri v2 and plain HTML ported from the revised prototype, as another client of the daemon (D-023, D-026)
 > Verified against: 2026-11-05
-> Status: in progress; G1 (spike) and G2 (window pages) done 2026-11-05, G3 (menu bar) 2026-11-06; see "G1 results", "G2 as built" and "G3 as built"
+> Status: in progress; G1 (spike) and G2 (window pages) done 2026-11-05, G3 (menu bar) and G4 (Devid.app) 2026-11-06; see "G1 results" and "G2", "G3" and "G4 as built"
 
 Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revised prototype (D-026: the Claude Design board "Devid — macOS style", copied to `devid-prototype/redesign/`): a menu-bar icon plus a window with the same pages as the TUI. The daemon does the work, as it does for the CLI and the TUI.
 
@@ -181,11 +181,39 @@ The window has the five pages, with every action the TUI has.
   - the prototype's site list and default-PHP picker in the menu (the window has both);
   - the icon's position after D-027's restart, which needs `Devid.app` (G4).
 
+### G4 as built (2026-11-06)
+
+- **`scripts/bundle-app.sh`:**
+  - **Build:** it builds `devid-gui` in Tauri's production mode (`--features custom-protocol`) and assembles `Devid.app` by hand: `Info.plist`, `icon.icns`, the binary.
+  - **Signing and packaging:** it signs the bundle ad hoc (D-010) and zips it with `ditto` as `Devid-darwin-x86_64.zip`.
+  - **`Info.plist`:**
+    - name "Devid";
+    - `dev.devid.app`;
+    - `LSUIElement`: menu-bar only until a window opens (D-030);
+    - macOS 12 or later.
+  - **Where it runs:** on the owner's Mac and in `release.yml`. The release publishes the zip with the devid binary, in `checksums.txt`, to `devid-v<version>` and `devid-latest`.
+- **`devid setup --gui`:** installs `~/Applications/Devid.app` with no sudo.
+  - **Version:** it comes from the installed devid's own release (`devid-v<version>`), so the app and the daemon match.
+  - **Checks:** the zip is checked against `checksums.txt`.
+  - **Swap:** the zip is unpacked next to the app and swapped in whole, and a failed install keeps the app that was there.
+  - **Updates:** once the app is installed, every `setup` updates it, including the one `devid self-update` runs.
+- **`devid uninstall`:** quits the app and deletes it, along with the login item (G3).
+- **Version check in the window:** if the daemon's version differs from the app's, a banner says what to do.
+  - **Daemon newer:** close the window, and the icon restarts as the new version (D-027).
+  - **App newer:** run `devid self-update`.
+  The older-daemon error (G2 fix) stays for requests the daemon does not know.
+- **Checked on the owner's Mac (local bundle):**
+  - macOS shows it as "Devid" (`dev.devid.app`), ad-hoc signed, 8.6 MB (2.0 MB zipped);
+  - the web view reaches the daemon in production mode;
+  - opened through LaunchServices it is a foreground app with its window, and started with `--background` it is a UIElement with no window until reopened.
+  - `spctl` rejects it, as expected for a bundle that is not notarized; Gatekeeper checks only files with a quarantine attribute, which a `curl` download does not have.
+- **Decided:**
+  - **Opt-in install:** `devid setup --gui`, as proposed; CLI-only users get nothing new.
+  - **A bundling script, not the Tauri CLI:** no large `cargo install`, and the same script for local and release builds.
+
 ## Open questions
 
-- **Install by default or opt-in?** Proposal: opt-in (`devid setup --gui`), so CLI-only users get nothing new.
-- **Tauri's CLI (`cargo tauri build`) or a small bundling script for the `.app`?** The Tauri CLI is another large `cargo install`. G1 needed neither (`cargo build -p devid-gui` runs the app unbundled). Decide in G4.
-- **Gatekeeper:** a file downloaded with `curl` carries no quarantine attribute, so an ad-hoc signed app should open without a prompt. Verify in G4.
+- **Gatekeeper on a real install:** the release's zip, downloaded by `devid setup --gui` (curl, no quarantine), should open from Finder without a prompt. The owner confirms on the first install.
 
 ## Out of scope
 

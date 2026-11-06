@@ -77,11 +77,12 @@ pub fn open_window(app: &AppHandle, page: Option<&'static str>) {
         .inner_size(width, height)
         .min_inner_size(MIN.0, MIN.1)
         .center();
-    // A new window reads its first page before app.js runs.
-    let builder = match page {
-        Some(page) => builder.initialization_script(format!("window.DEVID_START_PAGE = '{page}';")),
-        None => builder,
-    };
+    // Before app.js runs: this app's version (to compare with the daemon's, G4) and the first page.
+    let builder = builder.initialization_script(format!(
+        "window.DEVID_APP_VERSION = '{}'; window.DEVID_START_PAGE = '{}';",
+        env!("CARGO_PKG_VERSION"),
+        page.unwrap_or("")
+    ));
     // System Settings look: the sidebar runs under the traffic lights.
     #[cfg(target_os = "macos")]
     let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);

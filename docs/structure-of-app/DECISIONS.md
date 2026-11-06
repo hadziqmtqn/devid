@@ -39,6 +39,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-029 | 2026-11-06 | accepted | A parked site can be removed (ignored) and restored; its folder is never touched |
 | D-030 | 2026-11-06 | accepted (amends D-023's "no Dock icon") | While its window is open, the desktop app is in the Dock and Cmd+Tab with the padlock-and-prompt icon; at idle it is in the menu bar only |
 | D-031 | 2026-11-06 | accepted | Two login settings: "Serve sites at login" (nginx and PHP, on by default) and "Open Devid at login" (the app, off by default) |
+| D-032 | 2026-11-06 | accepted | The `devid` source stays private; downloads, the desktop app included, come from `devid-binaries`, whose README and release notes carry D-010's notice |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -475,3 +476,23 @@ See ARCHITECTURE, "PHP runtime".
   - the TUI's Settings page;
   - the app's Settings.
 - **Accepted:** by the owner on 2026-11-06, with the labels, the defaults and the CLI names.
+
+## D-032: the source stays private; downloads come from devid-binaries (accepted 2026-11-06)
+
+- **Context:**
+  - The owner built a landing page and asked how it can link to the desktop app while `devid` is private.
+  - The owner first planned to make the repository public under the MIT license, then chose to keep it private once it was clear the downloads do not need that.
+- **Decision:**
+  - **`devid` stays private**, as D-016 decided.
+  - **The landing page links to the public `devid-binaries`:**
+    - the install command (`install.sh` from `devid-latest`, then `devid setup --gui`);
+    - optionally, `Devid-darwin-x86_64.zip` from `devid-latest` (G4).
+    Neither needs a GitHub login.
+  - **D-010's notice goes where users download:**
+    - the `devid-binaries` README, which gains an "Install Devid" section and the system changes `devid setup` makes;
+    - the release notes of `devid-v<version>` and `devid-latest` (`release.yml`);
+    - the landing page (the owner's).
+- **Not now:** the MIT license. The source is not published; a license can come with a later decision to publish it.
+- **Cost:** macOS minutes in a private repository count 10x. With Devid.app, a release takes about 10–15 macOS minutes, or 100–150 of the 2,000 free monthly minutes.
+- **Still to do from D-010:** the notice at first launch, a signing approach, and an arm64 test plan.
+- **Accepted:** by the owner on 2026-11-06.
