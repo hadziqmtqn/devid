@@ -765,8 +765,20 @@ function renderPage() {
   const data = S.data[S.page];
   if (!data) return;
   const scroll = page.parentElement.scrollTop;
-  page.replaceChildren(...PAGES[S.page].render(data));
+  page.replaceChildren(...[versionBanner(), PAGES[S.page].render(data)].flat().filter(Boolean));
   page.parentElement.scrollTop = scroll;
+}
+
+/** G4: the app and the daemon come from the same release; say what to do when they differ. */
+function versionBanner() {
+  const app = window.DEVID_APP_VERSION;
+  const daemon = S.status?.version;
+  if (!app || !daemon || app === daemon) return null;
+  const older = (a, b) => a.split('.').map(Number).reduce((r, n, i) => r || n - (Number(b.split('.')[i]) || 0), 0) < 0;
+  const [title, sub] = older(app, daemon)
+    ? ['Devid ' + daemon + ' is installed', 'This window is still ' + app + '. Close it, and the menu-bar icon restarts as the new version.']
+    : ['The Devid daemon is ' + daemon, 'This app is ' + app + '. Update the daemon with devid self-update in Terminal.'];
+  return h('div.dv-banner.warn', { role: 'status' }, h('span.dv-dot.warn'), text(h('span.dv-strong', {}, title), sub));
 }
 
 function go(key) {

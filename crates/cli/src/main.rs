@@ -57,6 +57,9 @@ enum Command {
         /// Do not install a web server
         #[arg(long, conflicts_with = "server")]
         no_server: bool,
+        /// Also install the Devid desktop app into ~/Applications (an installed one is always updated)
+        #[arg(long)]
+        gui: bool,
     },
     /// Check every part of the installation and say how to fix problems
     Doctor,
@@ -375,8 +378,8 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             }
         }),
         Command::Helper { action } => helper(action, paths),
-        Command::Setup { dry_run, php, server, no_php, no_server } => {
-            setup::setup(paths, dry_run, setup::Pick { php, server, no_php, no_server })
+        Command::Setup { dry_run, php, server, no_php, no_server, gui } => {
+            setup::setup(paths, dry_run, setup::Pick { php, server, no_php, no_server, gui })
         }
         Command::Doctor => setup::doctor(paths),
         Command::Tui => match tui::run(paths)? {

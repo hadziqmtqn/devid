@@ -151,10 +151,15 @@ pub fn download(paths: &crate::paths::Paths, artifact: &Artifact) -> io::Result<
 /// "8.4.27" > "8.4.9", numerically; anything unparsable counts as older.
 /// Download one file from the `devid-latest` release into ~/.devid/downloads.
 pub fn fetch_latest(paths: &crate::paths::Paths, name: &str) -> io::Result<std::path::PathBuf> {
+    fetch_devid(paths, "devid-latest", name)
+}
+
+/// Download one file from a devid release (`devid-latest` or `devid-v<version>`).
+pub fn fetch_devid(paths: &crate::paths::Paths, release: &str, name: &str) -> io::Result<std::path::PathBuf> {
     let dir = paths.home.join("downloads");
     fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("self-update-{name}"));
-    fetch(&format!("{}/devid-latest/{name}", release_base()), &dest)?;
+    fetch(&format!("{}/{release}/{name}", release_base()), &dest)?;
     Ok(dest)
 }
 

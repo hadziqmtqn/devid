@@ -8,6 +8,10 @@ publish.workspace = true
 # The desktop app (Phase 7, D-023/D-026). Not a default member: a plain
 # `cargo build` or `cargo test` never compiles Tauri. Build it with `-p devid-gui`.
 
+[features]
+# Tauri's production mode, for Devid.app (scripts/bundle-app.sh).
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2.7.4", default-features = false }
 

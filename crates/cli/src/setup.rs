@@ -37,6 +37,8 @@ pub struct Pick {
     pub server: Option<String>,
     pub no_php: bool,
     pub no_server: bool,
+    /// Install the desktop app (an installed one is always updated).
+    pub gui: bool,
 }
 
 /// PHP versions to install and the version to make the default. Without `--php`, the configured
@@ -127,10 +129,77 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
             })?;
         }
     }
+    // The desktop app (Phase 7 G4): installed on request, and kept in step with devid once it is
+    // there, so `devid self-update` (which runs the new binary's setup) updates it too.
+    let app = install::app_bundle();
+    if pick.gui || app.exists() {
+        step(dry_run, &format!("install the Devid app ({}, sha256-checked)", app.display()), || {
+            install_app(paths).map(|_| "open it from Spotlight or ~/Applications".into())
+        })?;
+    }
     if !dry_run {
         println!("\ndone. Next: `devid park ~/Projects` (or `devid link` in one project), then `devid doctor`.");
     }
     Ok(())
+}
+
+/// The release asset with Devid.app (scripts/bundle-app.sh).
+const APP_ASSET: &str = "Devid-darwin-x86_64.zip";
+
+/// Installs or updates ~/Applications/Devid.app from this devid's own release (`devid-v<version>`),
+/// so the app and the daemon have the same version.
+fn install_app(paths: &Paths) -> Result<std::path::PathBuf, String> {
+    use devid_daemon::releases;
+    let release = format!("devid-v{}", devid_daemon::VERSION);
+    let get = |name: &str| releases::fetch_devid(paths, &release, name).map_err(|e| e.to_string());
+    let sums = std::fs::read_to_string(get("checksums.txt")?).map_err(|e| e.to_string())?;
+    let expected = checksum_for(&sums, APP_ASSET)?;
+    let zip = get(APP_ASSET)?;
+    let placed = place_app(&zip, &expected, &install::app_bundle());
+    let _ = std::fs::remove_file(&zip);
+    placed
+}
+
+/// Checks `zip` against `expected`, unpacks it next to `dest` and swaps it in whole: a running
+/// copy keeps its files (it restarts into the new one, D-027), and a failed swap puts the old
+/// bundle back.
+fn place_app(zip: &Path, expected: &str, dest: &Path) -> Result<std::path::PathBuf, String> {
+    let actual = devid_daemon::releases::sha256_hex(zip).map_err(|e| e.to_string())?;
+    if actual != expected {
+        return Err(format!("checksum mismatch for {APP_ASSET}; not installed"));
+    }
+    let dir = dest.parent().ok_or("no folder for the app")?;
+    let (staging, old) = (dir.join(".Devid.app.new"), dir.join(".Devid.app.old"));
+    let _ = std::fs::remove_dir_all(&staging);
+    let _ = std::fs::remove_dir_all(&old);
+    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    let unzip = std::process::Command::new("/usr/bin/ditto").args(["-x", "-k"]).arg(zip).arg(&staging).output();
+    let new = staging.join("Devid.app");
+    if !matches!(&unzip, Ok(o) if o.status.success()) || !new.join("Contents/MacOS/devid-gui").is_file() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("{APP_ASSET} does not hold Devid.app"));
+    }
+    let had_old = dest.exists();
+    if had_old {
+        std::fs::rename(dest, &old).map_err(|e| e.to_string())?;
+    }
+    if let Err(e) = std::fs::rename(&new, dest) {
+        if had_old {
+            let _ = std::fs::rename(&old, dest);
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e.to_string());
+    }
+    let _ = std::fs::remove_dir_all(&old);
+    let _ = std::fs::remove_dir_all(&staging);
+    Ok(dest.to_path_buf())
+}
+
+/// The SHA-256 of `asset` in a release's checksums.txt.
+fn checksum_for(sums: &str, asset: &str) -> Result<String, String> {
+    sums.lines()
+        .find_map(|l| l.split_once("  ").filter(|(_, f)| *f == asset).map(|(h, _)| h.to_string()))
+        .ok_or(format!("no checksum for {asset} in the release"))
 }
 
 /// One `doctor` result.
@@ -258,6 +327,13 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
         let _ = std::fs::remove_file(install::app_agent_plist_path());
         Ok(String::new())
     })?;
+    let app = install::app_bundle();
+    step(dry_run, &format!("quit and delete the Devid app ({})", app.display()), || {
+        let bin = install::default_app();
+        let _ = std::process::Command::new("/usr/bin/pkill").arg("-f").arg(&bin).output();
+        let _ = std::fs::remove_dir_all(&app);
+        Ok(String::new())
+    })?;
     let rc = install::rc_file();
     step(dry_run, &format!("remove Devid's PATH line from {}", rc.display()), || {
         install::remove_rc_line(&rc).map(|_| String::new()).map_err(|e| e.to_string())
@@ -304,10 +380,7 @@ pub fn self_update(paths: &Paths, check: bool) -> Result<(), String> {
     let asset = if cfg!(target_arch = "aarch64") { "devid-darwin-arm64" } else { "devid-darwin-x86_64" };
     println!("downloading devid {latest} (sha256-checked)…");
     let sums = std::fs::read_to_string(get("checksums.txt")?).map_err(|e| e.to_string())?;
-    let expected = sums
-        .lines()
-        .find_map(|l| l.split_once("  ").filter(|(_, f)| *f == asset).map(|(h, _)| h.to_string()))
-        .ok_or(format!("no checksum for {asset} in the release"))?;
+    let expected = checksum_for(&sums, asset)?;
     let bin = get(asset)?;
     let actual = releases::sha256_hex(&bin).map_err(|e| e.to_string())?;
     if actual != expected {
@@ -323,7 +396,58 @@ pub fn self_update(paths: &Paths, check: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::php_plan;
+    use super::{checksum_for, php_plan, place_app};
+    use std::{fs, path::Path, process::Command};
+
+    /// A fake Devid.app holding `marker`, zipped as the release does; returns the zip's SHA-256.
+    fn app_zip(dir: &Path, marker: &str, with_binary: bool) -> (std::path::PathBuf, String) {
+        let src = dir.join(format!("src-{marker}"));
+        let bin_dir = src.join("Devid.app/Contents/MacOS");
+        fs::create_dir_all(&bin_dir).unwrap();
+        if with_binary {
+            fs::write(bin_dir.join("devid-gui"), marker).unwrap();
+        }
+        let zip = dir.join(format!("{marker}.zip"));
+        let ok = Command::new("/usr/bin/ditto")
+            .args(["-c", "-k", "--keepParent"])
+            .arg(src.join("Devid.app"))
+            .arg(&zip)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+        let sum = devid_daemon::releases::sha256_hex(&zip).unwrap();
+        (zip, sum)
+    }
+
+    #[test]
+    fn the_app_is_checked_unpacked_and_swapped_in_whole() {
+        let dir = std::env::temp_dir().join(format!("devid-app-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let dest = dir.join("Applications/Devid.app");
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        let binary = |d: &Path| fs::read_to_string(d.join("Contents/MacOS/devid-gui")).unwrap();
+
+        let (v1, sum1) = app_zip(&dir, "v1", true);
+        place_app(&v1, &sum1, &dest).unwrap();
+        assert_eq!(binary(&dest), "v1");
+
+        let (v2, sum2) = app_zip(&dir, "v2", true);
+        place_app(&v2, &sum2, &dest).unwrap();
+        assert_eq!(binary(&dest), "v2", "an update replaces the bundle");
+        let left: Vec<_> = fs::read_dir(dest.parent().unwrap()).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(left, ["Devid.app"], "no staging or backup folders left");
+
+        assert!(place_app(&v1, &sum2, &dest).unwrap_err().contains("checksum mismatch"));
+        let (empty, sum) = app_zip(&dir, "empty", false);
+        assert!(place_app(&empty, &sum, &dest).unwrap_err().contains("does not hold Devid.app"));
+        assert_eq!(binary(&dest), "v2", "a failed install keeps the app that was there");
+
+        assert_eq!(
+            checksum_for(&format!("{sum1}  Devid-darwin-x86_64.zip\n"), "Devid-darwin-x86_64.zip").unwrap(),
+            sum1
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()

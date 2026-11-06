@@ -42,9 +42,14 @@ pub fn app_agent_plist_path() -> PathBuf {
     user_home().join("Library/LaunchAgents").join(format!("{APP_LABEL}.plist"))
 }
 
-/// Where the app is installed (`Devid.app` in ~/Applications, Phase 7 G4).
+/// The installed desktop app (Phase 7 G4): ~/Applications/Devid.app, no sudo.
+pub fn app_bundle() -> PathBuf {
+    user_home().join("Applications/Devid.app")
+}
+
+/// The app's binary, which the login item runs.
 pub fn default_app() -> PathBuf {
-    user_home().join("Applications/Devid.app/Contents/MacOS/devid-gui")
+    app_bundle().join("Contents/MacOS/devid-gui")
 }
 
 /// Opens the desktop app's menu-bar icon at login (`--background`), or stops doing so.
