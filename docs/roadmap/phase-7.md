@@ -1,8 +1,8 @@
 # Phase 7 Plan: desktop app (Tauri)
 
 > Scope: a menu-bar desktop app for macOS, built with Tauri v2 and plain HTML ported from the revised prototype, as another client of the daemon (D-023, D-026)
-> Verified against: 2026-11-05
-> Status: in progress; G1 (spike) and G2 (window pages) done 2026-11-05, G3 (menu bar) and G4 (Devid.app) 2026-11-06; see "G1 results" and "G2", "G3" and "G4 as built"
+> Verified against: 2026-11-06
+> Status: done 2026-11-06. G1 (spike) and G2 (window pages) 2026-11-05; G3 (menu bar), G4 (Devid.app) and G5 (docs and release) 2026-11-06; see "G1 results" and "G2" to "G5 as built"
 
 Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revised prototype (D-026: the Claude Design board "Devid — macOS style", copied to `devid-prototype/redesign/`): a menu-bar icon plus a window with the same pages as the TUI. The daemon does the work, as it does for the CLI and the TUI.
 
@@ -211,9 +211,22 @@ The window has the five pages, with every action the TUI has.
   - **Opt-in install:** `devid setup --gui`, as proposed; CLI-only users get nothing new.
   - **A bundling script, not the Tauri CLI:** no large `cargo install`, and the same script for local and release builds.
 
+### G5 as built (2026-11-06)
+
+- **README:**
+  - The desktop app section and the Install section show one command for both cases: `… | sh -s -- --gui` installs the daemon, the CLI and Devid.app, and `… | sh` installs no app (#53).
+  - The `devid-binaries` README says the same (hadziqmtqn/devid-binaries#10).
+- **Release notes:** `release.yml` says to add `-s -- --gui` after `sh` for the app. The published notes of `devid-v0.7.0` and `devid-latest` were edited to match.
+- **Release:** v0.7.0 (G4). G5 changed docs only, so no new release.
+- **Installed on the owner's Mac:** `devid self-update` (0.6.0 to 0.7.0), then `devid setup --gui`. Every other setup step reported "already there", and none asked for sudo. Checked:
+  - Spotlight opens Devid with no Gatekeeper prompt. The app has no quarantine attribute (a `curl` download), so Gatekeeper never checks it, although `spctl` rejects it.
+  - The Dock and Cmd+Tab show "Devid" with its icon.
+  - Closing the window removes the Dock icon. The menu-bar icon stays, with no flicker, and the same process continues as `--background` (D-027).
+  - **Memory:** 49 MB RSS with the window open; 5.6 MB footprint (17 MB RSS) at idle afterwards, within the G1 limit of 30 MB.
+
 ## Open questions
 
-- **Gatekeeper on a real install:** the release's zip, downloaded by `devid setup --gui` (curl, no quarantine), should open from Finder without a prompt. The owner confirms on the first install.
+None. Gatekeeper on a real install was the last one, answered by G5.
 
 ## Out of scope
 
