@@ -509,3 +509,20 @@ See ARCHITECTURE, "PHP runtime".
   - **Keeping it current:** a change users can see updates the guide in a `devid-binaries` pull request, merged when the release ships.
 - **Not now:** a docs site (GitHub Pages or a generator). It is worth it once the guide outgrows one page, or users ask for search.
 - **Accepted:** by the owner on 2026-11-06.
+
+## D-034: a website with the landing page and the docs (accepted 2026-11-06, supersedes part of D-033)
+
+- **Context:**
+  - D-033 made `GUIDE.md` in `devid-binaries` the user guide. The owner then asked for a docs page on the website itself, in the same codebase as the landing page, with room for more features later.
+  - The owner asked whether Zudoku fits. It is built for API references (OpenAPI, a playground, auth), and Devid has no public API, so its main features would go unused.
+- **Decision:**
+  - **Repository:** `devid-site`, public, separate from the release repositories.
+  - **Stack:** Next.js with Fumadocs, exported as a static site. The search index is built at build time, so the site needs no server.
+  - **Hosting:** Vercel, at `devid.bekenweb.com`.
+  - **Pages:**
+    - `/`: the landing page, ported from the "Devid Landing Page" design canvas, which stays the design reference;
+    - `/docs`: the user docs, from `GUIDE.md` split into pages.
+  - **One user guide, again:** `devid-site/content/docs` replaces `GUIDE.md` as the guide. Once the site is live, `GUIDE.md` keeps only a link to it, and the READMEs and the landing page link to `/docs`.
+  - **Keeping it current:** as in D-033, but the pull request goes to `devid-site`.
+- **Out of scope still:** databases (D-006). The docs promise nothing about them.
+- **Accepted:** by the owner on 2026-11-06.
