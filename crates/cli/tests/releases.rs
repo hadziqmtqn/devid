@@ -93,9 +93,14 @@ fn install_and_update_from_a_release() {
     assert!(check.contains("available: php 8.5 8.5.12 -> 8.5.13"), "{check}");
     assert!(check.contains("available: nginx 1.30.5 -> 1.30.6"), "{check}");
     assert!(out(&devid(&home, &["update", "--check"])).contains("8.5.12 -> 8.5.13"), "--check changed nothing");
+    // `status` keeps what the last check found (D-028), for the menu-bar dot and the CLI.
+    let found = &json(&home, &["status", "--json"])["updates"];
+    assert_eq!(found["changes"].as_array().map(Vec::len), Some(2), "{found}");
+    assert!(out(&devid(&home, &["status"])).contains("updates:     php 8.5 8.5.13, nginx 1.30.6"));
     let o = devid(&home, &["update"]);
     assert!(o.status.success(), "{}", stderr(&o));
     assert!(out(&o).contains("updated: php 8.5 8.5.12 -> 8.5.13"), "{}", out(&o));
+    assert_eq!(json(&home, &["status", "--json"])["updates"]["changes"], serde_json::json!([]), "applied");
     assert!(out(&devid(&home, &["update", "--check"])).contains("everything is up to date (release r2)"));
     wait_for("8.5 running after update", || proc_of(&json(&home, &["status", "--json"]), "8.5").0 == "running");
 

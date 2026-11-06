@@ -9,6 +9,7 @@ fn main() {
         "doctor",
         "devid_check",
         "in_terminal",
+        "login_item",
     ]));
     tauri_build::try_build(attributes).expect("tauri-build failed");
 }

@@ -468,11 +468,38 @@ function fillLog(box) {
   if (S.log.follow) box.scrollTop = box.scrollHeight;
 }
 
+/** What the daemon's automatic check found (D-028): a newer devid and the binary changes. */
+function autoUpdates(st) {
+  const u = st?.updates;
+  if (!u?.checked_at) return null;
+  const changes = (u.changes || []).map((c) => c.what + ' ' + c.from + '→' + c.to);
+  return { devid: u.devid || null, changes, count: changes.length + (u.devid ? 1 : 0), checkedAt: u.checked_at };
+}
+
+/** A switch row; `label` and `sub` describe it, `change` gets the new state. */
+function switchRow(id, label, sub, on, change) {
+  return row(h('label.dv-grow', { for: id }, h('div', {}, label), h('div.dv-sub', {}, sub)),
+    h('input.dv-switch', { type: 'checkbox', role: 'switch', id, checked: on, disabled: !!S.busy, onchange: (e) => change(e.target.checked) }));
+}
+
 function settingsPage() {
   const st = S.status;
   const ports = portsText(st);
   const doc = S.doctor;
+  const auto = autoUpdates(st);
+  const binaries = S.updates || (auto?.changes.length ? { text: 'Available: ' + auto.changes.join(', '), changes: auto.changes } : null);
+  const devidText = S.devid?.text || (auto?.devid ? 'devid ' + auto.devid + ' is available (installed: ' + st.version + ')' : '');
+  const minutes = st.update_check_minutes;
   return [
+    // D-031: two settings, because the sites and the app start separately.
+    h('h2.dv-h2', {}, 'Login'),
+    card(
+      switchRow('sw-autostart', 'Serve sites at login', 'nginx and PHP start in the background when you log in. Off: they wait until you press Start all.',
+        st.autostart !== false, (on) => act(on ? 'Turning on…' : 'Turning off…', () => daemon({ cmd: 'autostart', enabled: on }),
+          on ? 'Sites are served at login' : 'After login, nginx and PHP wait for Start all')),
+      switchRow('sw-login', 'Open Devid at login', 'Shows the Devid icon in the menu bar. Your sites don\'t need it.',
+        !!st.login_item, (on) => act(on ? 'Turning on…' : 'Turning off…', () => invoke('login_item', { enabled: on }),
+          (r) => r.login_item ? 'Devid opens at login' : 'Devid no longer opens at login'))),
     h('h2.dv-h2', {}, 'Domains'),
     card(row(text('Top-level domain', 'Every site is served over HTTPS with a local certificate'), h('span.dv-mono.dv-strong', {}, '.' + st.tld)),
       row(text('Ports'), h('span.dv-sub.dv-mono', {}, ports))),
@@ -480,17 +507,21 @@ function settingsPage() {
     card(row(text('Data folder', h('span.dv-mono', {}, st.home)), btn('Show in Finder', () => openTarget({ what: 'finder', path: st.home })))),
     h('h2.dv-h2', {}, 'Updates'),
     card(
-      row(text('Devid ' + st.version, S.devid?.text || 'Updates the Devid app itself'),
-        S.devid?.available ? btn('Update Devid…', updateDevid, 'primary') : null,
+      row(text('Devid ' + st.version, devidText || 'Updates the Devid app itself'),
+        S.devid?.available || (!S.devid && auto?.devid) ? btn('Update Devid…', updateDevid, 'primary') : null,
         busyBtn('devid-check', 'Check for updates', () => act('Checking…', async () => {
           const line = await invoke('devid_check');
           S.devid = { text: line, available: / is available /.test(line) };
         }, null, 'devid-check'))),
-      row(text('PHP, web server and extensions', S.updates?.text || 'Newer builds from Devid\'s release'),
-        S.updates?.changes.length ? busyBtn('updates-apply', 'Update', updateBinaries, 'primary') : null,
+      row(text('PHP, web server and extensions', binaries?.text || 'Newer builds from Devid\'s release'),
+        binaries?.changes.length ? busyBtn('updates-apply', 'Update', updateBinaries, 'primary') : null,
         busyBtn('updates-check', 'Check for updates', () => act('Checking…', async () => {
           S.updates = updateSummary(await daemon({ cmd: 'update', check: true }), true);
         }, null, 'updates-check')))),
+    h('p.dv-sub.dv-note', {}, minutes
+      ? 'Devid checks every ' + plural(minutes, 'minute') + (auto ? ', last ' + Math.max(0, Math.round((Date.now() / 1000 - auto.checkedAt) / 60)) + ' min ago' : '') +
+        '. The menu-bar icon shows a dot when something is new.'
+      : 'Automatic checks are off (update_check_minutes = 0 in config.toml).'),
     h('h2.dv-h2', {}, 'Health check'),
     card(
       row(text('Health check', doc?.error || (doc?.checks ? (doc.checks.filter((c) => !c.ok).length ? plural(doc.checks.filter((c) => !c.ok).length, 'problem') + ' found' : 'All good') :
@@ -519,7 +550,7 @@ async function updateDevid() {
 }
 
 async function updateBinaries() {
-  const list = S.updates.changes.join(', ');
+  const list = (S.updates || autoUpdates(S.status)).changes.join(', ');
   if (await ask('Install the updates?', 'Downloads and installs ' + list + ' from Devid\'s release (sha256-checked).', 'Update'))
     act('Updating…', async () => { S.updates = updateSummary(await daemon({ cmd: 'update', check: false }), false); return S.updates.text; }, (t) => t, 'updates-apply');
 }
@@ -693,13 +724,14 @@ function renderChrome() {
   const st = S.status;
   // Redraw only on a change, so keyboard focus in the sidebar survives the polling.
   const cardBusy = S.busyAt === 'card' ? S.busy : '';
-  const key = JSON.stringify([S.page, !!S.busy, cardBusy, st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status)]]);
+  const key = JSON.stringify([S.page, !!S.busy, cardBusy, autoUpdates(st)?.count, st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status)]]);
   if (key === chromeKey) return;
   chromeKey = key;
   $('nav').replaceChildren(...Object.entries(PAGES).map(([key, p]) =>
     h('button.dv-nav' + (key === S.page ? '.is-active' : ''), { type: 'button', 'aria-current': key === S.page ? 'page' : null,
       onclick: () => go(key) }, icon(key), h('span.dv-grow', {}, p.title),
-    key === 'sites' && st ? h('span.dv-chip', {}, String(st.sites)) : key === 'php' && st ? h('span.dv-chip', {}, st.default_php) : null)));
+    key === 'sites' && st ? h('span.dv-chip', {}, String(st.sites)) : key === 'php' && st ? h('span.dv-chip', {}, st.default_php) :
+      key === 'settings' && autoUpdates(st)?.count ? h('span.dv-navdot', { title: 'Updates available', 'aria-label': 'Updates available' }) : null)));
   $('title').textContent = PAGES[S.page].title;
   $('subtitle').textContent = PAGES[S.page].sub();
   $('tools').replaceChildren(...(PAGES[S.page].tools?.() || []));
@@ -796,4 +828,6 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
 });
+// The menu bar's "Settings…" opens a new window on that page (main.rs sets this first).
+if (PAGES[window.DEVID_START_PAGE]) S.page = window.DEVID_START_PAGE;
 poll();

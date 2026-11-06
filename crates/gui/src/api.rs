@@ -19,23 +19,55 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Any daemon request the CLI and TUI send, except `stop` (the daemon itself). Installs always
-/// download from Devid's release; installing from a local archive (`from`) stays a CLI option.
+/// Any daemon request the CLI and TUI send, except `stop` (the daemon itself) and `login_item`
+/// (which names a program to run at login; `login_item` below sends it for this app only).
+/// Installs always download from Devid's release; installing from a local archive (`from`)
+/// stays a CLI option. After a change, the menu-bar icon shows the new state right away.
 #[tauri::command]
-pub async fn daemon(req: Request) -> Result<Value, String> {
+pub async fn daemon(app: tauri::AppHandle, req: Request) -> Result<Value, String> {
+    let read = is_read(&req);
     let req = match req {
         Request::Stop => return Err("stopping the daemon is not available in the app".into()),
+        Request::LoginItem { .. } => return Err("use the app's login_item command".into()),
         Request::PhpInstall { version, .. } => Request::PhpInstall { version, from: None },
         Request::ServerInstall { server, .. } => Request::ServerInstall { server, from: None },
         req => req,
     };
     let paths = Paths::from_env();
-    request(&paths, &req).map_err(|e| {
+    let reply = request(&paths, &req).map_err(|e| {
         too_old(e, || {
             let status = request(&paths, &Request::Status).unwrap_or_default();
             status["version"].as_str().unwrap_or("?").to_string()
         })
-    })
+    });
+    if !read {
+        crate::tray::refresh(&app);
+    }
+    reply
+}
+
+fn is_read(req: &Request) -> bool {
+    matches!(
+        req,
+        Request::Status
+            | Request::Sites
+            | Request::PhpList
+            | Request::ServerList
+            | Request::Logs
+            | Request::LogRead { .. }
+            | Request::PhpExtCatalog { .. }
+            | Request::PhpExtList { .. }
+            | Request::PhpExtProgress
+            | Request::Update { check: true }
+    )
+}
+
+/// Opens this app's menu-bar icon at login, or stops doing so (D-031). The program is always
+/// this app itself, never one the page names.
+#[tauri::command]
+pub async fn login_item(enabled: bool) -> Result<Value, String> {
+    let app = std::env::current_exe().map_err(|e| e.to_string())?.display().to_string();
+    request(&Paths::from_env(), &Request::LoginItem { enabled, app: Some(app) })
 }
 
 /// An older daemon rejects a request it does not know with a serde error; say what to do instead.
@@ -299,8 +331,8 @@ mod tests {
     }
 
     #[test]
-    fn the_app_cannot_stop_the_daemon() {
-        let err = tauri::async_runtime::block_on(daemon(Request::Stop)).unwrap_err();
-        assert!(err.contains("not available"), "{err}");
+    fn only_changes_redraw_the_menu_bar() {
+        assert!(is_read(&Request::Status) && is_read(&Request::Update { check: true }));
+        assert!(!is_read(&Request::StopAll) && !is_read(&Request::Update { check: false }));
     }
 }

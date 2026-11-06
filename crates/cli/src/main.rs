@@ -128,6 +128,19 @@ enum Command {
     Ignore { site: String },
     /// Serve an ignored parked site again
     Unignore { site: String },
+    /// Serve sites at login: start nginx and PHP when the daemon starts, or wait for `devid start all`
+    Autostart {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// Open the Devid app (its menu-bar icon) at login
+    LoginItem {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+        /// The app's binary (default: ~/Applications/Devid.app)
+        #[arg(long)]
+        app: Option<PathBuf>,
+    },
     /// Serve every subfolder of a folder (default: the current one) as <subfolder>.test
     Park { path: Option<PathBuf> },
     /// Stop serving a parked folder
@@ -393,6 +406,20 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Unignore { site } => {
             send(Request::Unignore { site: site.clone() }).map(|_| println!("serving {site} again"))
         }
+        Command::Autostart { state } => send(Request::Autostart { enabled: state == "on" }).map(|_| {
+            if state == "on" {
+                println!("sites are served at login");
+            } else {
+                println!("after login, nginx and PHP wait for `devid start all`");
+            }
+        }),
+        Command::LoginItem { state, app } => {
+            let app = app.map(|p| abs(Some(p))).transpose()?;
+            send(Request::LoginItem { enabled: state == "on", app }).map(|v| match v["login_item"].as_str() {
+                Some(app) => println!("Devid opens at login ({app})"),
+                None => println!("Devid no longer opens at login"),
+            })
+        }
         Command::Park { path } => {
             send(Request::Park { path: abs(path)? }).map(|v| println!("parked {}", v["parked"].as_str().unwrap_or("?")))
         }
@@ -427,7 +454,36 @@ fn print_status(v: &serde_json::Value, json: bool) {
     println!("  CA:          {}", v["ca"].as_str().unwrap_or("?"));
     println!("  sites:       {}", v["sites"]);
     println!("  default PHP: {}", v["default_php"].as_str().unwrap_or("?"));
+    println!(
+        "  at login:    sites {}, app {}",
+        if v["autostart"] == false { "wait for `devid start all`" } else { "served" },
+        if v["login_item"].is_string() { "opens" } else { "does not open" }
+    );
+    if let Some(line) = updates_line(&v["updates"]) {
+        println!("  updates:     {line}");
+    }
     print_php(&v["php"]);
+}
+
+/// The last automatic update check (D-028), for `devid status`; None before the first check.
+pub fn updates_line(u: &serde_json::Value) -> Option<String> {
+    let checked = u["checked_at"].as_u64()?;
+    let mut found: Vec<String> = u["devid"].as_str().map(|d| format!("devid {d}")).into_iter().collect();
+    found.extend(
+        u["changes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|c| format!("{} {}", c["what"].as_str().unwrap_or("?"), c["to"].as_str().unwrap_or("?"))),
+    );
+    let ago = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs().saturating_sub(checked))
+        / 60;
+    Some(match found.is_empty() {
+        true => format!("none (checked {ago} min ago)"),
+        false => format!("{} (checked {ago} min ago); `devid update` or `devid self-update`", found.join(", ")),
+    })
 }
 
 fn print_sites(list: &serde_json::Value, json: bool) {

@@ -61,6 +61,8 @@ p.dv-note { margin: 10px 4px 0; }
 .dv-nav:nth-child(3) .dv-ico { background: #30B158; }
 .dv-nav .dv-chip { background: none; color: var(--text-2); font-weight: 400; }
 .dv-nav.is-active .dv-chip { color: rgba(255,255,255,.85); }
+.dv-navdot { width: 7px; height: 7px; flex: none; margin-right: 4px; border-radius: 50%; background: var(--switch-on); }
+.dv-nav.is-active .dv-navdot { background: #fff; }
 .dv-statuscard { margin-top: auto; padding: 10px; border-radius: 10px; background: var(--surface-2); }
 .dv-statusline { display: flex; align-items: center; gap: 10px; }
 .dv-statusbtns { display: flex; gap: 6px; margin-top: 10px; }

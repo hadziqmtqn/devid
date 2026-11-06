@@ -149,6 +149,23 @@ pub fn download(paths: &crate::paths::Paths, artifact: &Artifact) -> io::Result<
 }
 
 /// "8.4.27" > "8.4.9", numerically; anything unparsable counts as older.
+/// Download one file from the `devid-latest` release into ~/.devid/downloads.
+pub fn fetch_latest(paths: &crate::paths::Paths, name: &str) -> io::Result<std::path::PathBuf> {
+    let dir = paths.home.join("downloads");
+    fs::create_dir_all(&dir)?;
+    let dest = dir.join(format!("self-update-{name}"));
+    fetch(&format!("{}/devid-latest/{name}", release_base()), &dest)?;
+    Ok(dest)
+}
+
+/// The newest released devid version.
+pub fn latest_devid(paths: &crate::paths::Paths) -> io::Result<String> {
+    let file = fetch_latest(paths, "devid-version.txt")?;
+    let version = fs::read_to_string(&file)?.trim().to_string();
+    let _ = fs::remove_file(file);
+    Ok(version)
+}
+
 pub fn newer(candidate: &str, installed: &str) -> bool {
     let parse = |v: &str| v.split('.').map(|p| p.parse::<u64>().ok()).collect::<Option<Vec<u64>>>();
     match (parse(candidate), parse(installed)) {

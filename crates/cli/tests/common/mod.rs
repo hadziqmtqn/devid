@@ -125,7 +125,11 @@ pub fn start_daemon_env(home: &Path, env: &[(&str, &str)]) -> Daemon {
         fs::create_dir_all(home).unwrap();
         fs::write(
             &config,
-            format!("http_port = {TEST_HTTP_PORT}\nhttps_port = {TEST_HTTPS_PORT}\ndns_port = {}\n", free_udp_port()),
+            // No automatic update checks (D-028): tests never reach the network on their own.
+            format!(
+                "http_port = {TEST_HTTP_PORT}\nhttps_port = {TEST_HTTPS_PORT}\ndns_port = {}\nupdate_check_minutes = 0\n",
+                free_udp_port()
+            ),
         )
         .unwrap();
     }

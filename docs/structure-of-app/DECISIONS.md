@@ -38,6 +38,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-028 | 2026-11-06 | accepted (built in G3) | The daemon checks for updates every 20 minutes (configurable); the menu-bar icon and Settings show a dot when there are any |
 | D-029 | 2026-11-06 | accepted | A parked site can be removed (ignored) and restored; its folder is never touched |
 | D-030 | 2026-11-06 | accepted (amends D-023's "no Dock icon") | While its window is open, the desktop app is in the Dock and Cmd+Tab with the padlock-and-prompt icon; at idle it is in the menu bar only |
+| D-031 | 2026-11-06 | accepted | Two login settings: "Serve sites at login" (nginx and PHP, on by default) and "Open Devid at login" (the app, off by default) |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -450,3 +451,27 @@ See ARCHITECTURE, "PHP runtime".
 - **Idle cost:** none. Icon-only is still an Accessory app with no window.
 - **Amends:** D-023's "no Dock icon", now "no Dock icon at idle".
 - **Accepted:** by the owner on 2026-11-06.
+
+## D-031: two login settings, for the sites and for the app (accepted 2026-11-06, Phase 7 G3)
+
+- **Context:** "launch at login" can mean two things in Devid:
+  - **The sites:** nginx, php-fpm and DNS. The daemon's LaunchAgent has always started them at every login.
+  - **The desktop app:** its menu-bar icon. The plan made this opt-in.
+
+  The owner pointed out the ambiguity and asked for both to be clear.
+- **Decision:** two settings, side by side under "Login" in the app's Settings:
+  - **Serve sites at login:** "nginx and PHP start in the background when you log in. Off: they wait until you press Start all."
+    - On by default: today's behaviour.
+    - `config.toml` `autostart`; CLI `devid autostart on|off`; TUI `a` on Settings.
+    - Off, the daemon still starts at login (about 2 MB, no CPU), so the CLI, TUI and app work at once. It starts with nginx and php-fpm stopped, as after `devid stop all`. This also holds after any daemon restart, such as a self-update.
+  - **Open Devid at login:** "Shows the Devid icon in the menu bar. Your sites don't need it."
+    - Off by default.
+    - CLI `devid login-item on|off [--app <path>]`, which writes or removes the LaunchAgent `dev.devid.app`. It runs the app with `--background` in the login session.
+    - The plist is written for the next login, never loaded at once, because loading it would start a second copy next to a running app.
+    - The default app path is `~/Applications/Devid.app` (G4). The app's switch passes its own binary, and the page cannot name another program: the generic `daemon` command refuses `login_item`.
+    - `devid uninstall` removes it.
+- **Shown in:**
+  - `devid status`: "at login: sites served, app does not open";
+  - the TUI's Settings page;
+  - the app's Settings.
+- **Accepted:** by the owner on 2026-11-06, with the labels, the defaults and the CLI names.

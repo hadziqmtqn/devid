@@ -2,7 +2,7 @@
 
 > Scope: a menu-bar desktop app for macOS, built with Tauri v2 and plain HTML ported from the revised prototype, as another client of the daemon (D-023, D-026)
 > Verified against: 2026-11-05
-> Status: in progress; G1 (spike) and G2 (window pages) done 2026-11-05, see "G1 results" and "G2 as built"
+> Status: in progress; G1 (spike) and G2 (window pages) done 2026-11-05, G3 (menu bar) 2026-11-06; see "G1 results", "G2 as built" and "G3 as built"
 
 Devid v1 has a CLI and a TUI (D-012). Phase 7 adds the desktop app from the revised prototype (D-026: the Claude Design board "Devid — macOS style", copied to `devid-prototype/redesign/`): a menu-bar icon plus a window with the same pages as the TUI. The daemon does the work, as it does for the CLI and the TUI.
 
@@ -144,6 +144,42 @@ The window has the five pages, with every action the TUI has.
   - The folder picker gives the focus back to the window.
   - macOS actions run `/usr/bin/open`, `osascript` and `pbcopy` by full path, because a terminal's PATH can put its own `open` first.
 - **Added after G2 (v0.5.0):** Remove site for parked sites, with a Served / Removed filter (D-029).
+
+### G3 as built (2026-11-06)
+
+- **Menu-bar icon** (`crates/gui/src/tray.rs`): it asks the daemon for `status` every 15 seconds and redraws only when something changed. Actions from the window and the menu redraw it right away.
+  - **Icon:** one template image per state, drawn by `render.swift`:
+    - running: the plain padlock;
+    - stopped, or no daemon: dimmed;
+    - something failed: a "!" badge.
+    Each also comes with a dot when updates are available (D-028).
+  - **Menu:**
+    - the status line, as on the window's card;
+    - "Updates available (n)…", which opens Settings;
+    - Stop all and Restart <server> while running, Start all when stopped;
+    - Open Devid, Settings… and Quit Devid.
+    An action's error shows as a line in the menu until the next refresh.
+  - **No confirmation for Stop all here:** the prototype's quick menu has none, and Start all undoes it. The window keeps its confirmation (D-026).
+- **Daemon:**
+  - **D-028:**
+    - the daemon checks for updates 3 minutes after it starts, then every `update_check_minutes` (20). It checks the newer devid release and what `update --check` would change;
+    - `status` carries the last result, and an update clears its list;
+    - one check or update runs at a time, since they share the downloaded manifest;
+    - `devid status` prints an "updates:" line.
+  - **D-031:**
+    - `autostart` (`devid autostart on|off`);
+    - the app's login item (`devid login-item on|off`, LaunchAgent `dev.devid.app`, written for the next login, never loaded at once);
+    - `status` carries both, and `devid uninstall` removes the login item.
+- **TUI:** the Settings page shows both login settings and the last update check; `a` toggles "serve sites at login".
+- **Window:**
+  - **Settings, Login section:** "Serve sites at login" and "Open Devid at login". The app's switch passes its own binary through the new `login_item` command, and the generic `daemon` command refuses `login_item`.
+  - **Settings, Updates:** filled from the automatic check, with a note on how often it runs.
+  - **Sidebar:** Settings shows a dot when there are updates.
+  - **Menu bar's "Settings…":** opens the window on Settings.
+- **Idle with the polling icon:** release build, 5 minutes, icon only: 9.2 MB footprint (30 MB RSS) and 0.03 s of CPU, with no WebKit process. That is within G1's limits (30 MB, about 0% CPU).
+- **Not in G3:**
+  - the prototype's site list and default-PHP picker in the menu (the window has both);
+  - the icon's position after D-027's restart, which needs `Devid.app` (G4).
 
 ## Open questions
 

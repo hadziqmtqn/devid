@@ -252,9 +252,10 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
         println!("  {} undo system setup via sudo:", if dry_run { "-" } else { ".." });
         helper(HelperAction::Uninstall { dry_run }, paths)?;
     }
-    step(dry_run, "stop the daemon and remove the LaunchAgent", || {
+    step(dry_run, "stop the daemon and remove the LaunchAgents", || {
         install::unload_agent();
         let _ = std::fs::remove_file(install::agent_plist_path());
+        let _ = std::fs::remove_file(install::app_agent_plist_path());
         Ok(String::new())
     })?;
     let rc = install::rc_file();
@@ -275,22 +276,13 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
     Ok(())
 }
 
-/// Download one file from the `devid-latest` release into ~/.devid/downloads.
 fn fetch_latest(paths: &Paths, name: &str) -> Result<std::path::PathBuf, String> {
-    use devid_daemon::releases;
-    let dir = paths.home.join("downloads");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let dest = dir.join(format!("self-update-{name}"));
-    releases::fetch(&format!("{}/devid-latest/{name}", releases::release_base()), &dest).map_err(|e| e.to_string())?;
-    Ok(dest)
+    devid_daemon::releases::fetch_latest(paths, name).map_err(|e| e.to_string())
 }
 
-/// The newest released devid version.
+/// The newest released devid version (the daemon's periodic check uses the same code, D-028).
 pub fn latest_devid(paths: &Paths) -> Result<String, String> {
-    let file = fetch_latest(paths, "devid-version.txt")?;
-    let version = std::fs::read_to_string(&file).map_err(|e| e.to_string())?.trim().to_string();
-    let _ = std::fs::remove_file(file);
-    Ok(version)
+    devid_daemon::releases::latest_devid(paths).map_err(|e| e.to_string())
 }
 
 /// `devid self-update`: download the newest devid from the `devid-latest` release, verify it against

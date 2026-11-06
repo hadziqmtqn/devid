@@ -504,6 +504,12 @@ impl App {
                 return Action::Do(Effect::Daemon { request: Request::StartAll, done: "started all services".into() });
             }
             KeyCode::Char('d') if self.page == Page::Settings => return Action::Do(Effect::Doctor),
+            KeyCode::Char('a') if self.page == Page::Settings => {
+                let on = self.status.as_ref().is_ok_and(|s| s["autostart"] != false);
+                let done =
+                    if on { "after login, nginx and PHP wait for start all" } else { "sites are served at login" };
+                return Action::Do(Effect::Daemon { request: Request::Autostart { enabled: !on }, done: done.into() });
+            }
             KeyCode::Char('u') if self.page == Page::Settings => return Action::Do(Effect::CheckUpdates),
             KeyCode::Char('U') if self.page == Page::Settings => {
                 self.mode = Mode::Confirm {
@@ -1174,6 +1180,10 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal, "uninstall cancelled");
         app.handle_key(ch('U'));
         assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "update", "check": false}));
+        app.status = Ok(json!({"autostart": true}));
+        assert_eq!(daemon_json(app.handle_key(ch('a'))), json!({"cmd": "autostart", "enabled": false}), "a toggles");
+        app.status = Ok(json!({"autostart": false}));
+        assert_eq!(daemon_json(app.handle_key(ch('a'))), json!({"cmd": "autostart", "enabled": true}));
     }
 
     #[test]
