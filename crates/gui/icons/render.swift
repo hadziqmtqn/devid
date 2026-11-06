@@ -94,9 +94,11 @@ for (slot, px, size) in slots {
     render("icon.iconset/icon_\(slot).png", w: px, h: px, view: plate) { appIcon($0, size) }
 }
 
-// Menu-bar template: the prototype's outline padlock, black on transparent only, so macOS
-// can tint it. tray-icon shows it 18 pt high, so 44 px is the @2x size.
-render("tray.png", w: 40, h: 44, view: CGRect(x: 20, y: 18, width: 60, height: 66)) { c in
+// Menu-bar templates: the prototype's outline padlock, black on transparent only, so macOS can
+// tint it. tray-icon shows them 18 pt high, so 44 px is the @2x size. One per state (G3):
+// running, off (stopped or no daemon: dimmed), bad (something failed: a "!" badge), each also
+// with a dot for available updates (D-028).
+func padlock(_ c: CGContext) {
     let black = color(0x000000)
     c.setStrokeColor(black)
     c.setLineWidth(8)
@@ -107,4 +109,41 @@ render("tray.png", w: 40, h: 44, view: CGRect(x: 20, y: 18, width: 60, height: 6
     c.strokePath()
     stroke(c, 6, black, [CGPoint(x: 39, y: 56), CGPoint(x: 46, y: 62), CGPoint(x: 39, y: 68)])
     stroke(c, 6, black, [CGPoint(x: 51, y: 68), CGPoint(x: 61, y: 68)])
+}
+
+/// A filled black circle with a transparent gap around it, so it reads apart from the padlock.
+func badge(_ c: CGContext, _ center: CGPoint, _ r: CGFloat) {
+    c.setBlendMode(.clear)
+    c.fillEllipse(in: CGRect(x: center.x - r - 3, y: center.y - r - 3, width: 2 * (r + 3), height: 2 * (r + 3)))
+    c.setBlendMode(.normal)
+    c.setFillColor(color(0x000000))
+    c.fillEllipse(in: CGRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r))
+}
+
+for state in ["running", "off", "bad"] {
+    for dot in [false, true] {
+        let name = "tray" + (state == "running" ? "" : "-\(state)") + (dot ? "-dot" : "") + ".png"
+        render(name, w: 40, h: 44, view: CGRect(x: 20, y: 18, width: 60, height: 66)) { c in
+            if state == "off" {
+                c.setAlpha(0.4)
+                c.beginTransparencyLayer(auxiliaryInfo: nil)
+                padlock(c)
+                c.endTransparencyLayer()
+                c.setAlpha(1)
+            } else {
+                padlock(c)
+            }
+            if state == "bad" {
+                badge(c, CGPoint(x: 69, y: 72), 11)
+                // The "!" is cut out of the badge.
+                c.setBlendMode(.clear)
+                stroke(c, 4, color(0x000000), [CGPoint(x: 69, y: 66), CGPoint(x: 69, y: 72)])
+                c.fillEllipse(in: CGRect(x: 67, y: 75, width: 4, height: 4))
+                c.setBlendMode(.normal)
+            }
+            if dot {
+                badge(c, CGPoint(x: 73, y: 25), 6)
+            }
+        }
+    }
 }

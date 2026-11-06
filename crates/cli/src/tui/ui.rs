@@ -273,8 +273,19 @@ fn draw_settings(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
         Line::raw(format!("Storage:   {}", tilde(s(&status["home"])))),
         Line::raw(format!("CA:        {}", tilde(s(&status["ca"])))),
         Line::raw(format!("devid:     {}", s(&status["version"]))),
+        Line::raw(format!(
+            "At login:  sites {} (a toggles) · app {} (`devid login-item on|off`)",
+            if status["autostart"] == false { "wait for start all" } else { "served" },
+            if status["login_item"].is_string() { "opens" } else { "does not open" }
+        )),
+        Line::raw(format!(
+            "Updates:   {}",
+            crate::updates_line(&status["updates"]).unwrap_or_else(|| "not checked yet (every few minutes)".into())
+        )),
         Line::raw(""),
-        Line::raw("d doctor · u check updates · U update PHP/nginx · D update devid · s setup · X uninstall"),
+        Line::raw(
+            "d doctor · u check updates · U update PHP/nginx · D update devid · a serve at login · s setup · X uninstall",
+        ),
         Line::raw(""),
     ];
     if app.checks.is_empty() {
@@ -305,7 +316,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                     " enter actions (use, install, restart, stop/start, view config) · S stop all · A start all · ? help · q quit"
                 }
                 (Page::Settings, _) => {
-                    " d doctor · u check updates · U update PHP/nginx · D update devid · s setup · X uninstall · ? help · q quit"
+                    " d doctor · u check updates · U update PHP/nginx · D update devid · a serve at login · s setup · X uninstall · ? help · q quit"
                 }
                 (Page::Logs, _) => " ↑↓ pick a log · f follow · c clear · tab sidebar · ? help · q quit",
                 (Page::Php, _) => {

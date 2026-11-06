@@ -35,6 +35,81 @@ pub fn agent_plist_path() -> PathBuf {
     user_home().join("Library/LaunchAgents").join(format!("{AGENT_LABEL}.plist"))
 }
 
+/// The desktop app's login item (D-031), separate from the daemon's LaunchAgent.
+pub const APP_LABEL: &str = "dev.devid.app";
+
+pub fn app_agent_plist_path() -> PathBuf {
+    user_home().join("Library/LaunchAgents").join(format!("{APP_LABEL}.plist"))
+}
+
+/// Where the app is installed (`Devid.app` in ~/Applications, Phase 7 G4).
+pub fn default_app() -> PathBuf {
+    user_home().join("Applications/Devid.app/Contents/MacOS/devid-gui")
+}
+
+/// Opens the desktop app's menu-bar icon at login (`--background`), or stops doing so.
+/// Only writes or removes the plist: loading it now would start a second copy next to a running
+/// app; launchd reads it at the next login. Returns the app it opens, if any.
+pub fn set_app_agent(enabled: bool, app: Option<&str>) -> Result<Option<String>, String> {
+    let plist = app_agent_plist_path();
+    if !enabled {
+        return match fs::remove_file(&plist) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(format!("{}: {e}", plist.display())),
+            _ => Ok(None),
+        };
+    }
+    let app = app.map(PathBuf::from).unwrap_or_else(default_app);
+    if !app.is_file() {
+        return Err(format!("the Devid app is not installed at {}", app.display()));
+    }
+    let app = app.display().to_string();
+    fs::create_dir_all(plist.parent().expect("LaunchAgents folder")).map_err(|e| e.to_string())?;
+    fs::write(&plist, app_agent_plist(&app)).map_err(|e| format!("{}: {e}", plist.display()))?;
+    Ok(Some(app))
+}
+
+/// The app the login item opens, if there is one.
+pub fn app_agent_program() -> Option<String> {
+    let text = fs::read_to_string(app_agent_plist_path()).ok()?;
+    let args = &text[text.find("<key>ProgramArguments</key>")?..];
+    let start = args.find("<string>")? + "<string>".len();
+    let end = start + args[start..].find("</string>")?;
+    Some(xml_unescape(&args[start..end]))
+}
+
+fn app_agent_plist(app: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{APP_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+        <string>--background</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- The menu bar exists only in the login (Aqua) session. -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+</dict>
+</plist>
+"#,
+        xml_escape(app)
+    )
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+fn xml_unescape(s: &str) -> String {
+    s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
 /// The rc file for the login shell: zsh (the macOS default) or bash.
 pub fn rc_file() -> PathBuf {
     let shell = std::env::var("SHELL").unwrap_or_default();
@@ -259,6 +334,17 @@ mod tests {
         assert_eq!(fs::read_to_string(&rc).unwrap(), "export FOO=1\nexport PATH=\"/x:$PATH\"\n");
         assert!(!remove_rc_line(&rc).unwrap());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn app_login_item_round_trips_its_path() {
+        let plist = app_agent_plist("/Users/a&b/Devid.app/Contents/MacOS/devid-gui");
+        assert!(plist.contains("<string>/Users/a&amp;b/Devid.app/Contents/MacOS/devid-gui</string>"));
+        assert!(plist.contains("<string>--background</string>") && plist.contains("<string>Aqua</string>"));
+        let args = &plist[plist.find("<key>ProgramArguments</key>").unwrap()..];
+        let start = args.find("<string>").unwrap() + 8;
+        let end = start + args[start..].find("</string>").unwrap();
+        assert_eq!(xml_unescape(&args[start..end]), "/Users/a&b/Devid.app/Contents/MacOS/devid-gui");
     }
 
     #[test]

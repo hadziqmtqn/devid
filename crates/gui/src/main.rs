@@ -2,12 +2,9 @@
 //! created when opened and destroyed when closed. Like the CLI, it is only a daemon client.
 
 mod api;
+mod tray;
 
-use tauri::{
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
-};
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 /// D-026: the window opens at this size, shrunk to fit the screen, and never gets smaller
 /// than the minimum.
@@ -27,6 +24,7 @@ fn main() {
             api::doctor,
             api::devid_check,
             api::in_terminal,
+            api::login_item,
         ])
         .setup(move |app| {
             // Menu bar only while no window is open; in the Dock and Cmd+Tab with one (D-030).
@@ -36,9 +34,9 @@ fn main() {
             } else {
                 tauri::ActivationPolicy::Regular
             });
-            tray(app)?;
+            tray::start(app)?;
             if !background {
-                open_window(app.handle());
+                open_window(app.handle(), None);
             }
             Ok(())
         })
@@ -53,32 +51,14 @@ fn main() {
         }
         // Opened again from Finder or Spotlight while running.
         #[cfg(target_os = "macos")]
-        RunEvent::Reopen { .. } => open_window(_app),
+        RunEvent::Reopen { .. } => open_window(_app, None),
         _ => {}
     });
 }
 
-fn tray(app: &tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Devid", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Devid", true, Some("CmdOrCtrl+Q"))?;
-    let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
-    TrayIconBuilder::with_id("devid")
-        // A template image: macOS tints it for light, dark and highlighted menu bars.
-        .icon(tauri::include_image!("icons/tray.png"))
-        .icon_as_template(true)
-        .tooltip("Devid")
-        .menu(&menu)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "open" => open_window(app),
-            "quit" => app.exit(0),
-            _ => {}
-        })
-        .build(app)?;
-    Ok(())
-}
-
-/// Shows the window, creating it (and its web view) if it is closed.
-fn open_window(app: &AppHandle) {
+/// Shows the window, creating it (and its web view) if it is closed, on `page` if given
+/// ("settings" from the menu bar).
+pub fn open_window(app: &AppHandle, page: Option<&'static str>) {
     // With a window, Devid is in the Dock and in Cmd+Tab with its icon (D-030). Closing the window
     // restarts the app as icon-only (D-027), which takes it out of both again.
     #[cfg(target_os = "macos")]
@@ -86,6 +66,9 @@ fn open_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.set_focus();
+        if let Some(page) = page {
+            let _ = window.eval(format!("go('{page}')"));
+        }
         return;
     }
     let (width, height) = fit(app);
@@ -94,6 +77,11 @@ fn open_window(app: &AppHandle) {
         .inner_size(width, height)
         .min_inner_size(MIN.0, MIN.1)
         .center();
+    // A new window reads its first page before app.js runs.
+    let builder = match page {
+        Some(page) => builder.initialization_script(format!("window.DEVID_START_PAGE = '{page}';")),
+        None => builder,
+    };
     // System Settings look: the sidebar runs under the traffic lights.
     #[cfg(target_os = "macos")]
     let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);

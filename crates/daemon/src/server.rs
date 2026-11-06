@@ -3,7 +3,7 @@
 use crate::{
     ca,
     config::Config,
-    dns, helper, logs, nginx,
+    dns, helper, install, logs, nginx,
     paths::Paths,
     php, phpext,
     protocol::Request,
@@ -38,8 +38,12 @@ struct State {
     started: Instant,
     stopping: AtomicBool,
     /// Services the owner stopped on purpose; `apply` leaves them stopped. Not persisted: a
-    /// daemon restart (e.g. login) brings everything back.
+    /// daemon restart (e.g. login) brings everything back, unless `autostart` is off (D-031).
     paused: Mutex<BTreeSet<String>>,
+    /// The last update check (D-028): when, a newer devid, and the changes `update` would make.
+    updates: Mutex<Value>,
+    /// One update check or update at a time: they share the downloaded manifest.
+    update_lock: Mutex<()>,
     /// The running catalog install, for `PhpExtProgress`; one at a time.
     ext_job: Mutex<Option<ExtJob>>,
 }
@@ -237,8 +241,15 @@ pub fn run(paths: Paths) -> io::Result<()> {
         stopping: AtomicBool::new(false),
         paused: Mutex::new(BTreeSet::new()),
         ext_job: Mutex::new(None),
+        updates: Mutex::new(Value::Null),
+        update_lock: Mutex::new(()),
     });
     spawn_signal_thread(Arc::clone(&state));
+    spawn_update_checks(Arc::clone(&state));
+    if !config.autostart {
+        // D-031: nginx and php-fpm wait for `start all`; the daemon and DNS run as usual.
+        *state.paused.lock().unwrap() = state.services();
+    }
     if let Err(e) = state.apply(&config) {
         // Keep the daemon reachable so `devid status` can show the problem.
         eprintln!("devid: {e}");
@@ -355,6 +366,10 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "default_php": config.default_php,
                 "paused": state.paused.lock().unwrap().iter().collect::<Vec<_>>(),
                 "php": php_list(state),
+                "autostart": config.autostart,
+                "login_item": install::app_agent_program(),
+                "update_check_minutes": config.update_check_minutes,
+                "updates": *state.updates.lock().unwrap(),
             }))
         }
         Request::Stop => {
@@ -483,45 +498,18 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             Ok(json!({"ok": true, "installed": server}))
         }
         Request::Update { check } => {
-            let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
-            let mut changes = Vec::new();
-            // Installed but the version could not be read (e.g. the probe timed out): never treat that
-            // as "older", which would offer and run a needless reinstall.
-            let mut unknown = Vec::new();
-            for version in php::installed(&state.paths) {
-                let Some(a) = releases::artifact(&manifest, "php", Some(&version)) else { continue };
-                let Some(current) = php::full_version(&state.paths, &version) else {
-                    unknown.push(format!("php {version}"));
-                    continue;
-                };
-                let php_updated = releases::newer(&a.version, &current);
-                if php_updated {
-                    changes.push(json!({"what": format!("php {version}"), "from": current, "to": a.version}));
-                    if !check {
-                        install_php(state, &version, None, Some(&manifest))?;
-                    }
-                }
-                changes.extend(update_extensions(state, &version, &manifest, php_updated, check)?);
-            }
-            for server in ["nginx", "caddy"] {
-                if !webserver::installed(&state.paths, server) {
-                    continue;
-                }
-                let Some(a) = releases::artifact(&manifest, server, None) else { continue };
-                let Some(current) = webserver::installed_version(&state.paths, server) else {
-                    unknown.push(server.to_string());
-                    continue;
-                };
-                if releases::newer(&a.version, &current) {
-                    changes.push(json!({"what": server, "from": current, "to": a.version}));
-                    if !check {
-                        install_server(state, server, None, Some(&manifest))?;
-                    }
-                }
-            }
-            Ok(
-                json!({"ok": true, "changes": changes, "unknown": unknown, "applied": !check, "release": manifest["tag"]}),
-            )
+            let _one = state.update_lock.lock().unwrap();
+            let reply = find_updates(state, check)?;
+            remember_updates(state, &reply, None);
+            Ok(reply)
+        }
+        Request::Autostart { enabled } => state.mutate(|c, _| {
+            c.autostart = enabled;
+            Ok(json!({"ok": true, "autostart": enabled}))
+        }),
+        Request::LoginItem { enabled, app } => {
+            let app = install::set_app_agent(enabled, app.as_deref())?;
+            Ok(json!({"ok": true, "login_item": app}))
         }
         Request::ServerUse { server } => {
             webserver::check(&server)?;
@@ -867,6 +855,83 @@ fn install_server(state: &State, server: &str, from: Option<String>, manifest: O
     state.supervisor.restart(server);
     let config = state.config.lock().unwrap();
     state.apply(&config)
+}
+
+/// `update`: newer PHP, web servers and catalog extensions in the release; installs them unless
+/// `check`. The periodic check (D-028) runs it with `check` on.
+fn find_updates(state: &State, check: bool) -> Result<Value, String> {
+    let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
+    let mut changes = Vec::new();
+    // Installed but the version could not be read (e.g. the probe timed out): never treat that
+    // as "older", which would offer and run a needless reinstall.
+    let mut unknown = Vec::new();
+    for version in php::installed(&state.paths) {
+        let Some(a) = releases::artifact(&manifest, "php", Some(&version)) else { continue };
+        let Some(current) = php::full_version(&state.paths, &version) else {
+            unknown.push(format!("php {version}"));
+            continue;
+        };
+        let php_updated = releases::newer(&a.version, &current);
+        if php_updated {
+            changes.push(json!({"what": format!("php {version}"), "from": current, "to": a.version}));
+            if !check {
+                install_php(state, &version, None, Some(&manifest))?;
+            }
+        }
+        changes.extend(update_extensions(state, &version, &manifest, php_updated, check)?);
+    }
+    for server in ["nginx", "caddy"] {
+        if !webserver::installed(&state.paths, server) {
+            continue;
+        }
+        let Some(a) = releases::artifact(&manifest, server, None) else { continue };
+        let Some(current) = webserver::installed_version(&state.paths, server) else {
+            unknown.push(server.to_string());
+            continue;
+        };
+        if releases::newer(&a.version, &current) {
+            changes.push(json!({"what": server, "from": current, "to": a.version}));
+            if !check {
+                install_server(state, server, None, Some(&manifest))?;
+            }
+        }
+    }
+    Ok(json!({"ok": true, "changes": changes, "unknown": unknown, "applied": !check, "release": manifest["tag"]}))
+}
+
+/// Keeps what an update check found, for `status` (D-028). After an update the changes are gone;
+/// `devid` is the newer devid release, kept from the last check when this one did not look.
+fn remember_updates(state: &State, reply: &Value, devid: Option<Option<String>>) {
+    let mut cache = state.updates.lock().unwrap();
+    let devid = devid.unwrap_or_else(|| cache["devid"].as_str().map(String::from));
+    let changes = if reply["applied"] == true { json!([]) } else { reply["changes"].clone() };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    *cache = json!({"checked_at": now, "devid": devid, "changes": changes, "release": reply["release"]});
+}
+
+/// D-028: check for updates a few minutes after start, then every `update_check_minutes`.
+fn spawn_update_checks(state: Arc<State>) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(180));
+        loop {
+            let minutes = state.config.lock().unwrap().update_check_minutes;
+            if minutes == 0 {
+                std::thread::sleep(std::time::Duration::from_secs(300)); // look at the setting again later
+                continue;
+            }
+            check_updates(&state);
+            std::thread::sleep(std::time::Duration::from_secs(u64::from(minutes) * 60));
+        }
+    });
+}
+
+fn check_updates(state: &State) {
+    let _one = state.update_lock.lock().unwrap();
+    let devid = releases::latest_devid(&state.paths).ok().filter(|l| releases::newer(l, crate::VERSION));
+    match find_updates(state, true) {
+        Ok(reply) => remember_updates(state, &reply, Some(devid)),
+        Err(e) => eprintln!("devid: update check failed: {e}"),
+    }
 }
 
 #[cfg(test)]

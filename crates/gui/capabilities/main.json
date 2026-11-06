@@ -11,6 +11,7 @@
     "allow-doctor",
     "allow-devid-check",
     "allow-in-terminal",
+    "allow-login-item",
     "core:window:allow-start-dragging"
   ]
 }

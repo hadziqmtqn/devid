@@ -181,6 +181,8 @@ devid restart nginx
 devid stop php-8.4             # stays stopped until `devid start php-8.4`
 devid stop all                 # stop everything (a daemon restart, e.g. at login, brings it back)
 devid start all
+devid autostart off            # after login, nginx and PHP wait for `devid start all` (default: on)
+devid login-item on            # open the Devid app's menu-bar icon at login (default: off)
 devid logs                     # list logs
 devid logs php85-fpm.log -n 50 --follow
 devid logs nginx-error.log --clear
@@ -193,12 +195,12 @@ Run `devid` with no arguments, or run `devid tui`. The TUI has five pages: Sites
 | Where | Keys |
 |---|---|
 | Everywhere | `↑ ↓` or `j k` move · `tab` switch sidebar/page · `1`–`5` jump to a page · `r` refresh · `?` help · `q` quit |
-| Sites | `enter` actions (open in browser, open in Terminal, copy URL, PHP version, unlink) · `a` link a folder · `p` park a folder · `U` unpark |
+| Sites | `enter` actions (open in browser, open in Terminal, copy URL, PHP version, remove, unlink) · `a` link a folder · `p` park a folder · `U` unpark · `I` serve an ignored site again |
 | PHP | `enter` actions (extensions, make default, Xdebug, pcov, edit php.ini, restart, install) · `u` check for updates · `U` update |
 | PHP → Extensions… | `space` tick catalog extensions · `tab` to the Install button · `enter` install the ticked ones (after a confirmation, with an `installing 2/3 imagick… 52%` line) · `r` remove one (after a confirmation) · `x` Xdebug · `c` pcov |
 | Server | `enter` actions (use, install, restart, stop/start, view config) · `S` stop all · `A` start all |
 | Logs | `f` follow · `c` clear |
-| Settings | `d` health check · `u` check for updates · `U` update PHP/nginx · `D` update devid · `s` setup · `X` uninstall |
+| Settings | `d` health check · `u` check for updates · `U` update PHP/nginx · `D` update devid · `s` setup · `X` uninstall · `a` serve sites at login |
 
 Destructive actions ask for confirmation first. Colors come from your terminal theme, and every state also has a symbol and a word. Set `NO_COLOR=1` for a monochrome UI.
 
@@ -268,7 +270,7 @@ Everything lives in `~/.devid`:
 | Path | Contents |
 |---|---|
 | `bin/` | `devid`, plus `php` and `composer` (hard links to `devid`) |
-| `config.toml` | Settings: `.test` domain, web server, default PHP, ports (8088/8443 behind pf, DNS 53535), parked folders, links and isolated sites. Prefer the commands to editing it. |
+| `config.toml` | Settings: `.test` domain, web server, default PHP, ports (8088/8443 behind pf, DNS 53535), parked folders, links, isolated and ignored sites, `autostart`, and `update_check_minutes` (20; 0 turns the automatic update check off). Prefer the commands to editing it. |
 | `php/<version>/` | PHP binaries, `etc/php.ini` (yours to edit), `etc/conf.d/` (switches for Xdebug, pcov and catalog extensions) |
 | `php-ext/<version>/` | Catalog extensions (`devid php ext install`), one folder each |
 | `nginx/`, `caddy/`, `apache/` | Web server binaries and generated configs (rewritten by Devid) |

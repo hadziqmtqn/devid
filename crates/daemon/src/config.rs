@@ -27,6 +27,11 @@ pub struct Config {
     pub isolated: BTreeMap<String, String>,
     /// Folders of parked sites the owner removed (D-029): not served; the folders stay as they are.
     pub ignored: Vec<String>,
+    /// Start nginx and php-fpm when the daemon starts, at login (D-031). Off: they wait for
+    /// `devid start all`, also after the daemon restarts.
+    pub autostart: bool,
+    /// Minutes between automatic update checks (D-028); 0 turns them off.
+    pub update_check_minutes: u32,
 }
 
 impl Default for Config {
@@ -42,6 +47,8 @@ impl Default for Config {
             links: BTreeMap::new(),
             isolated: BTreeMap::new(),
             ignored: Vec::new(),
+            autostart: true,
+            update_check_minutes: 20,
         }
     }
 }

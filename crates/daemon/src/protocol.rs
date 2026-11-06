@@ -105,6 +105,15 @@ pub enum Request {
     Unignore {
         site: String,
     },
+    /// Start nginx and php-fpm at login, or wait for `start all` (D-031).
+    Autostart {
+        enabled: bool,
+    },
+    /// Open the desktop app at login (D-031). `app` is its binary; default: ~/Applications/Devid.app.
+    LoginItem {
+        enabled: bool,
+        app: Option<String>,
+    },
     /// Pin a site to a PHP version; the site is `site` or the one containing `cwd`.
     Isolate {
         version: String,
