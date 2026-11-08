@@ -4,6 +4,7 @@
 mod api;
 mod tray;
 
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 /// D-026: the window opens at this size, shrunk to fit the screen, and never gets smaller
@@ -11,7 +12,12 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 const SIZE: (f64, f64) = (1080.0, 680.0);
 const MIN: (f64, f64) = (760.0, 520.0);
 
+/// The app binary this process runs, as (device, inode). `devid setup` swaps the whole bundle on
+/// an update, so the same path then names another file.
+static RUNNING: Mutex<Option<(u64, u64)>> = Mutex::new(None);
+
 fn main() {
+    *RUNNING.lock().unwrap() = binary_id();
     // `--background` starts with the menu-bar icon only, for launch at login (G3).
     let background = std::env::args().any(|a| a == "--background");
     let app = tauri::Builder::default()
@@ -45,9 +51,11 @@ fn main() {
 
     app.run(|_app, event| match event {
         // The last window closed. Quit passes an exit code and is not caught here.
+        // Restarting gives the memory the window used back to the system: about 20 MB, mostly
+        // graphics, stays in the process after the window and its web view are gone (D-027).
         RunEvent::ExitRequested { code: None, api, .. } => {
             api.prevent_exit();
-            restart_in_background();
+            restart(true);
         }
         // Opened again from Finder or Spotlight while running.
         #[cfg(target_os = "macos")]
@@ -70,6 +78,11 @@ pub fn open_window(app: &AppHandle, page: Option<&'static str>) {
             let _ = window.eval(format!("go('{page}')"));
         }
         return;
+    }
+    // Updated while only the menu-bar icon ran (the icon checks every 15 s): open the window in
+    // the new version, not in this one.
+    if updated() {
+        restart(false);
     }
     let (width, height) = fit(app);
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -94,17 +107,40 @@ pub fn open_window(app: &AppHandle, page: Option<&'static str>) {
     }
 }
 
-/// Replaces this process with a fresh `--background` copy of itself (same pid), so the
-/// memory the window used goes back to the system: about 20 MB, mostly graphics, stays
-/// in the process after the window and its web view are gone (D-027). Returns only if
-/// the restart fails; the app then keeps running with that memory.
-fn restart_in_background() {
+fn binary_id() -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(std::env::current_exe().ok()?).ok()?;
+    Some((meta.dev(), meta.ino()))
+}
+
+/// Whether another app binary was installed over this one since it started. Not while the bundle
+/// is being swapped (no file at the path), and never because the daemon's version differs: a
+/// failed app install would otherwise restart the same binary forever.
+pub fn updated() -> bool {
+    replaced(*RUNNING.lock().unwrap(), binary_id())
+}
+
+fn replaced(running: Option<(u64, u64)>, now: Option<(u64, u64)>) -> bool {
+    running.is_some() && now.is_some() && now != running
+}
+
+/// Replaces this process with a fresh copy of the app binary at the same path (same pid):
+/// `--background` for the menu-bar icon only, else with its window. Returns only if that fails;
+/// the app then keeps running as it is and does not try again for this binary.
+pub fn restart(background: bool) {
     use std::os::unix::process::CommandExt;
     let err = match std::env::current_exe() {
-        Ok(exe) => std::process::Command::new(exe).arg("--background").exec(),
+        Ok(exe) => {
+            let mut cmd = std::process::Command::new(exe);
+            if background {
+                cmd.arg("--background");
+            }
+            cmd.exec()
+        }
         Err(e) => e,
     };
-    eprintln!("devid-gui: cannot restart after the window closed: {err}");
+    eprintln!("devid-gui: cannot restart: {err}");
+    *RUNNING.lock().unwrap() = binary_id();
 }
 
 /// The default size, shrunk to the primary screen's visible area (without the menu bar
@@ -123,6 +159,15 @@ fn clamp(want: (f64, f64), room: (f64, f64)) -> (f64, f64) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn restarts_only_for_another_binary_at_the_path() {
+        let replaced = super::replaced;
+        assert!(replaced(Some((1, 10)), Some((1, 11))), "the bundle was swapped");
+        assert!(!replaced(Some((1, 10)), Some((1, 10))), "same binary");
+        assert!(!replaced(Some((1, 10)), None), "mid-swap: no file at the path yet");
+        assert!(!replaced(None, Some((1, 11))), "unknown at start");
+    }
+
     use super::*;
 
     #[test]

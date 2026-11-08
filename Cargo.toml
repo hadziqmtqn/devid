@@ -5,7 +5,7 @@ members = ["crates/daemon", "crates/cli", "crates/gui"]
 default-members = ["crates/daemon", "crates/cli"]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.10.1"
 edition = "2024"
 license = "UNLICENSED"
 publish = false

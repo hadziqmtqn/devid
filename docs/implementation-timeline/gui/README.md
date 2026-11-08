@@ -8,3 +8,4 @@
 | 2026-11-06 | [Phase 7 G3: menu-bar menu, login settings, automatic update checks (v0.6.0)](2026-11-06-g3-menu-bar.md) |
 | 2026-11-06 | [Phase 7 G4: Devid.app, `devid setup --gui`, updates through self-update (v0.7.0)](2026-11-06-g4-app-bundle.md) |
 | 2026-11-06 | [Phase 7 G5: one-line install with `--gui`, installed on the owner's Mac; Phase 7 done](2026-11-06-g5-release.md) |
+| 2026-11-08 | [Fix: Devid.app moves to a newly installed version by itself (v0.10.1)](2026-11-08-restart-after-update.md) |
