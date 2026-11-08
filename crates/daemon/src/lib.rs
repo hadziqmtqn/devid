@@ -3,6 +3,7 @@
 pub mod apache;
 pub mod ca;
 pub mod caddy;
+pub mod commands;
 pub mod config;
 pub mod dns;
 pub mod helper;

@@ -168,6 +168,39 @@ enum Command {
         #[command(subcommand)]
         action: AppAction,
     },
+    /// A site's own commands (npm run dev, queue workers…), started and stopped by Devid
+    Cmd {
+        #[command(subcommand)]
+        action: Option<CmdAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CmdAction {
+    /// List a site's commands (default: the site containing the current folder) and suggestions
+    List { site: Option<String> },
+    /// Save a command: `devid cmd add [site] <name> -- <command…>`; the same name again replaces it
+    Add {
+        #[arg(num_args = 1..=2, required = true, value_name = "SITE NAME")]
+        args: Vec<String>,
+        #[arg(last = true, required = true, value_name = "COMMAND")]
+        run: Vec<String>,
+    },
+    /// Forget a command (a running one is stopped first): `devid cmd rm [site] <name>`
+    Rm {
+        #[arg(num_args = 1..=2, required = true, value_name = "SITE NAME")]
+        args: Vec<String>,
+    },
+    /// Start a command, or all of a site's: `devid cmd start [site] [name]`
+    Start {
+        #[arg(num_args = 0..=2, value_name = "SITE NAME")]
+        args: Vec<String>,
+    },
+    /// Stop a command, or all of a site's: `devid cmd stop [site] [name]`
+    Stop {
+        #[arg(num_args = 0..=2, value_name = "SITE NAME")]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -478,6 +511,120 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Unisolate { site } => send(Request::Unisolate { site, cwd: cwd()? })
             .map(|v| println!("{} uses the default PHP again", v["site"].as_str().unwrap_or("?"))),
         Command::App { action } => app(action, paths),
+        Command::Cmd { action } => cmd(action.unwrap_or(CmdAction::List { site: None }), paths),
+    }
+}
+
+fn cmd(action: CmdAction, paths: &Paths) -> Result<(), String> {
+    let send = |req: Request| request(paths, &req);
+    let cwd = cwd()?;
+    let sites = send(Request::Sites)?;
+    let list = sites["sites"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let here = site_at(list, &cwd);
+    // [site] <name>: one argument is a name in the current site.
+    let site_and_name = |args: Vec<String>| match <[String; 2]>::try_from(args) {
+        Ok([site, name]) => (Some(site), name),
+        Err(mut one) => (None, one.remove(0)),
+    };
+    // [site] [name]: one argument is a command of the current site if it has one by that name,
+    // else a site.
+    let site_or_name = |args: Vec<String>| match args.as_slice() {
+        [] => (None, None),
+        [one] if here.is_some_and(|s| s["commands"].as_array().into_iter().flatten().any(|c| c["name"] == *one)) => {
+            (None, Some(one.clone()))
+        }
+        [one] => (Some(one.clone()), None),
+        [site, name] => (Some(site.clone()), Some(name.clone())),
+        _ => unreachable!("clap allows at most two"),
+    };
+    let site = match action {
+        CmdAction::List { site } => site,
+        CmdAction::Add { args, run } => {
+            let (site, name) = site_and_name(args);
+            let v = send(Request::CommandAdd { site, cwd: cwd.clone(), name: name.clone(), run: run.join(" ") })?;
+            println!("saved {name}; start it with `devid cmd start {name}` in the project, or from Devid");
+            v["site"].as_str().map(String::from)
+        }
+        CmdAction::Rm { args } => {
+            let (site, name) = site_and_name(args);
+            let v = send(Request::CommandRemove { site, cwd: cwd.clone(), name: name.clone() })?;
+            println!("removed {name}");
+            v["site"].as_str().map(String::from)
+        }
+        CmdAction::Start { args } => {
+            let (site, name) = site_or_name(args);
+            let v = send(Request::CommandStart { site, cwd: cwd.clone(), name })?;
+            for r in v["results"].as_array().map(Vec::as_slice).unwrap_or_default() {
+                let name = r["name"].as_str().unwrap_or("?");
+                match r["ok"] == true {
+                    true => println!(
+                        "started {name} (pid {}); log: `devid logs {} -f`",
+                        r["pid"],
+                        r["log"].as_str().unwrap_or("?")
+                    ),
+                    false => println!("{name} did not start: {}", r["error"].as_str().unwrap_or("?")),
+                }
+            }
+            v["site"].as_str().map(String::from)
+        }
+        CmdAction::Stop { args } => {
+            let (site, name) = site_or_name(args);
+            let v = send(Request::CommandStop { site, cwd: cwd.clone(), name: name.clone() })?;
+            let stopped: Vec<&str> = v["stopped"].as_array().into_iter().flatten().filter_map(|n| n.as_str()).collect();
+            match (stopped.is_empty(), name) {
+                (false, _) => println!("stopped {}", stopped.join(", ")),
+                (true, Some(n)) => println!("{n} was not running"),
+                (true, None) => println!("nothing was running"),
+            }
+            v["site"].as_str().map(String::from)
+        }
+    };
+    let sites = send(Request::Sites)?;
+    let list = sites["sites"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let site = match &site {
+        Some(n) => match list.iter().find(|s| s["name"] == n.as_str()) {
+            Some(s) => s,
+            None => return Ok(()),
+        },
+        None => site_at(list, &cwd).ok_or(format!("{cwd} is not inside a site; pass a site name"))?,
+    };
+    print_commands(site);
+    Ok(())
+}
+
+/// The deepest site folder containing `cwd`, as the daemon picks it.
+fn site_at<'a>(list: &'a [serde_json::Value], cwd: &str) -> Option<&'a serde_json::Value> {
+    list.iter()
+        .filter(|s| s["path"].as_str().is_some_and(|p| Path::new(cwd).starts_with(p)))
+        .max_by_key(|s| s["path"].as_str().map_or(0, |p| Path::new(p).components().count()))
+}
+
+fn print_commands(s: &serde_json::Value) {
+    let name = s["name"].as_str().unwrap_or("?");
+    println!("{}", s["url"].as_str().unwrap_or("?"));
+    let saved = s["commands"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let suggestions = s["suggestions"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let width = saved.iter().chain(suggestions).filter_map(|c| c["name"].as_str()).map(str::len).max().unwrap_or(0);
+    if saved.is_empty() {
+        println!("  no commands; add one with `devid cmd add {name} <name> -- <command>`");
+    }
+    for c in saved {
+        let state = match c["state"].as_str() {
+            Some("running") => format!("running (pid {})", c["pid"]),
+            Some("exited") if c["code"].is_number() => format!("exited (code {})", c["code"]),
+            Some("exited") => format!("exited (signal {})", c["signal"]),
+            _ => "stopped".into(),
+        };
+        println!("  {:<width$}  {:<20} {}", c["name"].as_str().unwrap_or("?"), state, c["run"].as_str().unwrap_or("?"));
+    }
+    if let Some(c) = saved.first() {
+        println!("  logs: `devid logs {} -f` (one per command)", c["log"].as_str().unwrap_or("?"));
+    }
+    if !suggestions.is_empty() {
+        println!("  suggestions (`devid cmd add {name} <name> -- <command>`):");
+        for c in suggestions {
+            println!("  {:<width$}  {}", c["name"].as_str().unwrap_or("?"), c["run"].as_str().unwrap_or("?"));
+        }
     }
 }
 
@@ -525,12 +672,7 @@ fn app(action: AppAction, paths: &Paths) -> Result<(), String> {
     let list = reply["sites"].as_array().map(Vec::as_slice).unwrap_or_default();
     let site = match &name {
         Some(n) => list.iter().find(|s| s["name"] == n.as_str()).ok_or(format!("no site named {n}"))?,
-        // The deepest site folder containing the current folder, as the daemon picks it.
-        None => list
-            .iter()
-            .filter(|s| s["path"].as_str().is_some_and(|p| Path::new(&cwd).starts_with(p)))
-            .max_by_key(|s| s["path"].as_str().map_or(0, |p| Path::new(p).components().count()))
-            .ok_or(format!("{cwd} is not inside a site; pass a site name"))?,
+        None => site_at(list, &cwd).ok_or(format!("{cwd} is not inside a site; pass a site name"))?,
     };
     print_app(site);
     Ok(())
@@ -556,7 +698,11 @@ fn print_app(s: &serde_json::Value) {
             None => println!("  port:     http://127.0.0.1:{port}"),
         }
     }
-    let changed: Vec<&str> = s["app"].as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
+    // The port and the commands are not part of the type; `app reset` keeps them.
+    let changed: Vec<&str> = s["app"]
+        .as_object()
+        .map(|o| o.keys().map(String::as_str).filter(|k| !matches!(*k, "port" | "commands")).collect())
+        .unwrap_or_default();
     if !changed.is_empty() {
         println!("  changed:  {} (`devid app reset` goes back to the detected type)", changed.join(", "));
     }
@@ -610,6 +756,9 @@ fn print_status(v: &serde_json::Value, json: bool) {
     );
     if let Some(line) = updates_line(&v["updates"]) {
         println!("  updates:     {line}");
+    }
+    if v["commands_running"].as_u64().is_some_and(|n| n > 0) {
+        println!("  commands:    {} running (`devid cmd` in a project lists them)", v["commands_running"]);
     }
     print_php(&v["php"]);
 }

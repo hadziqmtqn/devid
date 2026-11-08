@@ -169,6 +169,32 @@ fn env_port(dir: &Path) -> Option<u16> {
 }
 
 /// A web root override must stay inside the project: relative, without `..`.
+/// Commands a site could run (D-036), as (name, shell line): package.json scripts named dev*,
+/// start* or watch*, with the package manager its lockfile shows, and Laravel's workers. Only
+/// suggestions: nothing runs until the owner saves one and starts it.
+pub fn suggest_commands(dir: &Path, preset: &str) -> Vec<(String, String)> {
+    let has = |f: &str| dir.join(f).exists();
+    let pm = match () {
+        _ if has("pnpm-lock.yaml") => "pnpm",
+        _ if has("yarn.lock") => "yarn",
+        _ if has("bun.lock") || has("bun.lockb") => "bun",
+        _ => "npm",
+    };
+    let mut out: Vec<(String, String)> = json_keys(&dir.join("package.json"), &["scripts"])
+        .into_iter()
+        .filter(|s| ["dev", "start", "watch"].iter().any(|p| s.starts_with(p)))
+        .map(|s| (s.clone(), format!("{pm} run {s}")))
+        .collect();
+    if preset == "laravel" {
+        out.push(("queue".into(), "php artisan queue:work".into()));
+        out.push(("schedule".into(), "php artisan schedule:work".into()));
+        if json_keys(&dir.join("composer.json"), &["require", "require-dev"]).contains("laravel/reverb") {
+            out.push(("reverb".into(), "php artisan reverb:start".into()));
+        }
+    }
+    out
+}
+
 pub fn safe_root(root: &str) -> bool {
     !root.is_empty() && Path::new(root).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
@@ -403,6 +429,16 @@ mod tests {
 
         assert!(safe_root(".") && safe_root("public") && safe_root("./dist/app"));
         assert!(!safe_root("") && !safe_root("../x") && !safe_root("/etc") && !safe_root("a/../../b"));
+
+        // Command suggestions (D-036): dev/start/watch scripts with the lockfile's package manager.
+        file("erd/package.json", r#"{"scripts": {"dev:pg:local": "x", "build": "x", "start": "x"}}"#);
+        file("erd/pnpm-lock.yaml", "");
+        let erd: Vec<String> =
+            suggest_commands(&root.join("p/erd"), "node").into_iter().map(|(n, r)| format!("{n}={r}")).collect();
+        assert_eq!(erd, ["dev:pg:local=pnpm run dev:pg:local", "start=pnpm run start"]);
+        let lara: Vec<String> = suggest_commands(&root.join("p/lara"), "laravel").into_iter().map(|(n, _)| n).collect();
+        assert_eq!(lara, ["queue", "schedule"], "reverb only when the app requires laravel/reverb");
+        assert!(suggest_commands(&root.join("p/rust"), "php").is_empty());
         fs::remove_dir_all(&root).unwrap();
     }
 }

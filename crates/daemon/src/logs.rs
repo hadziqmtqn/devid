@@ -1,5 +1,6 @@
 //! Log files in `~/.devid/log/`: list, read the tail (or what is new since an offset), clear.
 //! Only plain `*.log` names inside that folder are accepted, so a request cannot reach other files.
+//! A user command's log (D-036) may have `:` in its name, as npm scripts do (`dev:pg:local`).
 
 use crate::paths::Paths;
 use serde_json::{Value, json};
@@ -19,7 +20,7 @@ fn err(msg: impl Into<String>) -> io::Error {
 fn path_of(paths: &Paths, name: &str) -> io::Result<PathBuf> {
     let ok = name.ends_with(".log")
         && !name.starts_with('.')
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'));
     if !ok {
         return Err(err(format!("{name:?} is not a log name (see `devid logs`)")));
     }
