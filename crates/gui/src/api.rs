@@ -133,9 +133,22 @@ pub async fn open(target: Open) -> Result<String, String> {
     Ok(done)
 }
 
+/// Copies a site's URL, or with `share` its trycloudflare.com link (D-037), both as the daemon
+/// reports them.
 #[tauri::command]
-pub async fn copy_url(name: String) -> Result<String, String> {
-    let url = site_url(&Paths::from_env(), &name)?;
+pub async fn copy_url(name: String, share: Option<bool>) -> Result<String, String> {
+    let paths = Paths::from_env();
+    let url = match share {
+        Some(true) => {
+            let sites = request(&paths, &Request::Sites)?;
+            items(&sites["sites"])
+                .find(|s| s["name"] == name.as_str())
+                .and_then(|s| s["share"]["url"].as_str())
+                .map(String::from)
+                .ok_or(format!("{name} is not shared"))?
+        }
+        _ => site_url(&paths, &name)?,
+    };
     let mut child = Command::new("/usr/bin/pbcopy").stdin(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
     child.stdin.take().expect("piped stdin").write_all(url.as_bytes()).map_err(|e| e.to_string())?;
     match child.wait() {

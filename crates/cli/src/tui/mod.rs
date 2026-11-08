@@ -130,6 +130,18 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
             let (binaries, failed) = perform(Effect::Update { check: true }, paths);
             (format!("{devid} · {binaries}"), failed)
         }
+        Effect::Share(site) => {
+            match request(paths, &Request::ShareStart { site: Some(site.clone()), cwd: String::new() }) {
+                Ok(v) => match v["url"].as_str() {
+                    Some(url) => (format!("{site} is shared at {url} (copy it from the menu's line; h stops)"), false),
+                    None => (
+                        format!("cloudflared is still connecting for {site}; its link shows in the site's menu"),
+                        false,
+                    ),
+                },
+                Err(e) => (e, true),
+            }
+        }
         Effect::Copy(text) => {
             let copied = Command::new("pbcopy").stdin(Stdio::piped()).spawn().and_then(|mut child| {
                 std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes())?;
@@ -231,7 +243,10 @@ pub fn run(paths: &Paths) -> Result<Option<Vec<String>>, String> {
                     }
                     Action::Do(effect) => {
                         // Downloads take seconds; say so before blocking.
-                        if matches!(effect, Effect::Daemon { .. } | Effect::Update { .. } | Effect::CheckUpdates) {
+                        if matches!(
+                            effect,
+                            Effect::Daemon { .. } | Effect::Update { .. } | Effect::CheckUpdates | Effect::Share(_)
+                        ) {
                             app.message = Some(("⏳ working…".into(), false));
                             terminal.draw(|frame| ui::draw(frame, &app))?;
                         }

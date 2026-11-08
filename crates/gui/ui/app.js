@@ -324,6 +324,7 @@ function siteRow(s, installed, parked) {
     s.port ? h('span.dv-chip' + (s.port_busy ? '.warn' : '.muted'), { title: s.port_busy ? 'Port ' + s.port + ' is in use by ' + s.port_busy
       : 'Also served on http://127.0.0.1:' + s.port }, ':' + s.port + (s.port_busy ? ' busy' : '')) : null,
     running ? h('span.dv-chip.ok', {}, '● ' + running + ' running') : null,
+    s.share?.url ? h('span.dv-chip.accent', { title: 'Shared at ' + s.share.url }, 'Shared') : null,
     s.mode === 'php' ? h('span.dv-label', {}, 'PHP', pick) : h('span.dv-sub.dv-nowrap', {}, s.mode === 'proxy' ? 'Proxy :' + s.upstream : 'Static'),
     h('button.dv-btn.ghost.icon', { type: 'button', title: 'Open in browser', 'aria-label': 'Open ' + host + ' in browser',
       onclick: () => openTarget({ what: 'site', name: s.name }) }, icon('open')),
@@ -465,7 +466,28 @@ function siteDetail(s) {
     box,
     h('p.dv-sub.dv-note', {}, 'Commands run in ', h('span.dv-mono', {}, s.path), ' with your login shell\'s PATH (nvm, ~/.cargo/bin). ' +
       'They start only when you press Start, never at login. A command that asks a question stops with an error; its log says why.'),
+    h('h2.dv-h2', {}, 'Share'), shareCard(s, host),
+    h('p.dv-sub.dv-note', {}, 'Uses the cloudflared already on this Mac. Your own Cloudflare tunnel is never touched. ' +
+      'Links the app builds from APP_URL still point at ' + host + '.'),
   ];
+}
+
+/** Share (D-037): a temporary trycloudflare.com link to the site, until Stop sharing. */
+function shareCard(s, host) {
+  const sh = s.share;
+  const on = sh && (sh.state === 'running' || sh.state === 'starting');
+  const req = (cmd) => daemon({ cmd, site: s.name, cwd: '/' });
+  return card(
+    row(text('Share on the internet', 'A temporary trycloudflare.com link to ' + host + '. Anyone with the link can open the site until you stop sharing.'),
+      sh?.state === 'starting' ? h('span.dv-sub', { role: 'status' }, 'Connecting…') : null,
+      on ? btn('Stop sharing', () => act('Stopping…', () => req('share_stop'), 'Stopped sharing ' + host))
+        : busyBtn('share', 'Share', () => act('Starting cloudflared…', () => req('share_start'),
+          (r) => r.url ? 'Shared at ' + r.url : 'cloudflared is still connecting; the link shows here', 'share'))),
+    sh?.url && row(h('span.dv-dot.ok', { 'aria-hidden': 'true' }), h('div.dv-grow.dv-mono.dv-ellipsis.dv-select-text', {}, sh.url),
+      btn('Copy', () => act('Copying…', () => invoke('copy_url', { name: s.name, share: true }), (m) => m))),
+    sh?.state === 'exited' && row(h('div.dv-grow.dv-sub', { role: 'alert' }, 'cloudflared stopped. Its log, ' + sh.log + ', is on the Logs page.'),
+      busyBtn('share', 'Share again', () => act('Starting cloudflared…', () => req('share_start'),
+        (r) => r.url ? 'Shared at ' + r.url : 'cloudflared is still connecting; the link shows here', 'share'))));
 }
 
 function commandRow(c, req) {

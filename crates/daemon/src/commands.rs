@@ -54,8 +54,28 @@ pub fn valid_name(name: &str) -> bool {
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
 }
 
+/// The daemon's own entry for a site's Share (D-037): a name no user command can have.
+pub const SHARE: &str = ".share";
+
 pub fn log_name(site: &str, name: &str) -> String {
-    format!("app-{site}-{name}.log")
+    match name {
+        SHARE => format!("share-{site}.log"),
+        _ => format!("app-{site}-{name}.log"),
+    }
+}
+
+/// The `https://….trycloudflare.com` address in cloudflared's log, once it is there.
+pub fn share_url(log: &str) -> Option<String> {
+    log.lines().filter(|l| l.contains(".trycloudflare.com")).find_map(|line| {
+        let start = line.find("https://")?;
+        let url: String = line[start..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '/' | '.' | '-'))
+            .collect();
+        let host = url.strip_prefix("https://")?;
+        // cloudflared also logs its API endpoint when the request for a tunnel fails.
+        (host.ends_with(".trycloudflare.com") && host != "api.trycloudflare.com" && !host.contains('/')).then_some(url)
+    })
 }
 
 impl Commands {
@@ -129,12 +149,13 @@ impl Commands {
         Ok(pgid as u32)
     }
 
-    /// Stop a site's command, or all of them when `name` is None, and wait until nothing of their
-    /// process groups is left. Returns the names that were running.
+    /// Stop a site's command, or all of its user commands when `name` is None (not its Share), and
+    /// wait until nothing of their process groups is left. Returns the names that were running.
     pub fn stop(&self, site: &str, name: Option<&str>) -> Vec<String> {
         let taken: Vec<((String, String), Arc<Run>)> = {
             let mut runs = self.runs.lock().unwrap();
-            let keys: Vec<_> = runs.keys().filter(|(s, n)| s == site && name.is_none_or(|x| x == n)).cloned().collect();
+            let keys: Vec<_> =
+                runs.keys().filter(|(s, n)| s == site && name.map_or(n != SHARE, |x| x == n)).cloned().collect();
             keys.into_iter().filter_map(|k| runs.remove(&k).map(|r| (k, r))).collect()
         };
         self.stop_runs(taken)
@@ -423,6 +444,19 @@ mod tests {
         fs::write(app.join(".nvmrc"), "../../etc/x").unwrap();
         assert_eq!(nvm_bin(&nvm, &app), None);
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn share_url_from_cloudflareds_log() {
+        let log = "2026-11-08T10:00:00Z INF Requesting new quick Tunnel on trycloudflare.com...\n\
+            2026-11-08T10:00:02Z INF |  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |\n\
+            2026-11-08T10:00:02Z INF |  https://brave-lamp-river-sun.trycloudflare.com                                            |\n";
+        assert_eq!(share_url(log).as_deref(), Some("https://brave-lamp-river-sun.trycloudflare.com"));
+        let failed =
+            "ERR failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": dial tcp: timeout";
+        assert_eq!(share_url(failed), None, "not the API endpoint");
+        assert_eq!(share_url("INF starting"), None);
+        assert_eq!(log_name("shop", SHARE), "share-shop.log");
     }
 
     #[test]

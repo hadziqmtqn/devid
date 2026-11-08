@@ -67,6 +67,8 @@ pub enum Effect {
         version: String,
         names: Vec<String>,
     },
+    /// Share a site through a Cloudflare quick tunnel and show its link (D-037).
+    Share(String),
 }
 
 /// One catalog extension in the Extensions view.
@@ -443,6 +445,11 @@ impl App {
             items.push(('x', "Remove a command…".to_string()));
         }
         items.push(('n', "Add a command…".to_string()));
+        match site["share"]["url"].as_str() {
+            Some(url) => items.push(('h', format!("Stop sharing {url}"))),
+            None if site["share"]["state"] == "starting" => items.push(('h', "Stop sharing (connecting)".to_string())),
+            None => items.push(('h', "Share on the internet (trycloudflare.com)".to_string())),
+        }
         if site["linked"] == true {
             items.push(('d', "Unlink…".to_string()));
         } else {
@@ -719,6 +726,11 @@ impl App {
                 self.mode = Mode::Pick { purpose, options, index: 0 };
                 Action::None
             }
+            'h' if site["share"].is_object() && site["share"]["state"] != "exited" => Action::Do(Effect::Daemon {
+                request: Request::ShareStop { site: Some(name.clone()), cwd: String::new() },
+                done: format!("stopped sharing {name}"),
+            }),
+            'h' => Action::Do(Effect::Share(name)),
             'a' | 's' => Action::Do(Effect::Daemon {
                 request: match choice {
                     'a' => Request::CommandStart { site: Some(name.clone()), cwd: String::new(), name: None },
@@ -1103,8 +1115,8 @@ mod tests {
     fn site_menu_entries_depend_on_the_site() {
         let app = with_sites();
         let keys = |site: &Value| App::site_menu(site).iter().map(|(k, _)| *k).collect::<String>();
-        assert_eq!(keys(&app.sites[0]), "otciympnr", "parked, default PHP: no unisolate, no unlink, remove (D-029)");
-        assert_eq!(keys(&app.sites[1]), "otciuympnd", "linked + isolated");
+        assert_eq!(keys(&app.sites[0]), "otciympnhr", "parked, default PHP: no unisolate, no unlink, remove (D-029)");
+        assert_eq!(keys(&app.sites[1]), "otciuympnhd", "linked + isolated");
     }
 
     /// Phase 8 A5: the app type, serving mode, local port and commands from a site's menu.
@@ -1119,7 +1131,7 @@ mod tests {
         blog["commands"] = json!([{"name": "dev", "state": "running"}, {"name": "queue", "state": "stopped"}]);
         blog["suggestions"] = json!([{"name": "schedule", "run": "php artisan schedule:work"}]);
         let keys: String = App::site_menu(&app.sites[0]).iter().map(|(k, _)| *k).collect();
-        assert_eq!(keys, "otciympgasxnr");
+        assert_eq!(keys, "otciympgasxnhr");
         let menu = |app: &mut App, letter: char| {
             app.handle_key(key(KeyCode::Enter));
             app.handle_key(ch(letter))
@@ -1196,6 +1208,13 @@ mod tests {
         );
         app.mode = Mode::Input { purpose: InputFor::Command("blog".into()), text: String::new() };
         assert!(matches!(typed(&mut app, "justaname"), Action::None), "a name alone is not saved");
+
+        assert!(matches!(menu(&mut app, 'h'), Action::Do(Effect::Share(s)) if s == "blog"), "share");
+        app.sites[0]["share"] = json!({"state": "running", "url": "https://a-b.trycloudflare.com"});
+        assert!(
+            App::site_menu(&app.sites[0]).iter().any(|(k, l)| *k == 'h' && l.contains("https://a-b.trycloudflare.com"))
+        );
+        assert_eq!(daemon_json(menu(&mut app, 'h'))["cmd"], "share_stop", "a shared site stops sharing");
     }
 
     #[test]

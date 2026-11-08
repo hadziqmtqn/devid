@@ -1,8 +1,8 @@
 # Phase 8 Plan: apps, commands and sharing
 
 > Scope: app types detected per site (PHP, static, Node), a local port per site, user commands the daemon runs, and sharing a site through a quick tunnel (D-035, D-036, D-037)
-> Verified against: 2026-11-08 (A5 part 2 built on branch `feat/a5-tui`)
-> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 released in 0.9.0, see "A3 as built"; A4 released in 0.10.0, see "A4 as built"; A5 (desktop app, menu bar, TUI) built, see "A5 as built"; A6 next
+> Verified against: 2026-11-08 (A6 Share built on branch `feat/a6-share`)
+> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 released in 0.9.0, see "A3 as built"; A4 released in 0.10.0, see "A4 as built"; A5 (desktop app, menu bar, TUI) built, see "A5 as built"; A6 Share built, see "A6 as built"; the devid-site docs and the release next
 
 Today Devid serves every site as PHP through php-fpm, and the docroot is `public/` when it exists (`daemon::sites`). Everything else the owner runs is still started by hand in a terminal:
 
@@ -423,6 +423,41 @@ The proxy tests used a throwaway nginx (Devid's 1.30 binary, its own prefix and 
 **Verification (part 2):** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass. The new `app_type_port_and_commands` test walks every new menu entry to its daemon request (`app_reset`, `app_set` with a preset or a mode, `app_port` with none, 0 or a refused value, `command_stop`/`command_start` for one or all, `command_remove` after y, `command_add` from a suggestion and from "Other…"). The render test checks the new menu lines and the command input. A rendered Sites screen (100×20) shows `Laravel  PHP 8.5 · :8000 · ● 1 running`.
 
 **Still for the owner (A5's "done when"):** after the 0.11.0 release, run and stop both erd-builder-pro commands from Devid.app with no terminal.
+
+### A6 as built: Share (2026-11-08)
+
+Branch `feat/a6-share`, 0.12.0.
+
+- **Request:** `ShareStart { site, cwd }`.
+  - It finds an existing `cloudflared` in `/usr/local/bin`, `/opt/homebrew/bin` or the daemon's `PATH`. `DEVID_CLOUDFLARED` overrides it for tests. Without one, it says where to get it.
+  - It refuses while the web server is not running.
+  - It runs `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:<http_port> --http-host-header <site>.<tld>` through the command machinery (D-036): its own session, the login shell's environment, a log, stop by group, leftovers after a crash and a daemon stop.
+  - It waits up to 30 s for the `https://….trycloudflare.com` line in the log and replies with the URL, or with none while cloudflared is still connecting. Sent again, it only reports the URL.
+- **`ShareStop { site, cwd }`** stops it. It also accepts a site that was ignored meanwhile.
+- **Internals:**
+  - A share is the site's command entry `.share`, a name no user command can have.
+  - Its log is `share-<site>.log`; its pid file is `app-<site>-.share.pid`.
+  - "Stop all" of a site's commands leaves the share running; a daemon stop ends it.
+  - It is not counted in `commands_running` and not listed in `running_commands`.
+- **Replies:** `sites` adds `share` per site: null, or the state (`starting` until the URL is in the log, `running`, `exited`), the URL and the log name. `status` adds `shares` (site and URL).
+- **URL parsing:** `commands::share_url` takes the first `https://<name>.trycloudflare.com` in the log and skips the API endpoint that cloudflared logs when the tunnel request fails.
+- **Clients:**
+  - **CLI:** `devid share [site]` and `devid share [site] --stop`. `devid status` and `devid app show` print the link.
+  - **App:** the prototype's Share card (Share, "Connecting…", Stop sharing, the link with Copy, and an exited state that points at the log). The list shows a "Shared" chip. `copy_url` gains `share: true`, which copies the link the daemon reports.
+  - **Menu bar:** "Stop sharing <site>" per share.
+  - **TUI:** `h` in a site's menu shares the site or stops sharing it (the item shows the link). The table adds " · shared".
+- **Version:** 0.12.0.
+
+**Verification:**
+- **Checks:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` (also `-p devid-gui`) and `cargo test` pass. New unit test `share_url_from_cloudflareds_log`; the TUI and tray tests cover the new entries.
+- **New integration test** `share_runs_cloudflared_and_reads_its_url`, with a fake cloudflared that prints the quick-tunnel line, so nothing reaches the internet:
+  - it is refused while the web server is not running;
+  - the URL is read, and the arguments are checked;
+  - `sites` and `status` report the share, and it is not counted as a command;
+  - stopping the site's commands leaves the share;
+  - `--stop` ends the process.
+- **The Share card** with a fixture, unchanged `app.js`/`app.css` in Chrome.
+- **Not run yet:** a real quick tunnel and cloudflared's RSS while sharing. A real share opens a public URL, so it waits for the owner's go-ahead (see "A1 results").
 
 ## Not in this phase
 

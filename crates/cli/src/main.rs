@@ -173,6 +173,14 @@ enum Command {
         #[command(subcommand)]
         action: Option<CmdAction>,
     },
+    /// Share a site on the internet through a Cloudflare quick tunnel (a temporary
+    /// trycloudflare.com link; needs cloudflared). Default: the site containing the current folder
+    Share {
+        site: Option<String>,
+        /// Stop sharing
+        #[arg(long)]
+        stop: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -512,6 +520,30 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             .map(|v| println!("{} uses the default PHP again", v["site"].as_str().unwrap_or("?"))),
         Command::App { action } => app(action, paths),
         Command::Cmd { action } => cmd(action.unwrap_or(CmdAction::List { site: None }), paths),
+        Command::Share { site, stop: true } => send(Request::ShareStop { site, cwd: cwd()? }).map(|v| {
+            let site = v["site"].as_str().unwrap_or("?");
+            match v["stopped"] == true {
+                true => println!("stopped sharing {site}"),
+                false => println!("{site} was not shared"),
+            }
+        }),
+        Command::Share { site, stop: false } => {
+            println!("starting a Cloudflare quick tunnel…");
+            let v = send(Request::ShareStart { site, cwd: cwd()? })?;
+            let site = v["site"].as_str().unwrap_or("?");
+            match v["url"].as_str() {
+                Some(url) => {
+                    println!("{url}  →  {site}");
+                    println!("Anyone with the link can open the site until `devid share {site} --stop`.");
+                    println!("Links the app builds from APP_URL still point at {site}'s own address.");
+                }
+                None => println!(
+                    "cloudflared is still connecting; `devid share {site}` again shows the link (log: `devid logs {} -f`)",
+                    v["log"].as_str().unwrap_or("?")
+                ),
+            }
+            Ok(())
+        }
     }
 }
 
@@ -699,6 +731,9 @@ fn print_app(s: &serde_json::Value) {
         }
     }
     // The port and the commands are not part of the type; `app reset` keeps them.
+    if let Some(url) = s["share"]["url"].as_str() {
+        println!("  shared:   {url} (`devid share {} --stop`)", s["name"].as_str().unwrap_or("?"));
+    }
     let changed: Vec<&str> = s["app"]
         .as_object()
         .map(|o| o.keys().map(String::as_str).filter(|k| !matches!(*k, "port" | "commands")).collect())
@@ -756,6 +791,13 @@ fn print_status(v: &serde_json::Value, json: bool) {
     );
     if let Some(line) = updates_line(&v["updates"]) {
         println!("  updates:     {line}");
+    }
+    for share in v["shares"].as_array().into_iter().flatten() {
+        println!(
+            "  shared:      {} at {}",
+            share["site"].as_str().unwrap_or("?"),
+            share["url"].as_str().unwrap_or("(connecting)")
+        );
     }
     if v["commands_running"].as_u64().is_some_and(|n| n > 0) {
         println!("  commands:    {} running (`devid cmd` in a project lists them)", v["commands_running"]);
