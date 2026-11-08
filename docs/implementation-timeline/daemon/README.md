@@ -18,3 +18,4 @@
 | 2026-11-06 | [Ignore and unignore a parked site, in the CLI, TUI and app (v0.5.0)](2026-11-06-site-ignore.md) |
 | 2026-11-08 | [Phase 8 A2: app types, PHP / static / proxy (v0.8.0)](2026-11-08-a2-app-types.md) |
 | 2026-11-08 | [Phase 8 A3: a local port per site, for tunnels (v0.9.0)](2026-11-08-a3-local-port.md) |
+| 2026-11-08 | [Fix: self-update falls back to the GitHub API (v0.9.1)](2026-11-08-self-update-api-fallback.md) |

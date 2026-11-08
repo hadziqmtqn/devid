@@ -53,8 +53,14 @@ pub fn release_base() -> String {
 pub fn fetch(url: &str, dest: &Path) -> io::Result<()> {
     let local_release = manifest_url().starts_with("file://") || release_base().starts_with("file://");
     let proto = if url.starts_with("file://") && local_release { "=file" } else { "=https" };
+    curl(url, dest, &["--proto", proto])
+}
+
+fn curl(url: &str, dest: &Path, extra: &[&str]) -> io::Result<()> {
     let out = Command::new("curl")
-        .args(["-fsSL", "--retry", "2", "--proto", proto, "-o"])
+        .args(["-fsSL", "--retry", "2"])
+        .args(extra)
+        .arg("-o")
         .arg(dest)
         .arg(url)
         .output()
@@ -154,13 +160,42 @@ pub fn fetch_latest(paths: &crate::paths::Paths, name: &str) -> io::Result<std::
     fetch_devid(paths, "devid-latest", name)
 }
 
-/// Download one file from a devid release (`devid-latest` or `devid-v<version>`).
+/// Download one file from a devid release (`devid-latest` or `devid-v<version>`). When github.com's
+/// download link fails for an official release, the same file comes through the GitHub API (on
+/// 2026-11-08 the download links answered 504 from the Southeast Asia edge while the API worked).
 pub fn fetch_devid(paths: &crate::paths::Paths, release: &str, name: &str) -> io::Result<std::path::PathBuf> {
     let dir = paths.home.join("downloads");
     fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("self-update-{name}"));
-    fetch(&format!("{}/{release}/{name}", release_base()), &dest)?;
+    let url = format!("{}/{release}/{name}", release_base());
+    if let Err(e) = fetch(&url, &dest) {
+        if !url.starts_with(TRUSTED_PREFIX) {
+            return Err(e);
+        }
+        fetch_from_api(release, name, &dest).map_err(|api| err(format!("{e}; through the GitHub API: {api}")))?;
+    }
     Ok(dest)
+}
+
+/// The official releases through GitHub's API (60 requests an hour without a token; one update
+/// check is two). An asset's `url` there redirects to the same file as its download link.
+const API_RELEASES: &str = "https://api.github.com/repos/hadziqmtqn/devid-binaries/releases";
+
+fn fetch_from_api(release: &str, name: &str, dest: &Path) -> io::Result<()> {
+    let get = |url: &str, accept: &str| {
+        curl(url, dest, &["--proto", "=https", "--proto-redir", "=https", "-H", &format!("Accept: {accept}")])
+    };
+    get(&format!("{API_RELEASES}/tags/{release}"), "application/vnd.github+json")?;
+    let info: Value =
+        serde_json::from_str(&fs::read_to_string(dest)?).map_err(|e| err(format!("bad release info: {e}")))?;
+    let url = asset_api_url(&info, name).ok_or_else(|| err(format!("{name} is not in release {release}")))?;
+    get(&url, "application/octet-stream")
+}
+
+/// The API link of the asset `name`, only when it points into the official repository.
+fn asset_api_url(release: &Value, name: &str) -> Option<String> {
+    let asset = release["assets"].as_array()?.iter().find(|a| a["name"] == name)?;
+    asset["url"].as_str().filter(|u| u.starts_with(&format!("{API_RELEASES}/assets/"))).map(String::from)
 }
 
 /// The newest released devid version.
@@ -207,5 +242,30 @@ mod tests {
         assert_eq!(artifact(&manifest, "nginx", None).unwrap().version, "1.30.6");
         assert!(artifact(&manifest, "php", Some("8.1")).is_none());
         assert!(artifact(&manifest, "caddy", None).is_none());
+    }
+
+    #[test]
+    fn the_api_fallback_only_follows_official_asset_links() {
+        let release = serde_json::json!({"assets": [
+            {"name": "checksums.txt", "url": format!("{API_RELEASES}/assets/1")},
+            {"name": "devid-darwin-x86_64", "url": "https://api.github.com/repos/someone/else/releases/assets/2"}
+        ]});
+        assert_eq!(asset_api_url(&release, "checksums.txt").unwrap(), format!("{API_RELEASES}/assets/1"));
+        assert!(asset_api_url(&release, "devid-darwin-x86_64").is_none(), "another repository's asset");
+        assert!(asset_api_url(&release, "devid-version.txt").is_none(), "not in the release");
+        assert!(asset_api_url(&serde_json::json!({"message": "Not Found"}), "checksums.txt").is_none());
+    }
+
+    /// Live, against the real release: `cargo test -p devid-daemon -- --ignored api_fallback`.
+    #[test]
+    #[ignore = "network"]
+    fn the_api_fallback_downloads_the_checksummed_binary() {
+        let dest = std::env::temp_dir().join(format!("devid-api-test-{}", std::process::id()));
+        fetch_from_api("devid-latest", "checksums.txt", &dest).unwrap();
+        let sums = fs::read_to_string(&dest).unwrap();
+        fetch_from_api("devid-latest", "devid-darwin-x86_64", &dest).unwrap();
+        let line = format!("{}  devid-darwin-x86_64", sha256_hex(&dest).unwrap());
+        fs::remove_file(&dest).unwrap();
+        assert!(sums.lines().any(|l| l == line), "{line} not in\n{sums}");
     }
 }
