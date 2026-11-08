@@ -1,7 +1,7 @@
 //! TUI state and key handling. Pure: no terminal, no daemon, no side effects. Actions come out
 //! as `Effect`s that mod.rs carries out, so everything here is tested directly.
 
-use devid_daemon::protocol::Request;
+use devid_daemon::{protocol::Request, sites};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 
@@ -121,10 +121,14 @@ pub enum Action {
 }
 
 /// What text input is for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputFor {
     Link,
     Park,
+    /// A site's local port (D-037): a port, "off", or empty for the first free one from 8000.
+    Port(String),
+    /// A new command for a site (D-036): its name, a space, then the shell line.
+    Command(String),
 }
 
 /// What a pick list is for.
@@ -135,6 +139,26 @@ pub enum PickFor {
     Unpark,
     /// Serve an ignored parked site again (D-029).
     Unignore,
+    /// A site's app type (D-035): option 0 follows detection, then `sites::PRESETS` in order.
+    Preset(String),
+    /// A site's serving mode, `sites::Mode::NAMES` in order.
+    Serve(String),
+    /// Start or stop one of a site's commands (D-036); `running` per name.
+    Command {
+        site: String,
+        names: Vec<String>,
+        running: Vec<bool>,
+    },
+    /// Add one of the site's suggested commands (name, line); the last option types one in.
+    Suggest {
+        site: String,
+        items: Vec<(String, String)>,
+    },
+    /// Remove one of a site's commands, after a confirmation.
+    RemoveCommand {
+        site: String,
+        names: Vec<String>,
+    },
 }
 
 /// An overlay that takes the keys until it closes.
@@ -204,6 +228,20 @@ pub struct App {
     pub checks: Vec<(bool, String, String)>,
     /// After this action, load the Extensions view of this PHP version again.
     pub reopen: Option<String>,
+}
+
+/// `AppSet` changing only the preset or the mode of `site`.
+fn app_set(site: &str, preset: Option<String>, mode: Option<String>) -> Request {
+    Request::AppSet {
+        site: Some(site.to_string()),
+        cwd: String::new(),
+        preset,
+        mode,
+        root: None,
+        upstream: None,
+        spa: None,
+        pass_host: None,
+    }
 }
 
 fn s(v: &Value) -> String {
@@ -388,6 +426,23 @@ impl App {
         if site["isolated"] == true {
             items.push(('u', "Use the default PHP again".to_string()));
         }
+        // Phase 8: the app type, the local port and the site's commands.
+        items.push(('y', format!("App type… ({})", site["preset_label"].as_str().unwrap_or("PHP"))));
+        items.push(('m', format!("Serve as… ({})", site["mode"].as_str().unwrap_or("php"))));
+        items.push(('p', "Local port…".to_string()));
+        let cmds = site["commands"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let running = cmds.iter().filter(|c| c["state"] == "running").count();
+        if !cmds.is_empty() {
+            items.push(('g', format!("Commands… ({running} of {} running)", cmds.len())));
+            if running < cmds.len() {
+                items.push(('a', "Start all commands".to_string()));
+            }
+            if running > 0 {
+                items.push(('s', "Stop all commands".to_string()));
+            }
+            items.push(('x', "Remove a command…".to_string()));
+        }
+        items.push(('n', "Add a command…".to_string()));
         if site["linked"] == true {
             items.push(('d', "Unlink…".to_string()));
         } else {
@@ -622,6 +677,71 @@ impl App {
                 request: Request::Unisolate { site: Some(name.clone()), cwd: String::new() },
                 done: format!("{name} uses the default PHP again"),
             }),
+            'y' => {
+                let detected = site["detected"].as_str().and_then(sites::find_preset).map_or("nothing", |p| p.label);
+                let current = s(&site["preset"]);
+                let mut options = vec![format!("Use detected ({detected})")];
+                options.extend(
+                    sites::PRESETS.iter().map(|p| format!("{}{}", p.label, if p.key == current { "  ✓" } else { "" })),
+                );
+                self.mode = Mode::Pick { purpose: PickFor::Preset(name), options, index: 0 };
+                Action::None
+            }
+            'm' => {
+                let current = s(&site["mode"]);
+                let options = sites::Mode::NAMES
+                    .iter()
+                    .map(|m| format!("{m}{}", if *m == current { "  ✓" } else { "" }))
+                    .collect();
+                self.mode = Mode::Pick { purpose: PickFor::Serve(name), options, index: 0 };
+                Action::None
+            }
+            'p' => {
+                let text = site["port"].as_u64().map(|p| p.to_string()).unwrap_or_default();
+                self.mode = Mode::Input { purpose: InputFor::Port(name), text };
+                Action::None
+            }
+            'g' | 'x' => {
+                let cmds = site["commands"].as_array().cloned().unwrap_or_default();
+                let names: Vec<String> = cmds.iter().map(|c| s(&c["name"])).collect();
+                let running: Vec<bool> = cmds.iter().map(|c| c["state"] == "running").collect();
+                let options = cmds
+                    .iter()
+                    .map(|c| match choice {
+                        'g' => format!("{}  ·  {}", s(&c["name"]), s(&c["state"])),
+                        _ => s(&c["name"]),
+                    })
+                    .collect();
+                let purpose = match choice {
+                    'g' => PickFor::Command { site: name, names, running },
+                    _ => PickFor::RemoveCommand { site: name, names },
+                };
+                self.mode = Mode::Pick { purpose, options, index: 0 };
+                Action::None
+            }
+            'a' | 's' => Action::Do(Effect::Daemon {
+                request: match choice {
+                    'a' => Request::CommandStart { site: Some(name.clone()), cwd: String::new(), name: None },
+                    _ => Request::CommandStop { site: Some(name.clone()), cwd: String::new(), name: None },
+                },
+                done: format!("{} {name}'s commands", if choice == 'a' { "started" } else { "stopped" }),
+            }),
+            'n' => {
+                let items: Vec<(String, String)> = site["suggestions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|c| (s(&c["name"]), s(&c["run"])))
+                    .collect();
+                self.mode = if items.is_empty() {
+                    Mode::Input { purpose: InputFor::Command(name), text: String::new() }
+                } else {
+                    let mut options: Vec<String> = items.iter().map(|(n, r)| format!("{n}  —  {r}")).collect();
+                    options.push("Other… (type a name and a command)".to_string());
+                    Mode::Pick { purpose: PickFor::Suggest { site: name, items }, options, index: 0 }
+                };
+                Action::None
+            }
             'r' => {
                 self.mode = Mode::Confirm {
                     question: format!("Remove {name}? Devid stops serving it; the folder itself is not touched."),
@@ -721,13 +841,53 @@ impl App {
         match key.code {
             KeyCode::Esc => return Action::None,
             KeyCode::Enter => {
-                let path = expand_tilde(text.trim());
-                if path.is_empty() {
-                    return Action::None;
-                }
-                let (request, done) = match purpose {
-                    InputFor::Link => (Request::Link { name: None, path: path.clone() }, format!("linked {path}")),
-                    InputFor::Park => (Request::Park { path: path.clone() }, format!("parked {path}")),
+                let text = text.trim();
+                let (request, done) = match &purpose {
+                    InputFor::Link | InputFor::Park => {
+                        let path = expand_tilde(text);
+                        if path.is_empty() {
+                            return Action::None;
+                        }
+                        match purpose {
+                            InputFor::Link => {
+                                (Request::Link { name: None, path: path.clone() }, format!("linked {path}"))
+                            }
+                            _ => (Request::Park { path: path.clone() }, format!("parked {path}")),
+                        }
+                    }
+                    InputFor::Port(site) => {
+                        let port = match text {
+                            "" => None,
+                            "off" => Some(0),
+                            t => match t.parse::<u16>() {
+                                Ok(p) => Some(p),
+                                Err(_) => {
+                                    self.message = Some((format!("{t:?} is not a port (1024–65535) or off"), true));
+                                    return Action::None;
+                                }
+                            },
+                        };
+                        let done = match port {
+                            Some(0) => format!("{site}: local port off"),
+                            Some(p) => format!("{site} is also served on 127.0.0.1:{p}"),
+                            None => format!("{site} is also served on a local port (see the list)"),
+                        };
+                        (Request::AppPort { site: Some(site.clone()), cwd: String::new(), port }, done)
+                    }
+                    InputFor::Command(site) => {
+                        let Some((name, run)) = text.split_once(char::is_whitespace) else {
+                            self.message =
+                                Some(("type the name, a space, then the command (dev npm run dev)".into(), true));
+                            return Action::None;
+                        };
+                        let request = Request::CommandAdd {
+                            site: Some(site.clone()),
+                            cwd: String::new(),
+                            name: name.to_string(),
+                            run: run.trim().to_string(),
+                        };
+                        (request, format!("added {name} to {site}; start it from the site's menu"))
+                    }
                 };
                 return Action::Do(Effect::Daemon { request, done });
             }
@@ -772,6 +932,69 @@ impl App {
                         request: Request::Unignore { site: choice.clone() },
                         done: format!("serving {choice} again"),
                     },
+                    PickFor::Preset(site) => match index.checked_sub(1).and_then(|i| sites::PRESETS.get(i)) {
+                        None => Effect::Daemon {
+                            request: Request::AppReset { site: Some(site.clone()), cwd: String::new() },
+                            done: format!("{site} follows detection again"),
+                        },
+                        Some(p) => Effect::Daemon {
+                            request: app_set(&site, Some(p.key.to_string()), None),
+                            done: format!("{site} is now {}", p.label),
+                        },
+                    },
+                    PickFor::Serve(site) => {
+                        let mode = sites::Mode::NAMES[index.min(2)];
+                        Effect::Daemon {
+                            request: app_set(&site, None, Some(mode.to_string())),
+                            done: format!("{site} is served as {mode}"),
+                        }
+                    }
+                    PickFor::Command { site, names, running } => {
+                        let name = names[index].clone();
+                        let (request, verb) = match running[index] {
+                            true => (
+                                Request::CommandStop { site: Some(site), cwd: String::new(), name: Some(name.clone()) },
+                                "stopped",
+                            ),
+                            false => (
+                                Request::CommandStart {
+                                    site: Some(site),
+                                    cwd: String::new(),
+                                    name: Some(name.clone()),
+                                },
+                                "started",
+                            ),
+                        };
+                        Effect::Daemon { request, done: format!("{verb} {name}") }
+                    }
+                    PickFor::Suggest { site, items } => match items.get(index) {
+                        Some((name, run)) => Effect::Daemon {
+                            request: Request::CommandAdd {
+                                site: Some(site.clone()),
+                                cwd: String::new(),
+                                name: name.clone(),
+                                run: run.clone(),
+                            },
+                            done: format!("added {name} to {site}; start it from the site's menu"),
+                        },
+                        None => {
+                            self.mode = Mode::Input { purpose: InputFor::Command(site), text: String::new() };
+                            return Action::None;
+                        }
+                    },
+                    PickFor::RemoveCommand { site, names } => {
+                        let name = names[index].clone();
+                        self.mode = Mode::Confirm {
+                            question: format!("Remove {name}? A running one is stopped first; its log stays."),
+                            request: Box::new(Request::CommandRemove {
+                                site: Some(site),
+                                cwd: String::new(),
+                                name: name.clone(),
+                            }),
+                            done: format!("removed {name}"),
+                        };
+                        return Action::None;
+                    }
                 })
             }
             _ => {
@@ -880,8 +1103,99 @@ mod tests {
     fn site_menu_entries_depend_on_the_site() {
         let app = with_sites();
         let keys = |site: &Value| App::site_menu(site).iter().map(|(k, _)| *k).collect::<String>();
-        assert_eq!(keys(&app.sites[0]), "otcir", "parked, default PHP: no unisolate, no unlink, remove (D-029)");
-        assert_eq!(keys(&app.sites[1]), "otciud", "linked + isolated");
+        assert_eq!(keys(&app.sites[0]), "otciympnr", "parked, default PHP: no unisolate, no unlink, remove (D-029)");
+        assert_eq!(keys(&app.sites[1]), "otciuympnd", "linked + isolated");
+    }
+
+    /// Phase 8 A5: the app type, serving mode, local port and commands from a site's menu.
+    #[test]
+    fn app_type_port_and_commands() {
+        let mut app = with_sites();
+        let blog = &mut app.sites[0];
+        blog["preset"] = json!("laravel");
+        blog["preset_label"] = json!("Laravel");
+        blog["detected"] = json!("laravel");
+        blog["mode"] = json!("php");
+        blog["commands"] = json!([{"name": "dev", "state": "running"}, {"name": "queue", "state": "stopped"}]);
+        blog["suggestions"] = json!([{"name": "schedule", "run": "php artisan schedule:work"}]);
+        let keys: String = App::site_menu(&app.sites[0]).iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys, "otciympgasxnr");
+        let menu = |app: &mut App, letter: char| {
+            app.handle_key(key(KeyCode::Enter));
+            app.handle_key(ch(letter))
+        };
+        let typed = |app: &mut App, text: &str| {
+            for c in text.chars() {
+                app.handle_key(ch(c));
+            }
+            app.handle_key(key(KeyCode::Enter))
+        };
+
+        menu(&mut app, 'y');
+        assert!(matches!(&app.mode, Mode::Pick { purpose: PickFor::Preset(s), options, .. }
+            if s == "blog" && options[0] == "Use detected (Laravel)" && options[1] == "Laravel  ✓"));
+        assert_eq!(daemon_json(app.handle_key(key(KeyCode::Enter)))["cmd"], "app_reset", "option 0 follows detection");
+        menu(&mut app, 'y');
+        for _ in 0..10 {
+            app.handle_key(key(KeyCode::Down));
+        }
+        let v = daemon_json(app.handle_key(key(KeyCode::Enter)));
+        assert_eq!(
+            (v["cmd"].as_str(), v["preset"].as_str(), v["mode"].as_str()),
+            (Some("app_set"), Some("vite"), None)
+        );
+
+        menu(&mut app, 'm');
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(daemon_json(app.handle_key(key(KeyCode::Enter)))["mode"], "proxy");
+
+        menu(&mut app, 'p');
+        assert_eq!(daemon_json(app.handle_key(key(KeyCode::Enter)))["port"], Value::Null, "empty: the first free port");
+        menu(&mut app, 'p');
+        assert_eq!(daemon_json(typed(&mut app, "off"))["port"], 0);
+        menu(&mut app, 'p');
+        assert!(matches!(typed(&mut app, "80x"), Action::None));
+        assert!(app.message.as_ref().is_some_and(|(m, bad)| *bad && m.contains("not a port")));
+
+        menu(&mut app, 'g');
+        let v = daemon_json(app.handle_key(key(KeyCode::Enter)));
+        assert_eq!((v["cmd"].as_str(), v["name"].as_str()), (Some("command_stop"), Some("dev")), "a running one stops");
+        menu(&mut app, 'g');
+        app.handle_key(key(KeyCode::Down));
+        let v = daemon_json(app.handle_key(key(KeyCode::Enter)));
+        assert_eq!((v["cmd"].as_str(), v["name"].as_str()), (Some("command_start"), Some("queue")));
+        let v = daemon_json(menu(&mut app, 'a'));
+        assert_eq!(
+            (v["cmd"].as_str(), v["site"].as_str(), v["name"].as_str()),
+            (Some("command_start"), Some("blog"), None)
+        );
+        assert_eq!(daemon_json(menu(&mut app, 's'))["cmd"], "command_stop");
+
+        menu(&mut app, 'x');
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(&app.mode, Mode::Confirm { .. }), "removing asks first");
+        let v = daemon_json(app.handle_key(ch('y')));
+        assert_eq!((v["cmd"].as_str(), v["name"].as_str()), (Some("command_remove"), Some("queue")));
+
+        menu(&mut app, 'n');
+        let v = daemon_json(app.handle_key(key(KeyCode::Enter)));
+        assert_eq!((v["name"].as_str(), v["run"].as_str()), (Some("schedule"), Some("php artisan schedule:work")));
+        menu(&mut app, 'n');
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        assert!(
+            matches!(&app.mode, Mode::Input { purpose: InputFor::Command(s), .. } if s == "blog"),
+            "Other… types one in"
+        );
+        let v = daemon_json(typed(&mut app, "dev:pg:local npm run dev:pg:local"));
+        assert_eq!(
+            (v["cmd"].as_str(), v["name"].as_str(), v["run"].as_str()),
+            (Some("command_add"), Some("dev:pg:local"), Some("npm run dev:pg:local"))
+        );
+        app.mode = Mode::Input { purpose: InputFor::Command("blog".into()), text: String::new() };
+        assert!(matches!(typed(&mut app, "justaname"), Action::None), "a name alone is not saved");
     }
 
     #[test]
