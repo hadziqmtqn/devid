@@ -1,5 +1,6 @@
-//! Phase 5 R4: `devid self-update` and install.sh against a local `file://` copy of the
-//! devid-latest release (fake devid binary, real checksums).
+//! Phase 5 R4: `devid self-update` and install.sh against a local `file://` release (fake devid
+//! binary, real checksums): self-update reads GitHub's Latest (`latest/`, D-038), install.sh the
+//! rolling `devid-latest/`.
 
 mod common;
 
@@ -8,10 +9,16 @@ use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 
 const ASSET: &str = if cfg!(target_arch = "aarch64") { "devid-darwin-arm64" } else { "devid-darwin-x86_64" };
 
-/// Publish a fake devid `version` into `<base>/devid-latest`; its `setup` writes a marker file.
+/// Publish a fake devid `version` as `<base>/latest` and `<base>/devid-latest`; its `setup`
+/// writes a marker file.
 fn publish(base: &Path, version: &str, tamper: bool) {
-    let rel = base.join("devid-latest");
-    fs::create_dir_all(&rel).unwrap();
+    for release in ["latest", "devid-latest"] {
+        publish_to(&base.join(release), version, tamper);
+    }
+}
+
+fn publish_to(rel: &Path, version: &str, tamper: bool) {
+    fs::create_dir_all(rel).unwrap();
     let bin = rel.join(ASSET);
     fs::write(
         &bin,
