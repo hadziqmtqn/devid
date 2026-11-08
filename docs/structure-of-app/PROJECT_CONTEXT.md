@@ -27,12 +27,13 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - `.test` DNS, a local CA and HTTPS.
 - One global web server: nginx (default, D-015), Caddy or Apache.
 - A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012); the Tauri desktop app came in Phase 7 (D-023) and is opt-in (`devid setup --gui`).
+- Phase 8 (accepted 2026-11-08): Node and static apps at `.test` (D-035), user commands run by the daemon (D-036), a local port per site and Share (D-037).
 
 **Non-goals:**
 - Databases. The owner uses DBngin for PostgreSQL and MySQL.
 - Per-site web server choice.
 - Arbitrary extra PHP extensions in v1 (see D-008).
-- In v1: mail catcher, dump viewer, log viewer, share/tunnel (deferred, D-011).
+- In v1: mail catcher, dump viewer, log viewer, share/tunnel (deferred, D-011). Share/tunnel is scheduled for Phase 8 (D-037).
 
 ## Phases (estimate 2–2.5 months)
 
@@ -45,6 +46,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | done 2026-11-02 (R1–R5) |
 | 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | done (2026-11-05): apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole for 8.3–8.5; Devid v0.4.1 installs them (CLI and TUI); recipe PRs are built, tested and published (E6) |
 | 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | done 2026-11-06 (G1–G5): Devid.app ships with v0.7.0, installed with `devid setup --gui` |
+| 8 | Apps, commands and sharing: app types and presets (D-035), user commands (D-036), a local port per site and Share (D-037); plan in `docs/roadmap/phase-8.md` | accepted 2026-11-08; A1 (spike) done 2026-11-08, A2 next |
 
 ## Open risks (Phase 1 must prove)
 
@@ -149,6 +151,16 @@ Release build of `crates/gui` (Tauri 2.12.5, system WKWebView) on the owner's Ma
   - **Incremental release:** 2–3 min.
   - **Release binary:** 8.2 MB.
   - **Daemon and CLI builds:** unaffected (not a default member).
+
+### Phase 8 A1 spike (2026-11-08)
+
+Dev commands started the way the daemon will, plus a throwaway nginx in front of them. Details in `docs/roadmap/phase-8.md`, "A1 results".
+- **Environment:** a launchd job has only the system `PATH`. `zsh -l -c` adds `cargo` in 10–220 ms. nvm loads only in an interactive shell (5.9 s, with gitstatus errors), so Devid adds nvm's `bin` itself.
+- **GUI:** a window opened from a launchd job shows on screen, so `tauri dev` can run from the daemon.
+- **Stop:** one SIGINT to the process group ends Vite (3 processes) and Next.js (5 processes).
+- **Proxy:** Vite 6.4 and Next.js 16.4 need `Host: localhost:<port>`, and Next.js also needs the site's own `Origin` rewritten. Then pages, assets and the HMR WebSocket work through nginx, and foreign origins are still refused.
+- **Cost:** detection of 19 folders takes about 3 ms warm. A Next.js dev server uses 941 MB RSS while it runs.
+- **erd-builder-pro:** `PORT=3010 npm run dev:pg:local` ran next to the owner's own instance on 3000. It was ready in 14 s at 784 MB, served through the proxy rules, and stopped cleanly (6 processes). Its HMR runs on Vite's separate port 24678, which an HTTPS page cannot reach. That is a setting in the app (`server.hmr.server`), not in Devid.
 
 ## Machine state
 

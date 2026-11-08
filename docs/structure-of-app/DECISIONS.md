@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-06
+> Verified against: 2026-11-08
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -40,6 +40,11 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-030 | 2026-11-06 | accepted (amends D-023's "no Dock icon") | While its window is open, the desktop app is in the Dock and Cmd+Tab with the padlock-and-prompt icon; at idle it is in the menu bar only |
 | D-031 | 2026-11-06 | accepted | Two login settings: "Serve sites at login" (nginx and PHP, on by default) and "Open Devid at login" (the app, off by default) |
 | D-032 | 2026-11-06 | accepted | The `devid` source stays private; downloads, the desktop app included, come from `devid-binaries`, whose README and release notes carry D-010's notice |
+| D-033 | 2026-11-06 | accepted (the guide's home moved by D-034) | The user guide is public, in `devid-binaries` |
+| D-034 | 2026-11-06 | accepted | A website, `devid-site`, with the landing page and the docs |
+| D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
+| D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
+| D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -526,3 +531,49 @@ See ARCHITECTURE, "PHP runtime".
   - **Keeping it current:** as in D-033, but the pull request goes to `devid-site`.
 - **Out of scope still:** databases (D-006). The docs promise nothing about them.
 - **Accepted:** by the owner on 2026-11-06.
+
+## D-035: app types: a serving mode per site, filled in by a detected preset (accepted 2026-11-08, Phase 8)
+
+- **Context:**
+  - Devid serves every site as PHP, with `public/` as the docroot when it exists.
+  - The owner also works on Node and Vite apps (erd-builder-pro, apps on 3000, 3001 and 8080). They run outside Devid, and their folders are ignored in `~/Projects`.
+  - The owner asked for detection like Vercel's framework presets (Laravel, CodeIgniter, Node.js, Vite and others) that the user can change.
+- **Decision:**
+  - **Mode:** each site has a serving mode: `php` (today's behaviour), `static` (files, optionally with an SPA fallback) or `proxy` (to `127.0.0.1:<upstream>`, WebSockets included).
+  - **Preset:** a detected framework label that fills in the mode and its defaults. Detection only reads marker files, never runs anything, and is cached by their mtime.
+  - **Override:** the user can change the preset or any field. Overrides live in `config.toml` under `[apps.<site>]`; a missing field falls back to detection.
+  - **No match:** a site with no override and no match is served as today.
+- **Scope change:** Devid stays a PHP-first app, but it also serves Node and static apps at `.test`. Node itself is the user's own (nvm); Devid ships no Node.
+- **Plan:** `docs/roadmap/phase-8.md`.
+- **Accepted:** by the owner on 2026-11-08, after the Phase 8 prototype on the Devid Redesign canvas.
+
+## D-036: user commands run by the daemon (accepted 2026-11-08, Phase 8)
+
+- **Context:**
+  - The owner starts the same commands by hand in a terminal every day: `npm run dev:pg:local` and `npm run dev:tauri` in `~/Projects/erd-builder-pro`, and `php artisan serve` for erdbpro-saas.
+  - The owner asked to enter commands in the desktop app, run several at once, and stop them.
+- **Decision:**
+  - **Commands:** a site can have any number of named commands. The daemon starts them in the site's folder with the user's login-shell environment, each in its own process group. Stop ends the whole group.
+  - **Output** goes straight to `~/.devid/log/app-<site>-<name>.log`, so the Logs page shows it.
+  - **Nothing by itself:** commands are never started at login and never restarted on a crash. Scripts found in `package.json` or `composer.json` are only suggestions.
+  - **Lifetime:** a daemon stop stops them all. After a daemon crash, the next start stops the groups left behind.
+- **Why not more:** automatic restart and start at login cost RAM and CPU on a 2-core Mac, and a broken build would loop. They can come later if the owner needs them.
+- **Plan:** `docs/roadmap/phase-8.md`.
+- **Accepted:** by the owner on 2026-11-08, after the Phase 8 prototype on the Devid Redesign canvas.
+
+## D-037: a local port per site, and Share through a Cloudflare quick tunnel (accepted 2026-11-08, Phase 8)
+
+- **Context:**
+  - The owner's Cloudflare tunnel (`com.cloudflare.cloudflared`, routes set in the Cloudflare dashboard) targets `127.0.0.1:8000`, which is `php artisan serve`, and port 3000, which is a Node dev server.
+  - D-011 deferred share/tunnel.
+- **Decision:**
+  - **Local port:** a site can also be served on `http://127.0.0.1:<port>`.
+    - The default is no port; "Add port" picks the first free port from 8000 up, or the one the user enters.
+    - A port that is busy is left out of the config and reported, so it never stops the web server.
+    - With it, the tunnel reaches Devid directly, and `artisan serve` is no longer needed.
+  - **Share:** `devid share <site>` runs `cloudflared tunnel --url … --http-host-header <name>.test` on demand and shows the random `trycloudflare.com` URL until it is stopped.
+    - Devid uses an existing `cloudflared` binary and does not download it.
+  - **Never:** Devid does not touch the user's own tunnel, its LaunchDaemon or its dashboard routes.
+- **Amends:** D-011. Share/tunnel moves from deferred to Phase 8. The mail catcher stays deferred: the owner already runs Mailpit.
+- **Plan:** `docs/roadmap/phase-8.md`.
+- **Accepted:** by the owner on 2026-11-08, after the Phase 8 prototype on the Devid Redesign canvas.
