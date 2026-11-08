@@ -1,8 +1,8 @@
 # Phase 8 Plan: apps, commands and sharing
 
 > Scope: app types detected per site (PHP, static, Node), a local port per site, user commands the daemon runs, and sharing a site through a quick tunnel (D-035, D-036, D-037)
-> Verified against: 2026-11-08 (A1 spike; nothing built in the daemon yet)
-> Status: accepted 2026-11-08; A1 (spike) done 2026-11-08, see "A1 results"; A2 next
+> Verified against: 2026-11-08 (A2 built on branch `feat/a2-app-types`)
+> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 built, see "A2 as built"; A3 next
 
 Today Devid serves every site as PHP through php-fpm, and the docroot is `public/` when it exists (`daemon::sites`). Everything else the owner runs is still started by hand in a terminal:
 
@@ -51,9 +51,9 @@ Detection runs in order, and the first match wins:
 | PHP | `composer.json`, `index.php` or `public/index.php` | php, `public/` if it exists |
 | Next.js | `next` in `package.json` | proxy, 3000 |
 | Nuxt | `nuxt` in `package.json` | proxy, 3000 |
-| Node server | `express`, `fastify`, `koa` or `hono` in `package.json` | proxy, 3000 |
+| Node.js | `express`, `fastify`, `koa` or `hono` in `package.json` | proxy, 3000 |
 | Vite | `vite` in `package.json` | proxy, 5173; or static `dist/` with `spa = true` |
-| Node | another `package.json` with a `dev` or `start` script | proxy, 3000 |
+| Node.js | another `package.json` with a `dev` or `start` script | proxy, 3000 |
 | Static | `index.html` only | static, the folder |
 | (none) | none of the above | php, as today |
 
@@ -142,9 +142,9 @@ New requests, each with a CLI subcommand:
 
 | Request | CLI |
 |---|---|
-| `AppShow { site }` | `devid app <site>`: type (detected or set), mode, root/upstream, port, commands |
-| `AppSet { site, preset?, mode?, root?, upstream?, spa?, port? }` | `devid app set <site> --mode proxy --upstream 3000`, `devid app port <site> [<port>\|off]` |
-| `AppReset { site }` | `devid app reset <site>` (back to detection) |
+| `sites` (extended in A2) | `devid app show [site]`: type (detected or set), how it is served, what the owner changed |
+| `AppSet { site?, cwd, preset?, mode?, root?, upstream?, spa?, pass_host? }` (A2; `port` comes in A3) | `devid app set [site] --mode proxy --upstream 3000`; A3 adds `devid app port [site] [<port>\|off]` |
+| `AppReset { site?, cwd }` | `devid app reset [site]` (back to detection) |
 | `CommandAdd { site, name, run }` / `CommandRemove { site, name }` | `devid cmd add <site> <name> -- <command>`, `devid cmd rm <site> <name>` |
 | `CommandStart { site, name? }` / `CommandStop { site, name? }` | `devid cmd start <site> [name]`, `devid cmd stop <site> [name]` (no name = all of the site's commands) |
 | `ShareStart { site }` / `ShareStop { site }` | `devid share <site>`, `devid share <site> --stop` |
@@ -166,7 +166,7 @@ New requests, each with a CLI subcommand:
 | # | Milestone | Done when |
 |---|---|---|
 | A1 | **Spike** (see "Spike questions") | the answers and numbers are in this doc and in PROJECT_CONTEXT |
-| A2 | **App types:** detection with the mtime cache, presets, `[apps]` overrides, modes `php`/`static`/`proxy` in nginx, Caddy and Apache, `devid app` | erd-builder-pro, unignored, opens at `https://erd-builder-pro.test` through its dev server; erdbpro-saas and phpMyAdmin are served as before |
+| A2 | **App types:** detection, presets, `[apps]` overrides, modes `php`/`static`/`proxy` in nginx, Caddy and Apache, `devid app` | erd-builder-pro, unignored, opens at `https://erd-builder-pro.test` through its dev server; erdbpro-saas and phpMyAdmin are served as before |
 | A3 | **Local port:** `port` with the bind check on all three servers | erdbpro-saas is served by Devid on `127.0.0.1:8000` and the tunnel works with `artisan serve` stopped |
 | A4 | **Commands:** add, remove, start, stop, start all, stop all, logs, states, leftover cleanup after a crash, `devid cmd` | both erd-builder-pro commands run from `devid cmd start erd-builder-pro`; stop leaves no `node`, `cargo` or Tauri process |
 | A5 | **TUI and desktop app:** the site detail view and the menu-bar items | the owner runs and stops both commands from Devid.app, with no terminal |
@@ -254,6 +254,64 @@ The proxy tests used a throwaway nginx (Devid's 1.30 binary, its own prefix and 
   - `npm run dev:tauri` was not run in A1. It deletes `src-tauri/target/debug` and rebuilds Tauri from scratch (G1: 8.5 min cold debug on this Mac), so it waits until the owner can spare the CPU. The GUI probe above covers the window question.
   - The daemon's RSS with commands running is measured in A4.
   - cloudflared's RSS while sharing is measured in A6. A test opens a public URL, so it waits for the owner.
+
+### A2 as built (2026-11-08)
+
+- **Config:** `[apps.<site>]` in `config.toml` holds only the overrides: `preset`, `mode`, `root`, `upstream`, `spa` and `pass_host`. An empty table is removed.
+- **Detection (`sites::detect`):** the order in "App types". "Node server" and "Node" became one preset, `node` ("Node.js"), because they behave the same.
+- **Resolving a site:**
+  - the owner's preset, else the detected one, else `php`;
+  - then the mode;
+  - the web root: an override (relative, no `..`), else `public/` when it exists (php), the preset's build folder (static: Vite `dist`, Next.js `out`, Nuxt `.output/public`) or the folder itself;
+  - the upstream: an override, else `PORT=` in `.env` (proxy sites only), else the preset's port;
+  - `spa` is on for Vite.
+- **`AppSet`:**
+  - A new preset without a mode drops the old mode, root and upstream.
+  - Choosing the detected preset stores nothing.
+  - An upstream of 0, or Devid's own HTTP or HTTPS port (a proxy loop), is refused.
+- **php-fpm:** only PHP-mode sites count when the daemon decides which PHP versions to run, so a static or proxy site's PHP version starts nothing.
+- **nginx:**
+  - Static sites use `try_files $uri $uri.html $uri/ =404` (or `/index.html` with `spa`).
+  - Proxy sites use `proxy_pass http://localhost:<up>`, with the A1 headers through a per-site `map` of the site's own origins (with and without Devid's ports).
+  - Also on proxy sites: `proxy_buffering off` (SSE), `proxy_read_timeout 1h` (idle HMR sockets), and a plain-text 502 that names the port when nothing answers.
+- **Caddy:**
+  - Static: `try_files {path} {path}.html [/index.html]`.
+  - Proxy: `reverse_proxy localhost:<up>` with `header_up Host`, a `header_regexp` matcher with `request_header` for the own Origin, and `handle_errors 502`.
+- **Apache:**
+  - `mod_proxy_http` with `ProxyPass … upgrade=websocket retry=0`. The `retry=0` means a dev server that was down is tried again at once.
+  - `RequestHeader` sets Host, the own Origin (an `expr` condition) and the `X-Forwarded-*` headers. Devid sets them itself (`ProxyAddHeaders Off`).
+  - Static sites: a rewrite for `.html` and `FallbackResource` for SPA.
+- **Fixed on the way, Apache:** hidden folders were served. `FilesMatch` checks only the file name, so `/.git/config` returned 200 on PHP and static sites. Now a per-`<Directory>` rewrite refuses `(^|/)\.` (except `.well-known`). It is not used on proxy sites, whose dev servers serve `/node_modules/.vite/…`.
+- **Vite binds `[::1]` only:** without `--host`, Vite 6.4 listened on `[::1]:5198` and refused `127.0.0.1` (checked 2026-11-08). So every server proxies to `localhost`, which they all try over both IPv4 and IPv6.
+- **CLI:**
+  - `devid app show|set|reset [site]`.
+  - `devid sites` gains a type column, and shows "static dist/" or "proxy to localhost:3000" instead of a PHP version for those modes.
+- **Version:** 0.8.0, since the protocol and the CLI grow.
+
+**Verification:**
+- **Checks:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass. New unit tests cover detection and overrides (`sites.rs`), and static and proxy rendering for nginx, Caddy and Apache. A new integration test (`crates/cli/tests/sites.rs`, `app_types_and_overrides`) covers detection, `app set/reset/show`, validation, and php-fpm starting only for PHP sites.
+- **A second daemon on the owner's Mac:**
+  - Setup: its own `DEVID_HOME`, ports 18188/18543, nginx and a copy of PHP 8.4. It parked the real mikurkid-lp, erdbpro-saas-template, erd-builder-pro, devid-site and erdbpro-saas, plus three scratch projects (PHP, a built SPA, and a header-echo server).
+  - It detected all eight sites as expected, and the same checks passed on nginx, Apache and Caddy:
+    - PHP;
+    - static: `/`, `/profil` from `profil.html`, 404, and 403 for `/.git/config` and a hidden folder;
+    - SPA fallback;
+    - proxy headers: `Host: localhost:<up>`, the own Origin rewritten, a foreign Origin kept, `X-Forwarded-Host` and `X-Forwarded-Proto`;
+    - Vite on `[::1]` (200) and its HMR WebSocket over `wss` (101);
+    - the "nothing answers" page (nginx and Caddy 502, Apache 503).
+  - The erdbpro-saas server block in the new nginx.conf is identical to the live one, paths and ports aside.
+  - The owner's daemon, sites, php-fpm and dev servers were not touched.
+- **Cost:** `devid sites` with eight sites takes 24 ms per call (debug build, including the CLI's own start), so detection needs no cache.
+- **Seen once, not a bug:**
+  - devid-site's preset port (3000) reached the owner's running erd-builder-pro, a port clash that the override solves.
+  - A request sent right after `devid app set` can still meet the old nginx config, because the reload is a SIGHUP and the reply does not wait for it. That has always been so for every config change.
+
+**Still open:**
+- On the owner's Mac after the 0.8.0 release:
+  - `devid unignore erd-builder-pro`, then `https://erd-builder-pro.test` through the owner's dev server on 3000;
+  - Laravel with Vite in Safari.
+- The TUI and the desktop app show the new fields in A5. Until then, their Sites pages still show a PHP version for every site.
+- The user docs on devid-site follow with the release (D-034).
 
 ## Not in this phase
 

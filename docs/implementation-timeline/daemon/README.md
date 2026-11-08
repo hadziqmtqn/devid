@@ -16,3 +16,4 @@
 | 2026-11-03 | [`devid setup` installs PHP and a web server (v0.2.3)](2026-11-03-setup-installs-php-server.md) |
 | 2026-11-03 | [Fix: `.test` sites slow while the Mac is busy (LaunchAgent priority)](2026-11-03-agent-priority.md) |
 | 2026-11-06 | [Ignore and unignore a parked site, in the CLI, TUI and app (v0.5.0)](2026-11-06-site-ignore.md) |
+| 2026-11-08 | [Phase 8 A2: app types, PHP / static / proxy (v0.8.0)](2026-11-08-a2-app-types.md) |

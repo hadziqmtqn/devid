@@ -1,7 +1,15 @@
 //! Caddy, an alternative web server (D-005, D-015). Devid owns the certificates, so automatic
 //! HTTPS and the admin API are off; a config change restarts Caddy (it has no SIGHUP reload).
 
-use crate::{ca, config::Config, nginx::quotable_without, paths::Paths, php, sites::Site, supervisor::Spec};
+use crate::{
+    ca,
+    config::Config,
+    nginx::quotable_without,
+    paths::Paths,
+    php,
+    sites::{Mode, Site},
+    supervisor::Spec,
+};
 use std::{
     fmt::Write as _,
     fs, io,
@@ -72,29 +80,14 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
         log = q(&paths.log_dir().join("caddy-error.log")),
     );
     for site in sites {
-        let sock = php::socket(paths, &site.php);
-        let (Some(root), Some(sock), Some(crt), Some(key)) = (
-            quote(&site.docroot),
-            quote(Path::new(&format!("unix/{}", sock.display()))),
-            quote(&ca::site_cert(paths, &site.host)),
-            quote(&ca::site_key(paths, &site.host)),
-        ) else {
+        let (Some(crt), Some(key), Some(body)) =
+            (quote(&ca::site_cert(paths, &site.host)), quote(&ca::site_key(paths, &site.host)), site_body(paths, site))
+        else {
             let _ = writeln!(c, "\n# skipped {}: path contains characters Caddy cannot quote safely", site.name);
             continue;
         };
         // Caddy rejects `tls` in a block that also listens on plain HTTP, so each site gets an
         // HTTPS block and an HTTP block with the same body.
-        let body = format!(
-            "\troot * {root}\n\
-             \tencode\n\
-             \t@hidden {{\n\
-             \t\tpath /.*\n\
-             \t\tnot path /.well-known/*\n\
-             \t}}\n\
-             \trespond @hidden 403\n\
-             \tphp_fastcgi {sock}\n\
-             \tfile_server\n"
-        );
         let _ = write!(
             c,
             "\nhttps://{host}:{https} {{\n\
@@ -110,6 +103,44 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
         );
     }
     c
+}
+
+/// The part of a site's blocks that depends on its mode; None if a path cannot be quoted.
+fn site_body(paths: &Paths, site: &Site) -> Option<String> {
+    let hidden = "\t@hidden {\n\t\tpath /.*\n\t\tnot path /.well-known/*\n\t}\n\trespond @hidden 403\n";
+    Some(match site.mode {
+        Mode::Php => {
+            let root = quote(&site.docroot)?;
+            let sock = quote(Path::new(&format!("unix/{}", php::socket(paths, &site.php).display())))?;
+            format!("\troot * {root}\n\tencode\n{hidden}\tphp_fastcgi {sock}\n\tfile_server\n")
+        }
+        Mode::Static => {
+            let root = quote(&site.docroot)?;
+            let spa = if site.spa { " /index.html" } else { "" };
+            format!("\troot * {root}\n\tencode\n{hidden}\ttry_files {{path}} {{path}}.html{spa}\n\tfile_server\n")
+        }
+        Mode::Proxy => {
+            let (host, up) = (&site.host, site.upstream);
+            let down = format!(
+                "\thandle_errors 502 {{\n\
+                 \t\trespond \"Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid).\" 502\n\
+                 \t}}\n"
+            );
+            if site.pass_host {
+                return Some(format!("\treverse_proxy localhost:{up}\n{down}"));
+            }
+            // As in nginx: Host and the site's own Origin become the dev server's (A1).
+            let own = host.replace('.', "[.]");
+            format!(
+                "\t@devid_own_origin header_regexp Origin \"^https?://{own}(:[0-9]+)?$\"\n\
+                 \trequest_header @devid_own_origin Origin http://localhost:{up}\n\
+                 \treverse_proxy localhost:{up} {{\n\
+                 \t\theader_up Host localhost:{up}\n\
+                 \t}}\n\
+                 {down}"
+            )
+        }
+    })
 }
 
 /// Write the Caddyfile only if `caddy validate` accepts it. Returns whether it changed.
@@ -161,8 +192,9 @@ mod tests {
             path: PathBuf::from(docroot),
             docroot: PathBuf::from(docroot),
             php: php.into(),
-            isolated: false,
             linked: true,
+            preset: "php",
+            ..Site::default()
         }
     }
 
@@ -182,5 +214,21 @@ mod tests {
         assert!(conf.matches("bind 127.0.0.1").count() == 3, "default + blog (https, http), all local only");
         assert!(conf.contains("# skipped evil"), "placeholder injection is skipped");
         assert!(!conf.contains("{env.HOME}"));
+    }
+
+    #[test]
+    fn render_static_and_proxy() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let spa = Site { mode: Mode::Static, spa: true, ..site("app", "/p/app/dist", "8.4") };
+        let dev = Site { mode: Mode::Proxy, upstream: 5173, ..site("erd", "/p/erd", "8.4") };
+        let raw = Site { mode: Mode::Proxy, upstream: 3000, pass_host: true, ..site("raw", "/p/raw", "8.4") };
+        let conf = render(&paths, &Config::default(), &[spa, dev, raw]);
+        assert!(conf.contains("root * \"/p/app/dist\"") && conf.contains("try_files {path} {path}.html /index.html"));
+        assert!(!conf.contains("php_fastcgi"));
+        assert!(conf.contains("header_regexp Origin \"^https?://erd[.]test(:[0-9]+)?$\""));
+        assert!(conf.contains("request_header @devid_own_origin Origin http://localhost:5173"));
+        assert!(conf.contains("reverse_proxy localhost:5173 {\n\t\theader_up Host localhost:5173"));
+        assert!(conf.contains("\treverse_proxy localhost:3000\n"), "pass_host: no rewrites");
+        assert_eq!(conf.matches("handle_errors 502").count(), 4, "https and http block of both proxy sites");
     }
 }

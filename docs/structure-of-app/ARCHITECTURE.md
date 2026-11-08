@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-03 (Phase 4 T5: Settings)
+> Verified against: 2026-11-08 (Phase 8 A2: app types)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -164,3 +164,25 @@ Implemented in T5:
   - `d` runs the same checks as `devid doctor` (`setup::doctor_checks`) and lists them with a fix for each problem;
   - `u` checks for a newer devid (`devid-version.txt` in the `devid-latest` release) and newer PHP/nginx/Caddy (`update --check`); `U` installs the binaries (confirmed).
 - **Handover:** `D` (`self-update`, confirmed), `s` (`setup`) and `X` (`uninstall`, confirmed) need the plain terminal for sudo prompts and the daemon restart. `tui::run` returns those arguments, and `main` runs `devid <args>` after the terminal is restored.
+
+## App types (Phase 8 A2, D-035)
+
+`daemon::sites` gives every site an app type. Details and checks are in `docs/roadmap/phase-8.md`, "A2 as built".
+- **Detection:** `sites::detect` reads marker files in a fixed order and returns a preset key, or None:
+  - `artisan` with `laravel/framework`, `spark`, `system/…/CodeIgniter.php`, `bin/console` with `symfony/framework-bundle`, `wp-config.php`;
+  - then any PHP marker;
+  - then `package.json` dependencies (next, nuxt, express/fastify/koa/hono, vite) or a `dev`/`start` script;
+  - then `index.html`.
+  It never runs project code.
+- **Preset:** the label filling in a mode, a dev-server port and a static build folder. `config.toml` `[apps.<site>]` holds only the owner's overrides, and `resolve` combines both.
+- **Modes:**
+  - **php:** as before.
+  - **static:** files only, `$uri.html`, optional SPA fallback.
+  - **proxy:** to `localhost:<upstream>`, so IPv4 or IPv6.
+    - `Host: localhost:<upstream>`, and the site's own Origin rewritten, so Vite and Next.js accept `.test`. A foreign Origin is unchanged.
+    - WebSocket upgrades, `X-Forwarded-*` headers, and a plain-text error when nothing answers.
+    - `pass_host` keeps Host and Origin.
+- **Web servers:** all three render each mode (nginx `map` and `proxy_pass`; Caddy `reverse_proxy`; Apache `mod_proxy_http` with `upgrade=websocket retry=0`). Apache now refuses hidden paths per `<Directory>`.
+- **php-fpm:** only for the PHP versions of PHP-mode sites, plus the default.
+- **Requests:** `app_set` and `app_reset`. The `sites` reply adds `preset`, `preset_label`, `detected`, `mode`, `upstream`, `spa`, `pass_host` and `app` (the overrides).
+- **CLI:** `devid app show|set|reset [site]`, and a type column in `devid sites`.

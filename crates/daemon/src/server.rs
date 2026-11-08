@@ -8,7 +8,7 @@ use crate::{
     php, phpext,
     protocol::Request,
     releases,
-    sites::{self, Site},
+    sites::{self, Mode, Site},
     supervisor::{ProcState, Spec, Supervisor},
     webserver,
 };
@@ -92,6 +92,7 @@ impl State {
         let installed = php::installed(&self.paths);
         let mut out: BTreeSet<String> = sites::resolve(&config)
             .iter()
+            .filter(|s| s.mode == Mode::Php)
             .map(|s| s.php.clone())
             .chain([config.default_php.clone()])
             .filter(|v| installed.contains(v))
@@ -109,8 +110,13 @@ impl State {
     fn apply(&self, config: &Config) -> Result<(), String> {
         let sites = sites::resolve(config);
         let installed = php::installed(&self.paths);
-        let versions: BTreeSet<&str> =
-            sites.iter().map(|s| s.php.as_str()).chain([config.default_php.as_str()]).collect();
+        // Static and proxy sites need no php-fpm (D-035).
+        let versions: BTreeSet<&str> = sites
+            .iter()
+            .filter(|s| s.mode == Mode::Php)
+            .map(|s| s.php.as_str())
+            .chain([config.default_php.as_str()])
+            .collect();
         let mut wanted: BTreeMap<String, Spec> = versions
             .into_iter()
             .filter(|v| installed.iter().any(|i| i == v))
@@ -561,6 +567,14 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                         "php_installed": installed.contains(&s.php),
                         "isolated": s.isolated,
                         "linked": s.linked,
+                        "preset": s.preset,
+                        "preset_label": sites::find_preset(s.preset).map_or(s.preset, |p| p.label),
+                        "detected": s.detected,
+                        "mode": s.mode,
+                        "upstream": s.upstream,
+                        "spa": s.spa,
+                        "pass_host": s.pass_host,
+                        "app": config.apps.get(&s.name),
                     })
                 })
                 .collect();
@@ -635,6 +649,52 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         Request::Unisolate { site, cwd } => state.mutate(|c, sites| {
             let name = pick_site(sites, site, &cwd)?;
             c.isolated.remove(&name);
+            Ok(json!({"ok": true, "site": name}))
+        }),
+        Request::AppSet { site, cwd, preset, mode, root, upstream, spa, pass_host } => state.mutate(|c, sites| {
+            let name = pick_site(sites, site, &cwd)?;
+            let detected = sites.iter().find(|s| s.name == name).and_then(|s| s.detected);
+            if let Some(p) = &preset {
+                sites::find_preset(p).ok_or(format!(
+                    "unknown preset {p:?}; choose one of {}",
+                    sites::PRESETS.map(|p| p.key).join(", ")
+                ))?;
+            }
+            if let Some(m) = &mode {
+                Mode::parse(m).ok_or(format!("unknown mode {m:?}; choose one of {}", Mode::NAMES.join(", ")))?;
+            }
+            if let Some(r) = &root
+                && !sites::safe_root(r)
+            {
+                return Err(format!("{r:?} must be a folder inside the project, like public or dist"));
+            }
+            if let Some(u) = upstream
+                && (u == 0 || u == c.http_port || u == c.https_port)
+            {
+                return Err(format!("{u} cannot be a dev server's port (0, or Devid's own web server port)"));
+            }
+            let app = c.apps.entry(name.clone()).or_default();
+            if let Some(p) = preset {
+                // The old mode, root and upstream belonged to the previous type.
+                if mode.is_none() {
+                    (app.mode, app.root, app.upstream) = (None, None, None);
+                }
+                // Choosing what detection found is the same as following detection.
+                app.preset = (Some(p.as_str()) != detected).then_some(p);
+            }
+            app.mode = mode.or(app.mode.take());
+            app.root = root.or(app.root.take());
+            app.upstream = upstream.or(app.upstream);
+            app.spa = spa.or(app.spa);
+            app.pass_host = pass_host.or(app.pass_host);
+            if app.is_empty() {
+                c.apps.remove(&name);
+            }
+            Ok(json!({"ok": true, "site": name, "app": c.apps.get(&name)}))
+        }),
+        Request::AppReset { site, cwd } => state.mutate(|c, sites| {
+            let name = pick_site(sites, site, &cwd)?;
+            c.apps.remove(&name);
             Ok(json!({"ok": true, "site": name}))
         }),
     }
