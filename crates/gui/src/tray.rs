@@ -106,6 +106,17 @@ pub fn start(app: &tauri::App) -> tauri::Result<()> {
 
 /// Asks the daemon for its state and redraws the icon and the menu if anything changed.
 pub fn refresh(app: &AppHandle) {
+    // A self-update installed a new app while only this icon ran: become the new version now,
+    // so the menu and the next window are current (D-027 restarts the same way).
+    if crate::updated() && app.get_webview_window("main").is_none() {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if handle.get_webview_window("main").is_none() {
+                crate::restart(true);
+            }
+        });
+        return;
+    }
     let status = request(&Paths::from_env(), &Request::Status);
     let v = view(status.as_ref().map_err(String::as_str));
     let state = app.state::<TrayState>();
