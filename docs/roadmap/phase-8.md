@@ -1,8 +1,8 @@
 # Phase 8 Plan: apps, commands and sharing
 
 > Scope: app types detected per site (PHP, static, Node), a local port per site, user commands the daemon runs, and sharing a site through a quick tunnel (D-035, D-036, D-037)
-> Verified against: 2026-11-08 (A5 part 1 built on branch `feat/a5-app-ui`)
-> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 released in 0.9.0, see "A3 as built"; A4 released in 0.10.0, see "A4 as built"; A5 part 1 (desktop app, menu bar) built, see "A5 as built"; A5 part 2 (TUI) next
+> Verified against: 2026-11-08 (A5 part 2 built on branch `feat/a5-tui`)
+> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 released in 0.9.0, see "A3 as built"; A4 released in 0.10.0, see "A4 as built"; A5 (desktop app, menu bar, TUI) built, see "A5 as built"; A6 next
 
 Today Devid serves every site as PHP through php-fpm, and the docroot is `public/` when it exists (`daemon::sites`). Everything else the owner runs is still started by hand in a terminal:
 
@@ -409,7 +409,20 @@ The proxy tests used a throwaway nginx (Devid's 1.30 binary, its own prefix and 
   - Fixed on the way: the title stayed "Sites" until the next redraw, the port chip had no background, and "Proxy :5173" wrapped.
 - **Not run:** clicks inside Devid.app itself (cmux's computer use was not set up yet) and the menu-bar title with a running command. They use the daemon requests the CLI and its tests cover.
 
-**Part 2:** the TUI's site actions (type, port, commands).
+**Part 2: the TUI** (branch `feat/a5-tui`, still 0.11.0).
+
+- **Sites table:** URL, Type, Serving (the PHP version, `proxy :3000` or `static`, then ` · :8000` or ` · :8000 busy` and ` · ● 2 running`) and Folder.
+- **A site's menu** (enter on a site) adds:
+  - `y` App type…: "Use detected (…)" (`app_reset`), then the eleven presets with ✓ on the current one.
+  - `m` Serve as…: php, static or proxy.
+  - `p` Local port…: a port, `off`, or empty for the first free one from 8000; anything else is refused in the footer.
+  - `g` Commands… (start or stop the picked one), `a` Start all commands, `s` Stop all commands, and `x` Remove a command… (confirmed). These appear only when the site has commands, and `a`/`s` only when something would change.
+  - `n` Add a command…: the site's suggestions, or "Other…", which takes a name, a space and the command (`dev:pg:local npm run dev:pg:local`).
+- Each command's log is on the Logs page (`app-<site>-<name>.log`).
+
+**Verification (part 2):** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass. The new `app_type_port_and_commands` test walks every new menu entry to its daemon request (`app_reset`, `app_set` with a preset or a mode, `app_port` with none, 0 or a refused value, `command_stop`/`command_start` for one or all, `command_remove` after y, `command_add` from a suggestion and from "Other…"). The render test checks the new menu lines and the command input. A rendered Sites screen (100×20) shows `Laravel  PHP 8.5 · :8000 · ● 1 running`.
+
+**Still for the owner (A5's "done when"):** after the 0.11.0 release, run and stop both erd-builder-pro commands from Devid.app with no terminal.
 
 ## Not in this phase
 

@@ -359,6 +359,9 @@ mod tests {
         a.mode = Mode::Menu { row: 0, items: App::site_menu(&a.sites[0]), index: 0 };
         let (text, _) = render(&a);
         assert!(text.contains("erdbpro-saas") && text.contains("o  Open in browser") && text.contains("c  Copy URL"));
+        assert!(text.contains("y  App type") && text.contains("n  Add a command"), "Phase 8 site actions");
+        a.mode = Mode::Input { purpose: InputFor::Command("legacy".into()), text: "dev npm run dev".into() };
+        assert!(render(&a).0.contains("name command: dev npm run dev"));
         a.mode = Mode::Input { purpose: InputFor::Link, text: "~/code".into() };
         assert!(render(&a).0.contains("path: ~/code"));
         a.mode = Mode::Pick {

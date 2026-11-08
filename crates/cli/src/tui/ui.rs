@@ -150,16 +150,37 @@ fn draw_sites(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
     let rows = app.sites.iter().enumerate().map(|(i, site)| {
-        let php = if site["php_installed"] == true {
-            Span::raw(format!("PHP {}{}", s(&site["php"]), if site["isolated"] == true { " (isolated)" } else { "" }))
-        } else {
-            Span::styled(format!("✗ PHP {} not installed", s(&site["php"])), bad(app))
-        };
-        Row::new(vec![Cell::from(s(&site["url"]).to_string()), Cell::from(php), Cell::from(tilde(s(&site["path"])))])
-            .style(row_style(app, i))
+        let mut serving = vec![match s(&site["mode"]) {
+            "proxy" => Span::raw(format!("proxy :{}", site["upstream"])),
+            "static" => Span::raw("static"),
+            _ if site["php_installed"] == true => Span::raw(format!(
+                "PHP {}{}",
+                s(&site["php"]),
+                if site["isolated"] == true { " (isolated)" } else { "" }
+            )),
+            _ => Span::styled(format!("✗ PHP {} not installed", s(&site["php"])), bad(app)),
+        }];
+        if let Some(port) = site["port"].as_u64() {
+            match site["port_busy"].is_string() {
+                true => serving.push(Span::styled(format!(" · :{port} busy"), warn(app))),
+                false => serving.push(Span::raw(format!(" · :{port}"))),
+            }
+        }
+        let running = site["commands"].as_array().into_iter().flatten().filter(|c| c["state"] == "running").count();
+        if running > 0 {
+            serving.push(Span::styled(format!(" · ● {running} running"), ok(app)));
+        }
+        Row::new(vec![
+            Cell::from(s(&site["url"]).to_string()),
+            Cell::from(site["preset_label"].as_str().unwrap_or_default().to_string()),
+            Cell::from(Line::from(serving)),
+            Cell::from(tilde(s(&site["path"]))),
+        ])
+        .style(row_style(app, i))
     });
-    let table = Table::new(rows, [Constraint::Percentage(40), Constraint::Length(26), Constraint::Min(10)])
-        .header(Row::new(["URL", "PHP", "Folder"]).style(Style::default().add_modifier(Modifier::BOLD)));
+    let widths = [Constraint::Percentage(34), Constraint::Length(14), Constraint::Length(34), Constraint::Min(10)];
+    let table = Table::new(rows, widths)
+        .header(Row::new(["URL", "Type", "Serving", "Folder"]).style(Style::default().add_modifier(Modifier::BOLD)));
     frame.render_widget(table, area);
 }
 
@@ -368,23 +389,38 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
             popup(frame, 52, items.len() as u16 + 4, &name, lines);
         }
         Mode::Input { purpose, text } => {
-            let title = match purpose {
-                InputFor::Link => "Link a folder as <folder name>.test",
-                InputFor::Park => "Park a folder: each subfolder becomes <name>.test",
+            let (title, label, help) = match purpose {
+                InputFor::Link => {
+                    ("Link a folder as <folder name>.test".to_string(), "path", " ~ works · enter confirm · esc cancel")
+                }
+                InputFor::Park => (
+                    "Park a folder: each subfolder becomes <name>.test".to_string(),
+                    "path",
+                    " ~ works · enter confirm · esc cancel",
+                ),
+                InputFor::Port(site) => (
+                    format!("Local port for {site}"),
+                    "port",
+                    " a port from 1024, off, or empty for the first free one · enter · esc",
+                ),
+                InputFor::Command(site) => (
+                    format!("Add a command to {site}"),
+                    "name command",
+                    " e.g. dev npm run dev · enter save · esc cancel",
+                ),
             };
-            popup(
-                frame,
-                70,
-                5,
-                title,
-                vec![Line::raw(format!(" path: {text}█")), hint(" ~ works · enter confirm · esc cancel")],
-            );
+            popup(frame, 70, 5, &title, vec![Line::raw(format!(" {label}: {text}█")), hint(help)]);
         }
         Mode::Pick { purpose, options, index } => {
             let title = match purpose {
                 PickFor::Isolate(site) => format!("PHP version for {site}"),
                 PickFor::Unpark => "Unpark which folder?".to_string(),
                 PickFor::Unignore => "Serve which ignored site again?".to_string(),
+                PickFor::Preset(site) => format!("App type for {site}"),
+                PickFor::Serve(site) => format!("Serve {site} as"),
+                PickFor::Command { site, .. } => format!("Start or stop a command of {site}"),
+                PickFor::Suggest { site, .. } => format!("Add a command to {site}"),
+                PickFor::RemoveCommand { site, .. } => format!("Remove which command of {site}?"),
             };
             let mut lines: Vec<Line> = options
                 .iter()
@@ -395,7 +431,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
                 })
                 .collect();
             lines.push(hint(" ↑↓ enter · esc cancel"));
-            popup(frame, 60, options.len() as u16 + 3, &title, lines);
+            popup(frame, 72, options.len() as u16 + 3, &title, lines);
         }
         Mode::Confirm { question, .. } | Mode::ConfirmHandover { question, .. } => {
             popup(
