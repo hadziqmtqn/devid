@@ -435,7 +435,10 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "login_item": install::app_agent_program(),
                 "update_check_minutes": config.update_check_minutes,
                 "updates": *state.updates.lock().unwrap(),
-                "commands_running": state.commands.running(),
+                "commands_running": state.commands.running().len(),
+                "running_commands": state.commands.running().into_iter()
+                    .map(|(site, name)| json!({"site": site, "name": name}))
+                    .collect::<Vec<_>>(),
             }))
         }
         Request::Stop => {

@@ -186,3 +186,16 @@ p.dv-note { margin: 10px 4px 0; }
 .dv-ln.warning { color: var(--warn); }
 .dv-ln.error { color: var(--danger); }
 .dv-pre { margin: 12px 0 0; max-height: 50vh; padding: 12px 14px; border: .5px solid var(--border); border-radius: 10px; background: var(--log-bg); font: 11.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; overflow: auto; -webkit-user-select: text; user-select: text; cursor: text; }
+
+/* Phase 8 A5: the site detail */
+.dv-tools:empty { display: none; }
+.dv-input { height: 24px; min-width: 0; padding: 0 8px; border: .5px solid var(--border-strong); border-radius: 6px; background: var(--surface); font-size: 13px; }
+.dv-input.port { width: 72px; text-align: right; }
+.dv-log.is-panel { height: 220px; min-height: 0; }
+.dv-form { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 10px; margin-top: 14px; }
+.dv-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
+.dv-field .dv-input { height: 28px; font-size: 13px; color: var(--text); }
+.dv-sugg { margin-top: 14px; }
+.dv-sugg-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.dv-error { margin: 12px 0 0; color: var(--danger); }
+.dv-nowrap { white-space: nowrap; }

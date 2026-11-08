@@ -209,4 +209,5 @@ Implemented in T5:
   - Stop: SIGINT to the group, SIGTERM after 5 s, SIGKILL after 10 s, until no process of the group is left.
   - A watcher thread per running command records its exit; `~/.devid/run/app-<site>-<name>.pid` (pid and start time) lets the next daemon stop what a crashed one left.
 - **Lifetime:** the daemon stops every command when it stops (logout, `devid daemon stop`, a self-update).
-- **Requests and CLI:** `command_add`, `command_remove`, `command_start`, `command_stop`; `devid cmd [list|add|rm|start|stop]`. The `sites` reply carries each command's state and suggestions from `package.json` and Laravel.
+- **Requests and CLI:** `command_add`, `command_remove`, `command_start`, `command_stop`; `devid cmd [list|add|rm|start|stop]`. The `sites` reply carries each command's state and suggestions from `package.json` and Laravel; `status` lists `running_commands` for the menu bar.
+- **Desktop app (A5):** a site's detail view (type, serving, local port, commands with their log) and the menu bar's running commands with Stop; every action is a daemon request the CLI also sends.
