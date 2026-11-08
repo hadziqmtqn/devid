@@ -1,8 +1,8 @@
 # Phase 8 Plan: apps, commands and sharing
 
 > Scope: app types detected per site (PHP, static, Node), a local port per site, user commands the daemon runs, and sharing a site through a quick tunnel (D-035, D-036, D-037)
-> Verified against: 2026-11-08 (A2 built on branch `feat/a2-app-types`)
-> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 built, see "A2 as built"; A3 next
+> Verified against: 2026-11-08 (A3 built on branch `feat/a3-local-port`)
+> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 built, see "A3 as built"; A4 next
 
 Today Devid serves every site as PHP through php-fpm, and the docroot is `public/` when it exists (`daemon::sites`). Everything else the owner runs is still started by hand in a terminal:
 
@@ -122,7 +122,7 @@ A site can also be served on `http://127.0.0.1:<port>`, next to `https://<name>.
   - between 1024 and 65535;
   - not Devid's own `http_port`, `https_port` or `dns_port`;
   - not another site's port.
-- **Busy port:** before each render, the daemon tries to bind the port. A busy port is left out of the config, and `status` names the process holding it (for example `php` 38571 = `artisan serve`). A busy port must never stop nginx, and so take down every site.
+- **Busy port:** before each render, the daemon tries to connect to the port over 127.0.0.1 and ::1. A bind test is not enough: on macOS, binding 127.0.0.1 succeeds next to a listener on `*`, and the web server would take that program's traffic (A3). A busy port is left out of the config, and `sites` names the process holding it (for example `php` 38571 = `artisan serve`). A busy port must never stop nginx, and so take down every site.
 - **Plain HTTP only:** the tunnel's edge does TLS.
 - **Every server:** nginx gets an extra `listen 127.0.0.1:<port>` server block for the site, Caddy an `http://127.0.0.1:<port>` block, and Apache a `Listen` plus a vhost.
 
@@ -145,6 +145,7 @@ New requests, each with a CLI subcommand:
 | `sites` (extended in A2) | `devid app show [site]`: type (detected or set), how it is served, what the owner changed |
 | `AppSet { site?, cwd, preset?, mode?, root?, upstream?, spa?, pass_host? }` (A2; `port` comes in A3) | `devid app set [site] --mode proxy --upstream 3000`; A3 adds `devid app port [site] [<port>\|off]` |
 | `AppReset { site?, cwd }` | `devid app reset [site]` (back to detection) |
+| `AppPort { site?, cwd, port? }` (A3) | `devid app port [site] [PORT\|off]`: without a port, the site keeps its own or gets the first free one from 8000; sent again, it checks a busy port anew |
 | `CommandAdd { site, name, run }` / `CommandRemove { site, name }` | `devid cmd add <site> <name> -- <command>`, `devid cmd rm <site> <name>` |
 | `CommandStart { site, name? }` / `CommandStop { site, name? }` | `devid cmd start <site> [name]`, `devid cmd stop <site> [name]` (no name = all of the site's commands) |
 | `ShareStart { site }` / `ShareStop { site }` | `devid share <site>`, `devid share <site> --stop` |
@@ -312,6 +313,48 @@ The proxy tests used a throwaway nginx (Devid's 1.30 binary, its own prefix and 
   - Laravel with Vite in Safari.
 - The TUI and the desktop app show the new fields in A5. Until then, their Sites pages still show a PHP version for every site.
 - The user docs on devid-site follow with the release (D-034).
+
+### A3 as built (2026-11-08)
+
+- **Config:** `port` in `[apps.<site>]`.
+- **`AppPort` request:** a port, `Some(0)` for off, or None, which keeps the site's own port or picks the first free one from 8000 to 8999.
+- **Refused ports:**
+  - below 1024;
+  - Devid's own HTTP, HTTPS and DNS ports;
+  - another site's port;
+  - any proxy site's dev server port (on the site itself, a proxy loop).
+- **A program already listening is not an error** (`ports::in_use`, a connect test over 127.0.0.1 and ::1):
+  - `apply` leaves the port out of the web server's config, and `sites` reports `port_busy` with the holder from `lsof` ("php (pid 38571)").
+  - While a Devid web server runs, the ports in its last applied config are its own and are not tested again.
+  - Sending `devid app port` again picks the port up once it is free.
+- **Web servers:** a plain-HTTP block on `127.0.0.1:<port>` with the site's usual body, answering any Host (a tunnel sends its public name):
+  - **nginx:** `listen … default_server`.
+  - **Caddy:** `http://:<port>`.
+  - **Apache:** `Listen` and a `<VirtualHost>`.
+- **Tunnel headers:** a tunnel's own `X-Forwarded-*` headers are kept:
+  - **nginx:** a `$devid_forwarded_proto` map;
+  - **Caddy:** `trusted_proxies` for loopback;
+  - **Apache:** `setifempty` on the local port.
+- **Apache fix on the way:** `X-Forwarded-For` used `%{REMOTE_ADDR}s`, which is an SSL variable, so it was empty. It is now `expr=%{REMOTE_ADDR}`. `X-Forwarded-Host` now carries the Host the visitor sent.
+- **CLI:**
+  - `devid app port [site] [PORT|off]`; one argument that looks like a port is a port.
+  - `devid app show` prints the port, or who holds it.
+  - `devid sites` adds ", :8000" or ", :8000 busy".
+- **Version:** 0.9.0.
+
+**Verification:**
+- **Checks:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass (74 tests).
+- **New unit tests:**
+  - `ports.rs`: a listener on `*` counts as in use, and its holder is named.
+  - Local-port rendering on all three servers, and Apache's forwarded headers.
+- **New integration test** (`local_port`): the first free port, a busy port on `*` left out while other sites stay, taken once free, validation, and off.
+- **A second daemon on the owner's Mac** (own `DEVID_HOME`), on nginx, Apache and Caddy, with a request shaped like cloudflared's (public Host, `X-Forwarded-Proto: https`, `X-Forwarded-For`):
+  - PHP sees the public Host and https.
+  - A proxy site gets `Host: localhost:<up>`, the public name in `X-Forwarded-Host`, and https.
+  - A port held on `*:18612` is reported busy, and the other sites keep serving. Once free, the port is served (Caddy about 1 s after its restart).
+  - The owner's daemon, sites and dev servers were not touched.
+
+**Owner's migration** (after the release, A3 part of "Owner's migration" above): stop `php artisan serve`, then `devid app port erdbpro-saas 8000`. If `artisan serve` is still running, Devid says so and keeps serving everything else.
 
 ## Not in this phase
 

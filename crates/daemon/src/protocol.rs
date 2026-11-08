@@ -148,6 +148,13 @@ pub enum Request {
         site: Option<String>,
         cwd: String,
     },
+    /// Also serve a site on http://127.0.0.1:<port> (D-037). `port`: None keeps the site's port or
+    /// picks the first free one from 8000; Some(0) turns it off. Sent again, it checks a busy port anew.
+    AppPort {
+        site: Option<String>,
+        cwd: String,
+        port: Option<u16>,
+    },
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

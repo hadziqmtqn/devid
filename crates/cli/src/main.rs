@@ -198,6 +198,12 @@ enum AppAction {
     },
     /// Forget your changes; the detected type applies again
     Reset { site: Option<String> },
+    /// Also serve a site on http://127.0.0.1:<port>, for a tunnel or a tool. Usage: `devid app port
+    /// [site] [PORT|off]`; without a port, the site keeps its own or gets the first free one from 8000
+    Port {
+        #[arg(num_args = 0..=2, value_name = "SITE PORT")]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -497,6 +503,22 @@ fn app(action: AppAction, paths: &Paths) -> Result<(), String> {
             let v = send(Request::AppReset { site, cwd: cwd()? })?;
             Some(v["site"].as_str().unwrap_or("?").to_string())
         }
+        AppAction::Port { args } => {
+            // One argument is a port when it looks like one ("8000", "off"), else a site name.
+            let port = |a: &str| match a {
+                "off" => Ok(Some(0)),
+                _ => a.parse::<u16>().map(Some).map_err(|_| format!("{a:?} is not a port (1024–65535) or off")),
+            };
+            let (site, port) = match args.as_slice() {
+                [] => (None, None),
+                [one] if one == "off" || one.parse::<u16>().is_ok() => (None, port(one)?),
+                [one] => (Some(one.clone()), None),
+                [site, p] => (Some(site.clone()), port(p)?),
+                _ => unreachable!("clap allows at most two"),
+            };
+            let v = send(Request::AppPort { site, cwd: cwd()?, port })?;
+            Some(v["site"].as_str().unwrap_or("?").to_string())
+        }
     };
     let cwd = cwd()?;
     let reply = send(Request::Sites)?;
@@ -526,6 +548,14 @@ fn print_app(s: &serde_json::Value) {
     println!("{}", text("url"));
     println!("  type:     {typ}");
     println!("  serve as: {}", serving(s));
+    if let Some(port) = s["port"].as_u64() {
+        match s["port_busy"].as_str() {
+            Some(who) => println!(
+                "  port:     {port} is in use by {who}; Devid leaves it out until it is free, then `devid app port` takes it"
+            ),
+            None => println!("  port:     http://127.0.0.1:{port}"),
+        }
+    }
     let changed: Vec<&str> = s["app"].as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
     if !changed.is_empty() {
         println!("  changed:  {} (`devid app reset` goes back to the detected type)", changed.join(", "));
@@ -621,6 +651,11 @@ fn print_sites(list: &serde_json::Value, json: bool) {
             (_, _, false) => format!("PHP {php} (not installed!)"),
             (_, true, _) => format!("PHP {php} (isolated)"),
             (_, false, _) => format!("PHP {php}"),
+        };
+        let note = match (s["port"].as_u64(), s["port_busy"].is_string()) {
+            (Some(p), false) => format!("{note}, :{p}"),
+            (Some(p), true) => format!("{note}, :{p} busy"),
+            (None, _) => note,
         };
         let typ = s["preset_label"].as_str().unwrap_or("PHP");
         println!(

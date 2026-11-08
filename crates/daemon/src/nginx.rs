@@ -115,8 +115,12 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
         fastcgi = q(&prefix(paths).join("tmp/fastcgi")),
         proxy = q(&prefix(paths).join("tmp/proxy")),
     );
-    // WebSocket upgrades (dev servers' HMR) pass through proxy sites.
-    c.push_str("    map $http_upgrade $connection_upgrade { default upgrade; '' close; }\n");
+    // WebSocket upgrades (dev servers' HMR) pass through proxy sites. A tunnel on a local port
+    // (D-037) already says which scheme the visitor used; keep it.
+    c.push_str(
+        "    map $http_upgrade $connection_upgrade { default upgrade; '' close; }\n\
+         \x20   map $http_x_forwarded_proto $devid_forwarded_proto { default $http_x_forwarded_proto; '' $scheme; }\n",
+    );
     for site in sites {
         let (Some(crt), Some(key)) =
             (quotable(&ca::site_cert(paths, &site.host)), quotable(&ca::site_key(paths, &site.host)))
@@ -144,6 +148,20 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
              \x20   }}\n",
             host = site.host,
         );
+        // D-037: plain HTTP on 127.0.0.1:<port>, any Host (a tunnel sends its public name).
+        if let Some(local) = site.port {
+            let _ = write!(
+                c,
+                "\n    # {name} on its local port\n\
+                 \x20   server {{\n\
+                 \x20       listen 127.0.0.1:{local} default_server;\n\
+                 \x20       server_name {host};\n\
+                 {body}\
+                 \x20   }}\n",
+                name = site.name,
+                host = site.host,
+            );
+        }
     }
     c.push_str("}\n");
     c
@@ -223,7 +241,7 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
                  \x20           proxy_set_header Upgrade $http_upgrade;\n\
                  \x20           proxy_set_header Connection $connection_upgrade;\n\
                  \x20           proxy_set_header X-Forwarded-Host $host;\n\
-                 \x20           proxy_set_header X-Forwarded-Proto $scheme;\n\
+                 \x20           proxy_set_header X-Forwarded-Proto $devid_forwarded_proto;\n\
                  \x20           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
                  \x20           # Dev servers stream (SSE, HMR); keep idle WebSockets open.\n\
                  \x20           proxy_buffering off;\n\
@@ -364,5 +382,20 @@ mod tests {
         );
         assert!(!conf.contains("$devid_origin_raw"), "pass_host keeps Host and Origin");
         assert_eq!(conf.matches("map $http_upgrade").count(), 1);
+        assert!(conf.contains("proxy_set_header X-Forwarded-Proto $devid_forwarded_proto;"));
+        assert!(!conf.contains("default_server;\n        server_name"), "no local port unless set");
+    }
+
+    #[test]
+    fn render_local_port() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let saas = Site { port: Some(8000), ..site("saas", "/p/saas/public", "8.5") };
+        let conf = render(&paths, &Config::default(), &[saas, site("blog", "/p/blog/public", "8.4")]);
+        let local = &conf[conf.find("# saas on its local port").expect("a local-port block")..];
+        let local = &local[..local.find("\n    }").unwrap()];
+        assert!(local.contains("listen 127.0.0.1:8000 default_server;"), "{local}");
+        assert!(local.contains("fastcgi_pass \"unix:/h/.devid/run/php85.sock\";"), "same body as the .test block");
+        assert!(!local.contains("ssl"), "plain HTTP: the tunnel's edge does TLS");
+        assert_eq!(conf.matches("listen 127.0.0.1:8000").count(), 1);
     }
 }

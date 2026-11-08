@@ -218,3 +218,68 @@ fn app_types_and_overrides() {
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// Local ports (D-037, Phase 8 A3): pick, busy detection without breaking nginx, validation, off.
+#[test]
+fn local_port() {
+    let root = temp_root("devid-port-it");
+    let home = root.join("home");
+    let projects = root.join("projects");
+    fs::create_dir_all(projects.join("blog/public")).unwrap();
+    fs::create_dir_all(projects.join("shop/public")).unwrap();
+    fs::create_dir_all(projects.join("web")).unwrap();
+    fs::write(projects.join("web/package.json"), r#"{"devDependencies": {"vite": "^6"}}"#).unwrap();
+    let (b85, nginx) = (fake_build(&root, "8.5"), fake_nginx(&root, &home));
+    let s = |p: &Path| p.to_str().unwrap().to_string();
+    let daemon = start_daemon(&home);
+    assert!(devid(&home, &["php", "install", "8.5", "--from", &s(&b85)]).status.success());
+    assert!(devid(&home, &["server", "install", "nginx", "--from", &s(&nginx)]).status.success());
+    assert!(devid(&home, &["park", &s(&projects)]).status.success());
+    let conf = || fs::read_to_string(home.join("nginx/conf/nginx.conf")).unwrap();
+    let blog = || site(&json(&home, &["sites", "--json"]), "blog").clone();
+
+    // No port given: the first free one from 8000.
+    let out = devid(&home, &["app", "port", "blog"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let picked = blog()["port"].as_u64().expect("a port") as u16;
+    assert!(picked >= 8000, "{picked}");
+    assert!(conf().contains(&format!("listen 127.0.0.1:{picked} default_server;")));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("port:     http://127.0.0.1:{picked}")));
+
+    // A port another program listens on (on *, which a bind test would miss) is left out of
+    // nginx.conf and reported; sent again once it is free, the port is served.
+    let other = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+    let busy = other.local_addr().unwrap().port();
+    let out = devid(&home, &["app", "port", "shop", &busy.to_string()]);
+    assert!(out.status.success(), "a busy port is not an error: {}", stderr(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("port:     {busy} is in use by")));
+    assert!(site(&json(&home, &["sites", "--json"]), "shop")["port_busy"].is_string());
+    assert!(!conf().contains(&format!("listen 127.0.0.1:{busy}")));
+    assert!(conf().contains("server_name blog.test;"), "every other site is still served");
+    drop(other);
+    assert!(devid(&home, &["app", "port", "shop"]).status.success());
+    assert!(site(&json(&home, &["sites", "--json"]), "shop")["port_busy"].is_null());
+    assert!(conf().contains(&format!("listen 127.0.0.1:{busy} default_server;")));
+
+    // The port nginx itself holds stays its own on the next change (the fake nginx listens nowhere,
+    // so this also checks that an unchanged port is not re-tested into "busy").
+    assert!(devid(&home, &["app", "set", "blog", "--root", "public"]).status.success());
+    assert!(blog()["port_busy"].is_null());
+
+    // Validation.
+    let p = picked.to_string();
+    assert!(stderr(&devid(&home, &["app", "port", "shop", &p])).contains("blog.test already uses port"));
+    assert!(stderr(&devid(&home, &["app", "port", "shop", "80"])).contains("needs root"));
+    let own = TEST_HTTP_PORT.to_string();
+    assert!(stderr(&devid(&home, &["app", "port", "shop", &own])).contains("Devid's own ports"));
+    assert!(stderr(&devid(&home, &["app", "port", "blog", "5173"])).contains("dev server port of web.test"));
+    assert!(stderr(&devid(&home, &["app", "port", "web", "5173"])).contains("this site's own dev server port"));
+
+    // Off.
+    assert!(devid(&home, &["app", "port", "blog", "off"]).status.success());
+    assert!(blog()["port"].is_null());
+    assert!(!conf().contains(&format!("listen 127.0.0.1:{picked}")));
+
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}

@@ -65,6 +65,10 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
          {{\n\
          \tadmin off\n\
          \tauto_https off\n\
+         \t# A tunnel on a local port (D-037) runs on this Mac; keep its X-Forwarded-* headers.\n\
+         \tservers {{\n\
+         \t\ttrusted_proxies static 127.0.0.1/8 ::1\n\
+         \t}}\n\
          \tstorage file_system {data}\n\
          \tlog {{\n\
          \t\toutput file {log}\n\
@@ -101,6 +105,10 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
              }}\n",
             host = site.host,
         );
+        // D-037: plain HTTP on 127.0.0.1:<port>, any Host (a tunnel sends its public name).
+        if let Some(local) = site.port {
+            let _ = write!(c, "\n# {} on its local port\nhttp://:{local} {{\n\tbind 127.0.0.1\n{body}}}\n", site.name);
+        }
     }
     c
 }
@@ -230,5 +238,17 @@ mod tests {
         assert!(conf.contains("reverse_proxy localhost:5173 {\n\t\theader_up Host localhost:5173"));
         assert!(conf.contains("\treverse_proxy localhost:3000\n"), "pass_host: no rewrites");
         assert_eq!(conf.matches("handle_errors 502").count(), 4, "https and http block of both proxy sites");
+    }
+
+    #[test]
+    fn render_local_port() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let saas = Site { port: Some(8000), ..site("saas", "/p/saas/public", "8.5") };
+        let conf = render(&paths, &Config::default(), &[saas]);
+        assert!(conf.contains("trusted_proxies static 127.0.0.1/8 ::1"));
+        assert!(
+            conf.contains("# saas on its local port\nhttp://:8000 {\n\tbind 127.0.0.1\n\troot * \"/p/saas/public\"")
+        );
+        assert_eq!(conf.matches("php_fastcgi").count(), 3, "https, http and the local port");
     }
 }

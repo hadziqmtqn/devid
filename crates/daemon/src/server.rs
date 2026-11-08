@@ -5,7 +5,7 @@ use crate::{
     config::Config,
     dns, helper, install, logs, nginx,
     paths::Paths,
-    php, phpext,
+    php, phpext, ports,
     protocol::Request,
     releases,
     sites::{self, Mode, Site},
@@ -46,6 +46,11 @@ struct State {
     update_lock: Mutex<()>,
     /// The running catalog install, for `PhpExtProgress`; one at a time.
     ext_job: Mutex<Option<ExtJob>>,
+    /// Local ports (D-037) in the web server's last applied config: while a Devid web server runs,
+    /// those are its own, not taken by another program.
+    own_ports: Mutex<BTreeSet<u16>>,
+    /// Sites whose local port another program holds: site name -> that program ("php (pid 38571)").
+    busy_ports: Mutex<BTreeMap<String, String>>,
 }
 
 /// Progress of a `PhpExtInstall`. Downloads count for 0–90 % by bytes (the archive's size on disk
@@ -108,7 +113,23 @@ impl State {
     /// version a site uses (if installed), and nginx with a freshly rendered config.
     /// Fails without changing anything if nginx rejects the new config.
     fn apply(&self, config: &Config) -> Result<(), String> {
-        let sites = sites::resolve(config);
+        let mut sites = sites::resolve(config);
+        // D-037: a local port another program listens on is left out of the web server's config,
+        // so it can never stop the web server and every other site with it. Ports the running server
+        // already holds are its own.
+        let states = self.supervisor.state();
+        let serving = webserver::SERVERS.iter().any(|s| matches!(states.get(*s), Some(ProcState::Running(_))));
+        let own = if serving { self.own_ports.lock().unwrap().clone() } else { BTreeSet::new() };
+        let mut busy = BTreeMap::new();
+        for site in &mut sites {
+            if let Some(p) = site.port
+                && !own.contains(&p)
+                && ports::in_use(p)
+            {
+                busy.insert(site.name.clone(), ports::holder(p).unwrap_or_else(|| "another program".into()));
+                site.port = None;
+            }
+        }
         let installed = php::installed(&self.paths);
         // Static and proxy sites need no php-fpm (D-035).
         let versions: BTreeSet<&str> = sites
@@ -161,6 +182,8 @@ impl State {
             Some(webserver::Reload::Restart) => self.supervisor.restart(server),
             None => {}
         }
+        *self.own_ports.lock().unwrap() = sites.iter().filter_map(|s| s.port).collect();
+        *self.busy_ports.lock().unwrap() = busy;
         Ok(())
     }
 
@@ -249,6 +272,8 @@ pub fn run(paths: Paths) -> io::Result<()> {
         ext_job: Mutex::new(None),
         updates: Mutex::new(Value::Null),
         update_lock: Mutex::new(()),
+        own_ports: Mutex::new(BTreeSet::new()),
+        busy_ports: Mutex::new(BTreeMap::new()),
     });
     spawn_signal_thread(Arc::clone(&state));
     spawn_update_checks(Arc::clone(&state));
@@ -338,6 +363,27 @@ fn existing_dir(path: &str) -> Result<PathBuf, String> {
 }
 
 /// The site named `name`, or else the one containing `cwd`.
+/// Whether `site` may use local port `port` (D-037). A program already listening there is not an
+/// error: `apply` leaves the port out until it is free.
+fn check_port(config: &Config, sites: &[Site], site: &str, port: u16) -> Result<(), String> {
+    if port < 1024 {
+        return Err(format!("{port} needs root; use a port from 1024 up"));
+    }
+    if [config.http_port, config.https_port, config.dns_port].contains(&port) {
+        return Err(format!("{port} is one of Devid's own ports"));
+    }
+    if let Some(other) = sites.iter().find(|s| s.name != site && s.port == Some(port)) {
+        return Err(format!("{}.{} already uses port {port}", other.name, config.tld));
+    }
+    if let Some(dev) = sites.iter().find(|s| s.mode == Mode::Proxy && s.upstream == port) {
+        return Err(match dev.name == site {
+            true => format!("{port} is this site's own dev server port; pick another"),
+            false => format!("{port} is the dev server port of {}.{}", dev.name, config.tld),
+        });
+    }
+    Ok(())
+}
+
 fn pick_site(sites: &[Site], name: Option<String>, cwd: &str) -> Result<String, String> {
     match name {
         Some(name) => {
@@ -550,6 +596,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         Request::Sites => {
             let config = state.config.lock().unwrap().clone();
             let installed = php::installed(&state.paths);
+            let busy = state.busy_ports.lock().unwrap().clone();
             let list: Vec<Value> = sites::resolve(&config)
                 .into_iter()
                 .map(|s| {
@@ -575,6 +622,8 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                         "spa": s.spa,
                         "pass_host": s.pass_host,
                         "app": config.apps.get(&s.name),
+                        "port": s.port,
+                        "port_busy": busy.get(&s.name),
                     })
                 })
                 .collect();
@@ -696,6 +745,30 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             let name = pick_site(sites, site, &cwd)?;
             c.apps.remove(&name);
             Ok(json!({"ok": true, "site": name}))
+        }),
+        Request::AppPort { site, cwd, port } => state.mutate(|c, sites| {
+            let name = pick_site(sites, site, &cwd)?;
+            let current = sites.iter().find(|s| s.name == name).and_then(|s| s.port);
+            let port = match port {
+                Some(0) => None,
+                Some(p) => {
+                    check_port(c, sites, &name, p)?;
+                    Some(p)
+                }
+                None => match current {
+                    Some(p) => Some(p),
+                    None => Some(
+                        ports::first_free(|p| check_port(c, sites, &name, p).is_err())
+                            .ok_or("no free port from 8000 to 8999; pass one")?,
+                    ),
+                },
+            };
+            let app = c.apps.entry(name.clone()).or_default();
+            app.port = port;
+            if app.is_empty() {
+                c.apps.remove(&name);
+            }
+            Ok(json!({"ok": true, "site": name, "port": port}))
         }),
     }
 }

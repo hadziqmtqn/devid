@@ -137,7 +137,8 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
             let _ = writeln!(c, "\n# skipped {}: path contains characters Apache cannot quote safely", site.name);
             continue;
         };
-        let (Some(http_body), Some(https_body)) = (site_body(paths, site, "http"), site_body(paths, site, "https"))
+        let (Some(http_body), Some(https_body), Some(local_body)) =
+            (site_body(paths, site, "http"), site_body(paths, site, "https"), site_body(paths, site, "local"))
         else {
             let _ = writeln!(c, "\n# skipped {}: path contains characters Apache cannot quote safely", site.name);
             continue;
@@ -151,11 +152,22 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
              \x20   SSLCertificateKeyFile {key}\n\
              </VirtualHost>\n"
         );
+        // D-037: plain HTTP on 127.0.0.1:<port>; its only vhost answers any Host (a tunnel's name).
+        if let Some(local) = site.port {
+            let _ = write!(
+                c,
+                "\n# {name} on its local port\n\
+                 Listen 127.0.0.1:{local}\n\
+                 <VirtualHost 127.0.0.1:{local}>\n{local_body}</VirtualHost>\n",
+                name = site.name,
+            );
+        }
     }
     c
 }
 
-/// A site's vhost lines for one scheme, by mode; None if a path cannot be quoted.
+/// A site's vhost lines by mode for "http", "https" or "local" (the D-037 port, plain HTTP behind a
+/// tunnel); None if a path cannot be quoted.
 fn site_body(paths: &Paths, site: &Site, scheme: &str) -> Option<String> {
     let host = &site.host;
     // `dir_rules` go inside <Directory>, where paths are relative to the web root: hidden files and
@@ -208,15 +220,21 @@ fn site_body(paths: &Paths, site: &Site, scheme: &str) -> Option<String> {
                     own = host.replace('.', "[.]"),
                 ),
             };
+            // On the local port a tunnel already sent X-Forwarded-*: keep them (`setifempty`).
+            // X-Forwarded-Host comes first, from the Host the visitor used, before Host is rewritten.
+            let (set, proto) = match scheme {
+                "local" => ("setifempty", "http"),
+                other => ("set", other),
+            };
             // retry=0: a dev server that was down is tried again on the next request, not after 60 s.
             format!(
                 "\x20   ServerName {host}\n\
                  \x20   ProxyPreserveHost On\n\
                  \x20   ProxyAddHeaders Off\n\
+                 \x20   RequestHeader {set} X-Forwarded-Host \"expr=%{{HTTP_HOST}}\"\n\
+                 \x20   RequestHeader {set} X-Forwarded-Proto \"{proto}\"\n\
+                 \x20   RequestHeader {set} X-Forwarded-For \"expr=%{{REMOTE_ADDR}}\"\n\
                  {rewrite}\
-                 \x20   RequestHeader set X-Forwarded-Host \"{host}\"\n\
-                 \x20   RequestHeader set X-Forwarded-Proto \"{scheme}\"\n\
-                 \x20   RequestHeader set X-Forwarded-For \"%{{REMOTE_ADDR}}s\"\n\
                  \x20   ProxyPass / http://localhost:{up}/ upgrade=websocket retry=0\n\
                  \x20   ProxyPassReverse / http://localhost:{up}/\n\
                  \x20   ErrorDocument 502 \"Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid).\"\n\
@@ -303,5 +321,28 @@ mod tests {
             conf.contains("RequestHeader set X-Forwarded-Proto \"https\"")
                 && conf.contains("X-Forwarded-Proto \"http\"")
         );
+        assert!(conf.contains("RequestHeader set X-Forwarded-For \"expr=%{REMOTE_ADDR}\""));
+        let xfh = conf.find("X-Forwarded-Host \"expr=%{HTTP_HOST}\"").unwrap();
+        assert!(xfh < conf.find("RequestHeader set Host").unwrap(), "the visitor's Host, before the rewrite");
+    }
+
+    #[test]
+    fn render_local_port() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let base = Site { name: "saas".into(), host: "saas.test".into(), path: "/p/saas".into(), ..Site::default() };
+        let saas = Site { port: Some(8000), docroot: "/p/saas/public".into(), php: "8.5".into(), ..base.clone() };
+        let dev = Site {
+            name: "erd".into(),
+            host: "erd.test".into(),
+            mode: Mode::Proxy,
+            upstream: 3000,
+            port: Some(8001),
+            ..base
+        };
+        let conf = render(&paths, &Config::default(), &[saas, dev]);
+        assert!(conf.contains("# saas on its local port\nListen 127.0.0.1:8000\n<VirtualHost 127.0.0.1:8000>\n"));
+        let local = &conf[conf.find("<VirtualHost 127.0.0.1:8001>").unwrap()..];
+        assert!(local.contains("RequestHeader setifempty X-Forwarded-Proto \"http\""), "a tunnel's scheme is kept");
+        assert!(!local.contains("SSLEngine"));
     }
 }
