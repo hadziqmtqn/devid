@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-08 (Phase 8 A2: app types)
+> Verified against: 2026-11-08 (Phase 8 A3: local ports)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -186,3 +186,16 @@ Implemented in T5:
 - **php-fpm:** only for the PHP versions of PHP-mode sites, plus the default.
 - **Requests:** `app_set` and `app_reset`. The `sites` reply adds `preset`, `preset_label`, `detected`, `mode`, `upstream`, `spa`, `pass_host` and `app` (the overrides).
 - **CLI:** `devid app show|set|reset [site]`, and a type column in `devid sites`.
+
+## Local ports (Phase 8 A3, D-037)
+
+- **What it does:** a site may also be served on `http://127.0.0.1:<port>`, for a tunnel or a tool. The web server gets a plain-HTTP block on that port with the site's usual body, answering any Host.
+- **`daemon::ports`:**
+  - `in_use` is a connect test over 127.0.0.1 and ::1. A bind test misses a listener on `*`.
+  - `holder` asks `lsof` for the program on a port.
+  - `first_free` picks a port from 8000.
+- **`apply`:**
+  - Leaves out a port another program listens on, and records it for the `sites` reply (`port_busy`), so a busy port never stops the web server.
+  - Ports in the running server's last config count as its own.
+- **Forwarded headers:** a tunnel's `X-Forwarded-*` headers are kept on proxy sites (nginx map, Caddy `trusted_proxies` for loopback, Apache `setifempty`).
+- **Request and CLI:** `app_port`; `devid app port [site] [PORT|off]`.

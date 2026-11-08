@@ -60,6 +60,9 @@ pub struct App {
     /// Proxy sites: send the .test Host and Origin unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pass_host: Option<bool>,
+    /// Also serve the site on http://127.0.0.1:<port>, for a tunnel or a tool (D-037).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
 }
 
 impl App {

@@ -12,6 +12,7 @@ pub mod nginx;
 pub mod paths;
 pub mod php;
 pub mod phpext;
+pub mod ports;
 pub mod protocol;
 pub mod releases;
 pub mod server;

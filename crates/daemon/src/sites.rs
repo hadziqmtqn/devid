@@ -98,6 +98,9 @@ pub struct Site {
     pub spa: bool,
     /// Proxy: send the .test Host and Origin unchanged.
     pub pass_host: bool,
+    /// Also served on http://127.0.0.1:<port> (D-037). The daemon drops it from the web server's
+    /// config while another program listens there.
+    pub port: Option<u16>,
 }
 
 /// Keys of the given top-level objects in a JSON file (dependencies, scripts…); empty if unreadable.
@@ -251,6 +254,7 @@ pub fn resolve(config: &Config) -> Vec<Site> {
                 upstream,
                 spa: app.and_then(|a| a.spa).unwrap_or(preset.key == "vite"),
                 pass_host: app.and_then(|a| a.pass_host).unwrap_or(false),
+                port: app.and_then(|a| a.port),
                 name,
                 path,
             }
