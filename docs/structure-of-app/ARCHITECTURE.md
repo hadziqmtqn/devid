@@ -83,7 +83,7 @@ Implemented in M7:
 - **Version probes** for `server install` time out after 5 s, so a wrong binary cannot hang the daemon.
 
 Implemented in Phase 5 R3:
-- **`daemon::releases`** reads `manifest.json` from `https://github.com/hadziqmtqn/devid-binaries/releases/latest/download/` (D-016). It refuses any artifact URL outside that repository's release downloads, downloads with `curl --proto =https`, verifies SHA-256 (with `ring`, already in the tree) before unpacking, and removes the archive and the unpacked folder after installing. `DEVID_MANIFEST_URL` overrides the location for tests (`file://`).
+- **`daemon::releases`** reads `manifest.json` from `https://github.com/hadziqmtqn/devid-binaries/releases/download/runtime-latest/` (D-016; `releases/latest/download/` before D-038). It refuses any artifact URL outside that repository's release downloads, downloads with `curl --proto =https`, verifies SHA-256 (with `ring`, already in the tree) before unpacking, and removes the archive and the unpacked folder after installing. `DEVID_MANIFEST_URL` overrides the location for tests (`file://`).
 - `devid php install <ver>` and `devid server install <nginx|caddy>` download from the manifest when `--from` is omitted. `--from` still installs a local build.
 - `devid update [--check]` compares the installed PHP versions (`PHP_VERSION`), nginx and Caddy with the manifest and installs the newer ones through the same path, restarting the affected service.
 
@@ -162,7 +162,7 @@ Implemented in T4:
 Implemented in T5:
 - **Settings page:** domain, ports, storage, CA and version, plus:
   - `d` runs the same checks as `devid doctor` (`setup::doctor_checks`) and lists them with a fix for each problem;
-  - `u` checks for a newer devid (`devid-version.txt` in the `devid-latest` release) and newer PHP/nginx/Caddy (`update --check`); `U` installs the binaries (confirmed).
+  - `u` checks for a newer devid (`devid-version.txt` in GitHub's Latest release, D-038) and newer PHP/nginx/Caddy (`update --check`); `U` installs the binaries (confirmed).
 - **Handover:** `D` (`self-update`, confirmed), `s` (`setup`) and `X` (`uninstall`, confirmed) need the plain terminal for sudo prompts and the daemon restart. `tui::run` returns those arguments, and `main` runs `devid <args>` after the terminal is restored.
 
 ## App types (Phase 8 A2, D-035)

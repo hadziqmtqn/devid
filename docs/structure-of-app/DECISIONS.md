@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-038 | 2026-11-08 | accepted (amends D-016's release layout) | The newest stable devid is GitHub's "Latest" release in `devid-binaries`; the PHP/nginx builds move to a rolling `runtime-latest` release; tags with a suffix are pre-releases |
 
 ## D-001: native app, no Homebrew, no VM
 
@@ -179,6 +180,7 @@ See ARCHITECTURE, "PHP runtime".
   - Anyone can see the build scripts and download the binaries, which are open-source software plus the compiled `devid`; the Devid source stays private.
   - `install.sh`'s `REPO` changes to `devid-binaries` in R4.
 - **Plan:** `docs/roadmap/phase-5.md`.
+- **Amended by D-038 (2026-11-08):** devid releases are now GitHub's "Latest" in `devid-binaries`, and the PHP/nginx builds are read from `runtime-latest`.
 
 ## D-017: TUI colors (accepted 2026-11-02)
 
@@ -577,3 +579,19 @@ See ARCHITECTURE, "PHP runtime".
 - **Amends:** D-011. Share/tunnel moves from deferred to Phase 8. The mail catcher stays deferred: the owner already runs Mailpit.
 - **Plan:** `docs/roadmap/phase-8.md`.
 - **Accepted:** by the owner on 2026-11-08, after the Phase 8 prototype on the Devid Redesign canvas.
+
+## D-038: devid is GitHub's "Latest" release; PHP/nginx builds move to `runtime-latest` (accepted 2026-11-08)
+
+- **Context:**
+  - Devid is shared in public from v0.10.1. In `devid-binaries`, GitHub's "Latest" label sat on the PHP/nginx build release (`2026.11.05-7`), because the daemon and `check-upstream.yml` read `releases/latest/download/manifest.json`. The devid releases were published with `--latest=false`, and updates were found through the rolling `devid-latest` release.
+  - A visitor saw a PHP build as the newest release, and there was no way to publish a test build: every `v*` tag replaced `devid-latest` at once.
+- **Decision:**
+  - **devid:** a stable `devid-v<version>` is created with `--latest`. `devid self-update`, the daemon's automatic check, the TUI and the app read `releases/latest/download/devid-version.txt` (through the API's `/releases/latest` when the download link fails).
+  - **Pre-releases:** a tag with a suffix (`v0.11.0-rc.1`, with the same version in `Cargo.toml`) is published with `--prerelease`. It never becomes Latest and never touches `devid-latest`; it is installed by hand. A release counts as newer than its own pre-release.
+  - **PHP, nginx and Caddy:** their release is created with `--latest=false` and copied to a rolling `runtime-latest` release, whose `manifest.json` the daemon and `check-upstream.yml` read. Artifact URLs still point at the dated release, inside the trusted prefix.
+  - **Compatibility:**
+    - `devid-latest` stays and is updated by every stable release: `install.sh`'s public link uses it, and devid 0.10.0 and older look for updates there.
+    - Every stable devid release also carries `runtime-latest`'s `manifest.json`, and a new PHP/nginx release uploads its manifest to the current Latest devid release. devid 0.10.0 and older read the manifest from `releases/latest`.
+- **Order of the switch:** `runtime-latest` exists before the first devid release with `--latest` (0.10.1), because that release copies its manifest.
+- **Amends:** D-016's release layout.
+- **Accepted:** by the owner on 2026-11-08.

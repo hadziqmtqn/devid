@@ -20,3 +20,4 @@
 | 2026-11-08 | [Phase 8 A3: a local port per site, for tunnels (v0.9.0)](2026-11-08-a3-local-port.md) |
 | 2026-11-08 | [Fix: self-update falls back to the GitHub API (v0.9.1)](2026-11-08-self-update-api-fallback.md) |
 | 2026-11-08 | [Phase 8 A4: user commands run by the daemon (v0.10.0)](2026-11-08-a4-commands.md) |
+| 2026-11-08 | [devid is GitHub's Latest release; PHP/nginx builds from `runtime-latest` (D-038, v0.10.1)](2026-11-08-github-latest.md) |

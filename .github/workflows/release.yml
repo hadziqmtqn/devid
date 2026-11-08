@@ -1,10 +1,14 @@
 name: Release devid
 
-# Build the devid binary and publish it to the public devid-binaries repo (D-016, Phase 5 R4):
-#   devid-v<version>  one immutable release per version
-#   devid-latest      a rolling release that install.sh and `devid self-update` read
-# Both are created with --latest=false so devid-binaries' "Latest" stays the PHP/nginx release
-# that manifest.json is read from.
+# Build the devid binary and publish it to the public devid-binaries repo (D-016, D-038):
+#   devid-v<version>  one release per version. A stable one is GitHub's "Latest", which
+#                     `devid self-update` reads; a tag with a suffix (v0.11.0-rc.1) is a pre-release,
+#                     installed by hand only.
+#   devid-latest      a rolling copy of the newest stable devid, for install.sh's public link and
+#                     the update check of devid 0.10.0 and older.
+# The PHP, nginx and Caddy builds are the rolling `runtime-latest` release (devid-binaries'
+# release.yml). A stable devid release also carries its manifest.json, which devid 0.10.0 and older
+# read from releases/latest.
 on:
   push:
     tags: ["v*"]
@@ -64,11 +68,23 @@ jobs:
           ASSETS="dist/devid-darwin-x86_64 dist/install.sh dist/devid-version.txt dist/Devid-darwin-x86_64.zip dist/checksums.txt"
           # D-010's notice, on the page the landing page links to (D-032).
           NOTES="devid $VERSION and the Devid desktop app for macOS on Intel (x86_64). A personal project, provided as is, without warranty; tested on Intel macOS 14 only. Ad-hoc signed, not notarized: install with the command below (no Gatekeeper prompt), adding '-s -- --gui' after 'sh' for the desktop app; a browser download needs 'xattr -dr com.apple.quarantine Devid.app'. 'devid setup' asks for sudo once to add /etc/resolver/test, trust Devid's CA and forward ports 80/443; 'devid uninstall' undoes it. Install: curl -fsSL https://github.com/$BINARIES_REPO/releases/download/devid-latest/install.sh | sh"
+          case "$VERSION" in
+            *-*)
+              # A pre-release: never Latest, and devid-latest stays on the last stable devid.
+              FLAGS="--prerelease --latest=false"
+              RELEASE_ASSETS="$ASSETS" ;;
+            *)
+              FLAGS="--latest"
+              gh release download runtime-latest -R "$BINARIES_REPO" -p manifest.json -D dist --clobber
+              RELEASE_ASSETS="$ASSETS dist/manifest.json" ;;
+          esac
           if gh release view "devid-v$VERSION" -R "$BINARIES_REPO" >/dev/null 2>&1; then
-            gh release upload "devid-v$VERSION" $ASSETS -R "$BINARIES_REPO" --clobber
+            gh release upload "devid-v$VERSION" $RELEASE_ASSETS -R "$BINARIES_REPO" --clobber
+            gh release edit "devid-v$VERSION" -R "$BINARIES_REPO" $FLAGS
           else
-            gh release create "devid-v$VERSION" $ASSETS -R "$BINARIES_REPO" --latest=false --title "devid $VERSION" --notes "$NOTES"
+            gh release create "devid-v$VERSION" $RELEASE_ASSETS -R "$BINARIES_REPO" $FLAGS --title "devid $VERSION" --notes "$NOTES"
           fi
+          case "$VERSION" in *-*) exit 0 ;; esac
           if ! gh release view devid-latest -R "$BINARIES_REPO" >/dev/null 2>&1; then
             gh release create devid-latest -R "$BINARIES_REPO" --latest=false --title "devid (latest)" --notes "Always the newest devid. $NOTES"
           fi

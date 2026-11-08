@@ -9,8 +9,15 @@ use std::{
     process::Command,
 };
 
-pub const MANIFEST_URL: &str = "https://github.com/hadziqmtqn/devid-binaries/releases/latest/download/manifest.json";
+/// D-038: the PHP, nginx and Caddy builds are the rolling `runtime-latest` release; GitHub's
+/// "Latest" is the newest devid.
+pub const MANIFEST_URL: &str =
+    "https://github.com/hadziqmtqn/devid-binaries/releases/download/runtime-latest/manifest.json";
 const TRUSTED_PREFIX: &str = "https://github.com/hadziqmtqn/devid-binaries/releases/download/";
+const REPO: &str = "https://github.com/hadziqmtqn/devid-binaries";
+const RELEASE_BASE: &str = "https://github.com/hadziqmtqn/devid-binaries/releases/download";
+/// As a release name: GitHub's "Latest" release, the newest devid that is not a pre-release (D-038).
+pub const LATEST: &str = "latest";
 
 fn err(msg: impl Into<String>) -> io::Error {
     io::Error::other(msg.into())
@@ -42,10 +49,16 @@ pub struct Artifact {
 /// Where `devid self-update` and install.sh find the devid binary; `DEVID_RELEASE_BASE` overrides it
 /// for tests (`file://`).
 pub fn release_base() -> String {
-    std::env::var("DEVID_RELEASE_BASE")
-        .ok()
-        .filter(|u| !u.is_empty())
-        .unwrap_or_else(|| "https://github.com/hadziqmtqn/devid-binaries/releases/download".into())
+    std::env::var("DEVID_RELEASE_BASE").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| RELEASE_BASE.into())
+}
+
+/// A devid release file's URL under `base`. GitHub serves its Latest release at its own path; a
+/// test release (`DEVID_RELEASE_BASE`) keeps it in a `latest` folder.
+fn devid_url(base: &str, release: &str, name: &str) -> String {
+    match release {
+        LATEST if base == RELEASE_BASE => format!("{REPO}/releases/latest/download/{name}"),
+        _ => format!("{base}/{release}/{name}"),
+    }
 }
 
 /// Download `url` to `dest` with curl, HTTPS only (file:// only when a test points Devid at a local
@@ -154,22 +167,21 @@ pub fn download(paths: &crate::paths::Paths, artifact: &Artifact) -> io::Result<
     Ok(unpacked)
 }
 
-/// "8.4.27" > "8.4.9", numerically; anything unparsable counts as older.
-/// Download one file from the `devid-latest` release into ~/.devid/downloads.
+/// Download one file from GitHub's Latest release (the newest devid, D-038) into ~/.devid/downloads.
 pub fn fetch_latest(paths: &crate::paths::Paths, name: &str) -> io::Result<std::path::PathBuf> {
-    fetch_devid(paths, "devid-latest", name)
+    fetch_devid(paths, LATEST, name)
 }
 
-/// Download one file from a devid release (`devid-latest` or `devid-v<version>`). When github.com's
+/// Download one file from a devid release (`LATEST` or `devid-v<version>`). When github.com's
 /// download link fails for an official release, the same file comes through the GitHub API (on
 /// 2026-11-08 the download links answered 504 from the Southeast Asia edge while the API worked).
 pub fn fetch_devid(paths: &crate::paths::Paths, release: &str, name: &str) -> io::Result<std::path::PathBuf> {
     let dir = paths.home.join("downloads");
     fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("self-update-{name}"));
-    let url = format!("{}/{release}/{name}", release_base());
-    if let Err(e) = fetch(&url, &dest) {
-        if !url.starts_with(TRUSTED_PREFIX) {
+    let base = release_base();
+    if let Err(e) = fetch(&devid_url(&base, release, name), &dest) {
+        if base != RELEASE_BASE {
             return Err(e);
         }
         fetch_from_api(release, name, &dest).map_err(|api| err(format!("{e}; through the GitHub API: {api}")))?;
@@ -185,7 +197,11 @@ fn fetch_from_api(release: &str, name: &str, dest: &Path) -> io::Result<()> {
     let get = |url: &str, accept: &str| {
         curl(url, dest, &["--proto", "=https", "--proto-redir", "=https", "-H", &format!("Accept: {accept}")])
     };
-    get(&format!("{API_RELEASES}/tags/{release}"), "application/vnd.github+json")?;
+    let info_url = match release {
+        LATEST => format!("{API_RELEASES}/latest"),
+        tag => format!("{API_RELEASES}/tags/{tag}"),
+    };
+    get(&info_url, "application/vnd.github+json")?;
     let info: Value =
         serde_json::from_str(&fs::read_to_string(dest)?).map_err(|e| err(format!("bad release info: {e}")))?;
     let url = asset_api_url(&info, name).ok_or_else(|| err(format!("{name} is not in release {release}")))?;
@@ -206,8 +222,13 @@ pub fn latest_devid(paths: &crate::paths::Paths) -> io::Result<String> {
     Ok(version)
 }
 
+/// "8.4.27" > "8.4.9", numerically; a release is newer than its own pre-release ("0.11.0" >
+/// "0.11.0-rc.1"); anything unparsable counts as older.
 pub fn newer(candidate: &str, installed: &str) -> bool {
-    let parse = |v: &str| v.split('.').map(|p| p.parse::<u64>().ok()).collect::<Option<Vec<u64>>>();
+    let parse = |v: &str| {
+        let (numbers, stable) = v.split_once('-').map_or((v, true), |(n, _)| (n, false));
+        numbers.split('.').map(|p| p.parse::<u64>().ok()).collect::<Option<Vec<u64>>>().map(|n| (n, stable))
+    };
     match (parse(candidate), parse(installed)) {
         (Some(c), Some(i)) => c > i,
         (Some(_), None) => true,
@@ -226,6 +247,22 @@ mod tests {
         assert!(!newer("8.4.27", "8.4.27"));
         assert!(newer("8.4.27", "garbage"));
         assert!(!newer("garbage", "8.4.27"));
+        assert!(newer("0.11.0", "0.11.0-rc.1") && !newer("0.11.0-rc.1", "0.11.0"));
+        assert!(!newer("0.10.1", "0.11.0-rc.1"), "a pre-release is not offered an older release");
+    }
+
+    #[test]
+    fn latest_is_githubs_latest_release() {
+        assert_eq!(
+            devid_url(RELEASE_BASE, LATEST, "devid-version.txt"),
+            "https://github.com/hadziqmtqn/devid-binaries/releases/latest/download/devid-version.txt"
+        );
+        assert_eq!(
+            devid_url(RELEASE_BASE, "devid-v0.10.1", "checksums.txt"),
+            format!("{TRUSTED_PREFIX}devid-v0.10.1/checksums.txt")
+        );
+        assert_eq!(devid_url("file:///tmp/rel", LATEST, "x"), "file:///tmp/rel/latest/x");
+        assert!(MANIFEST_URL.starts_with(TRUSTED_PREFIX));
     }
 
     #[test]
