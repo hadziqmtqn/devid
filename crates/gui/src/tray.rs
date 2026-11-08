@@ -1,5 +1,6 @@
 //! The menu-bar icon and its menu (Phase 7 G3): the state at a glance, Start all, Stop all and
-//! Restart, available updates (D-028), Open Devid, Settings and Quit.
+//! Restart, available updates (D-028), running commands with Stop (Phase 8 A5, D-036), Open Devid,
+//! Settings and Quit.
 
 use devid_daemon::{
     paths::Paths,
@@ -31,6 +32,8 @@ pub struct View {
     pub server: String,
     /// A newer devid plus the PHP, web server and extension updates the last check found.
     pub updates: usize,
+    /// Running commands (D-036) as (site, name); their number shows next to the icon.
+    pub commands: Vec<(String, String)>,
 }
 
 pub fn view(status: Result<&Value, &str>) -> View {
@@ -41,6 +44,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
             running: None,
             server: String::new(),
             updates: 0,
+            commands: Vec::new(),
         };
     };
     let failed = s["php"].as_array().into_iter().flatten().filter(|p| p["status"] == "failed").count()
@@ -56,6 +60,12 @@ pub fn view(status: Result<&Value, &str>) -> View {
     };
     let u = &s["updates"];
     let updates = u["changes"].as_array().map_or(0, Vec::len) + usize::from(u["devid"].is_string());
+    let commands = s["running_commands"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| (c["site"].as_str().unwrap_or("?").to_string(), c["name"].as_str().unwrap_or("?").to_string()))
+        .collect();
     View {
         icon: if failed > 0 {
             "bad"
@@ -68,6 +78,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
         running: Some(running),
         server,
         updates,
+        commands,
     }
 }
 
@@ -134,6 +145,8 @@ pub fn refresh(app: &AppHandle) {
         Err(e) => eprintln!("devid-gui: menu: {e}"),
     }
     let _ = tray.set_icon(Some(icon(&v)));
+    let count = v.commands.len().to_string();
+    let _ = tray.set_title((!v.commands.is_empty()).then_some(count.as_str()));
     let _ = tray.set_icon_as_template(true);
     let _ = tray.set_tooltip(Some(&v.header));
     *shown = key;
@@ -161,6 +174,15 @@ fn menu(app: &AppHandle, v: &View, error: Option<&str>) -> tauri::Result<Menu<Wr
     if v.updates > 0 {
         m.append(&item("updates", &format!("Updates available ({})…", v.updates), true, None)?)?;
     }
+    if !v.commands.is_empty() {
+        m.append(&sep()?)?;
+        let n = v.commands.len();
+        m.append(&item("commands", &format!("Commands · {n} running"), false, None)?)?;
+        for (site, name) in &v.commands {
+            m.append(&item(&format!("cmd-stop:{site}/{name}"), &format!("Stop {site} · {name}"), true, None)?)?;
+        }
+        m.append(&item("cmd-stop-all", "Stop all commands", true, None)?)?;
+    }
     match v.running {
         Some(true) => {
             m.append(&sep()?)?;
@@ -186,6 +208,29 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
         "open" => crate::open_window(app, None),
         "settings" | "updates" => crate::open_window(app, Some("settings")),
         "quit" => app.exit(0),
+        id if id == "cmd-stop-all" || id.starts_with("cmd-stop:") => {
+            // A stop waits until nothing of the command is left (up to 10 s).
+            let (app, id) = (app.clone(), id.to_string());
+            std::thread::spawn(move || {
+                let paths = Paths::from_env();
+                let stop = |site: &str, name: Option<&str>| {
+                    let req =
+                        Request::CommandStop { site: Some(site.into()), cwd: "/".into(), name: name.map(String::from) };
+                    request(&paths, &req).err()
+                };
+                let error = match id.strip_prefix("cmd-stop:").and_then(|k| k.split_once('/')) {
+                    Some((site, name)) => stop(site, Some(name)),
+                    None => {
+                        let status = request(&paths, &Request::Status).unwrap_or_default();
+                        let sites: std::collections::BTreeSet<String> =
+                            view(Ok(&status)).commands.into_iter().map(|(s, _)| s).collect();
+                        sites.iter().find_map(|site| stop(site, None))
+                    }
+                };
+                *app.state::<TrayState>().error.lock().unwrap() = error;
+                refresh(&app);
+            });
+        }
         id @ ("start" | "stop" | "restart") => {
             // Off the main thread: a request can take seconds (a restart waits for the server).
             let (app, id) = (app.clone(), id.to_string());
@@ -233,5 +278,12 @@ mod tests {
 
         let down = view(Err("daemon is not running"));
         assert_eq!((down.icon, down.running), ("off", None));
+
+        let commands = json!({"server": "nginx", "server_status": "running", "php": [],
+            "running_commands": [{"site": "erd", "name": "dev:pg:local"}, {"site": "erd", "name": "tauri"}]});
+        assert_eq!(
+            view(Ok(&commands)).commands,
+            [("erd".to_string(), "dev:pg:local".to_string()), ("erd".to_string(), "tauri".to_string())]
+        );
     }
 }

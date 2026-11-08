@@ -623,7 +623,7 @@ fn print_commands(s: &serde_json::Value) {
     if !suggestions.is_empty() {
         println!("  suggestions (`devid cmd add {name} <name> -- <command>`):");
         for c in suggestions {
-            println!("  {:<width$}  {}", c["name"].as_str().unwrap_or("?"), c["run"].as_str().unwrap_or("?"));
+            println!("    {:<width$}  {}", c["name"].as_str().unwrap_or("?"), c["run"].as_str().unwrap_or("?"));
         }
     }
 }

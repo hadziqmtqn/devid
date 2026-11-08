@@ -1,8 +1,8 @@
 # Phase 8 Plan: apps, commands and sharing
 
 > Scope: app types detected per site (PHP, static, Node), a local port per site, user commands the daemon runs, and sharing a site through a quick tunnel (D-035, D-036, D-037)
-> Verified against: 2026-11-08 (A4 built on branch `feat/a4-commands`)
-> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 released in 0.9.0, see "A3 as built"; A4 built, see "A4 as built"; A5 next
+> Verified against: 2026-11-08 (A5 part 1 built on branch `feat/a5-app-ui`)
+> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 released in 0.9.0, see "A3 as built"; A4 released in 0.10.0, see "A4 as built"; A5 part 1 (desktop app, menu bar) built, see "A5 as built"; A5 part 2 (TUI) next
 
 Today Devid serves every site as PHP through php-fpm, and the docroot is `public/` when it exists (`daemon::sites`). Everything else the owner runs is still started by hand in a terminal:
 
@@ -385,6 +385,31 @@ The proxy tests used a throwaway nginx (Devid's 1.30 binary, its own prefix and 
   - The owner's own `dev:pg:local` on port 3000 and their other erd-builder-pro instance kept running; the repository was unchanged.
 
 **Owner's migration** (A4 part): `devid unignore erd-builder-pro`, then in the project `devid cmd add dev:pg:local -- npm run dev:pg:local` and `devid cmd add tauri -- npm run dev:tauri`, and `devid cmd start` once the terminal copies are stopped (the saved `dev:pg:local` needs port 3000).
+
+### A5 as built (2026-11-08)
+
+**Part 1: desktop app and menu bar** (0.11.0, branch `feat/a5-app-ui`). The view follows the approved Phase 8 prototype (`Phase8.dc.html` on the Devid Redesign canvas), without Share, which comes in A6.
+
+- **Sites list:** each row shows the type (`preset_label`), the local port (`:8000`, or `:8000 busy`), the number of running commands, and "Proxy :3000" or "Static" in place of the PHP picker for those modes. The host name and a chevron open the site's detail; the ⋯ menu gains "Details".
+- **Site detail** (title: the host; subtitle: the folder and the type; a back button):
+  - **App:** Type (the eleven presets, "(detected)" marked, "Use detected" when the owner set one, which sends `app_reset`), Serve as (PHP / Static / Proxy), the PHP version (php), Web root (php and static), Single-page app (static), Forward to (proxy).
+  - **Local port:** a switch (on picks the first free port from 8000), the port with "Serving" or "In use", and when busy the holder and "Check again".
+  - **Commands:** Start all, Stop all and Add command; each command with its state (running with its pid, exited with its code or signal, stopped), Start or Stop, its log under the list (followed every second), and Restart, Show log and Remove… in its ⋯ menu.
+  - **Add a command:** name and command fields, the site's suggestions as buttons that fill both, the daemon's error inline.
+- Fields save on Enter or when they lose focus, and a poll does not redraw the page while a field has focus.
+- **Menu bar:** the number of running commands next to the icon, a "Commands · N running" section with "Stop <site> · <name>" per command and "Stop all commands". `status` adds `running_commands` (site and name) for it.
+- **CLI:** `devid cmd` indents suggestions under their heading.
+
+**Verification:**
+- **Checks:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` (also `-p devid-gui`) and `cargo test` pass. New: the tray view lists running commands.
+- **The UI with a real daemon's data:** a second daemon (own `DEVID_HOME`) with a Vite and a Laravel sample, three commands (running, exited with code 2, stopped) and a local port; `app.js` and `app.css` unchanged in Chrome, with `status` and `sites` from that daemon as fixtures:
+  - the list (chips, "Proxy :5173", the port);
+  - the detail of both samples (every row per mode, the port switch and chip, the commands with their states, the log panel);
+  - the Add dialog, where a suggestion fills both fields.
+  - Fixed on the way: the title stayed "Sites" until the next redraw, the port chip had no background, and "Proxy :5173" wrapped.
+- **Not run:** clicks inside Devid.app itself (cmux's computer use was not set up yet) and the menu-bar title with a running command. They use the daemon requests the CLI and its tests cover.
+
+**Part 2:** the TUI's site actions (type, port, commands).
 
 ## Not in this phase
 

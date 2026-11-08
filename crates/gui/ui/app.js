@@ -11,6 +11,10 @@ const SERVERS = {
   caddy: { label: 'Caddy', hint: 'Short, readable config.' },
   apache: { label: 'Apache', hint: 'The httpd that ships with macOS. For apps that rely on .htaccess.' },
 };
+// App types (D-035), in sites::PRESETS order: [key, label].
+const PRESETS = [['laravel', 'Laravel'], ['ci4', 'CodeIgniter 4'], ['ci3', 'CodeIgniter 3'], ['symfony', 'Symfony'],
+  ['wordpress', 'WordPress'], ['php', 'PHP'], ['next', 'Next.js'], ['nuxt', 'Nuxt'], ['node', 'Node.js'], ['vite', 'Vite'], ['static', 'Static']];
+const MODES = { php: 'PHP', static: 'Static', proxy: 'Proxy' };
 const EXT_INFO = {
   xdebug: 'Debugger; turn it on only while debugging.',
   pcov: 'Code coverage for PHPUnit and Pest.',
@@ -34,6 +38,10 @@ const ICONS = {
   open: '<svg viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 7.5 8.5M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/></svg>',
   plus: '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>',
   chevron: '<svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg>',
+  back: '<svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>',
+  next: '<svg viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg>',
+  play: '<svg viewBox="0 0 16 16"><path class="f" d="M5 3.2v9.6L12.8 8z"/></svg>',
+  stop: '<svg viewBox="0 0 16 16"><rect class="f" x="4" y="4" width="8" height="8" rx="1.2"/></svg>',
 };
 
 const S = {
@@ -48,6 +56,8 @@ const S = {
   devid: null, // {text, available}
   doctor: null, // {checks} or {error} or {busy}
   ext: null, // the open Extensions dialog
+  site: null, // the site whose detail view is open (Phase 8 A5)
+  logPanel: null, // the command whose log shows under its site's commands
 };
 const $ = (id) => document.getElementById(id);
 
@@ -219,8 +229,10 @@ const openTarget = (target) => act('Opening…', () => invoke('open', { target }
 // ---------- pages ----------
 
 const PAGES = {
-  sites: { title: 'Sites', sub: () => 'Every site is served at https://name.' + (S.status?.tld || 'test') + ' with a local certificate.',
-    load: () => daemon({ cmd: 'sites' }), render: sitesPage, tools: () => [
+  sites: { title: 'Sites', heading: () => openedSite() && siteHost(openedSite()),
+    sub: () => openedSite() ? openedSite().path + ' · ' + openedSite().preset_label
+      : 'Every site is served at https://name.' + (S.status?.tld || 'test') + ' with a local certificate.',
+    load: () => daemon({ cmd: 'sites' }), render: (d) => (openedSite() ? siteDetail(openedSite()) : sitesPage(d)), tools: () => S.site ? [] : [
       h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Link a site', title: 'Link a site', onclick: linkSite, disabled: !!S.busy }, icon('plus'))] },
   php: { title: 'PHP', sub: () => 'PHP 8.3, 8.4 and 8.5 side by side; pick one per site.',
     load: () => daemon({ cmd: 'php_list' }), render: phpPage },
@@ -295,7 +307,8 @@ function sitesPage(d) {
 }
 
 function siteRow(s, installed, parked) {
-  const host = new URL(s.url).hostname;
+  const host = siteHost(s);
+  const running = (s.commands || []).filter((c) => c.state === 'running').length;
   const versions = installed.includes(s.php) ? installed : [...installed, s.php];
   const pick = dropdown('PHP version for ' + host, s.php, versions.map((v) => ({ value: v, label: v })), (version) =>
     act('Switching ' + s.name + '…', () => daemon({ cmd: 'isolate', version, site: s.name, cwd: '/' }), s.name + ' now uses PHP ' + version));
@@ -303,15 +316,20 @@ function siteRow(s, installed, parked) {
     h('span.dv-avatar', {}, s.name.charAt(0).toUpperCase()),
     h('div.dv-grow', {},
       h('div.dv-line', {},
-        h('button.dv-host', { type: 'button', title: 'Open ' + s.url, onclick: () => openTarget({ what: 'site', name: s.name }) }, host),
-        s.isolated ? h('span.dv-chip.accent', { title: 'This site uses its own PHP version' }, 'Isolated') : null,
-        s.php_installed ? null : h('span.dv-chip.warn', {}, 'PHP ' + s.php + ' not installed')),
+        h('button.dv-host', { type: 'button', title: 'Details for ' + host, onclick: () => openSite(s.name) }, host),
+        h('span.dv-chip.muted', {}, s.preset_label),
+        s.mode === 'php' && s.isolated ? h('span.dv-chip.accent', { title: 'This site uses its own PHP version' }, 'Isolated') : null,
+        s.mode !== 'php' || s.php_installed ? null : h('span.dv-chip.warn', {}, 'PHP ' + s.php + ' not installed')),
       h('div.dv-sub.dv-ellipsis', {}, h('span.dv-mono', {}, s.path), ' · ' + (s.linked ? 'Linked' : 'Parked'))),
-    h('span.dv-label', {}, 'PHP', pick),
+    s.port ? h('span.dv-chip' + (s.port_busy ? '.warn' : '.muted'), { title: s.port_busy ? 'Port ' + s.port + ' is in use by ' + s.port_busy
+      : 'Also served on http://127.0.0.1:' + s.port }, ':' + s.port + (s.port_busy ? ' busy' : '')) : null,
+    running ? h('span.dv-chip.ok', {}, '● ' + running + ' running') : null,
+    s.mode === 'php' ? h('span.dv-label', {}, 'PHP', pick) : h('span.dv-sub.dv-nowrap', {}, s.mode === 'proxy' ? 'Proxy :' + s.upstream : 'Static'),
     h('button.dv-btn.ghost.icon', { type: 'button', title: 'Open in browser', 'aria-label': 'Open ' + host + ' in browser',
       onclick: () => openTarget({ what: 'site', name: s.name }) }, icon('open')),
     moreBtn('More actions for ' + host, () => [
       { header: host },
+      { label: 'Details', run: () => openSite(s.name) },
       { label: 'Open in browser', run: () => openTarget({ what: 'site', name: s.name }) },
       { label: 'Open folder in Terminal', run: () => openTarget({ what: 'terminal', path: s.path }) },
       { label: 'Copy URL', run: () => act('Copying…', () => invoke('copy_url', { name: s.name }), (m) => m) },
@@ -327,7 +345,190 @@ function siteRow(s, installed, parked) {
         if (await ask('Remove ' + host + '?', 'Devid stops serving it and ignores ' + s.path + ' inside ' + folder + '; the folder itself is not touched.', 'Remove', true))
           act('Removing…', () => daemon({ cmd: 'ignore', site: s.name }), (r) => 'Ignored ' + s.name + '; the folder is still in ' + r.parked);
       } },
+    ]),
+    h('button.dv-btn.ghost.icon', { type: 'button', title: 'Details', 'aria-label': 'Details for ' + host, onclick: () => openSite(s.name) }, icon('next')));
+}
+
+// ---------- site detail (Phase 8 A5: app type D-035, local port D-037, commands D-036) ----------
+
+const siteHost = (s) => new URL(s.url).hostname;
+const presetLabel = (key) => (PRESETS.find((p) => p[0] === key) || [key, key])[1];
+/** The open site detail's site from the last `sites` reply; a site that is gone closes it. */
+function openedSite() {
+  const s = S.site && S.data.sites?.sites.find((x) => x.name === S.site);
+  if (S.site && S.data.sites && !s) S.site = null;
+  return s || null;
+}
+
+function openSite(name) {
+  S.site = name;
+  S.logPanel = null;
+  closeMenu();
+  $('page').parentElement.scrollTop = 0;
+  renderChrome();
+  renderPage();
+}
+
+/** A text field that saves on Enter or when it loses focus. */
+function field(id, value, save, cls = '', extra = {}) {
+  return h('input.dv-input' + (cls ? '.' + cls : ''), { id, value: value ?? '', spellcheck: 'false', autocomplete: 'off', disabled: !!S.busy,
+    onchange: (e) => save(e.target.value.trim()), onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); }, ...extra });
+}
+
+const label = (id, title, sub) => h('label.dv-grow', { for: id }, h('div', {}, title), h('div.dv-sub', {}, sub));
+
+function asPort(v, run) {
+  const n = Number(v);
+  if (Number.isInteger(n) && n > 0 && n < 65536) run(n);
+  else { toast(v + ' is not a port (1 to 65535)', true); renderPage(); }
+}
+
+function siteDetail(s) {
+  const st = S.status;
+  const host = siteHost(s);
+  const site = { site: s.name, cwd: '/' };
+  const set = (fields, done) => act('Saving…', () => daemon({ cmd: 'app_set', ...site, ...fields }), done);
+  const rel = s.docroot === s.path ? '.' : s.docroot.startsWith(s.path + '/') ? s.docroot.slice(s.path.length + 1) : s.docroot;
+  const typeSet = !!s.app?.preset;
+  const installed = st.php.map((p) => p.version);
+  const versions = installed.includes(s.php) ? installed : [...installed, s.php];
+  const port = (p, busy, done) => act(busy, () => daemon({ cmd: 'app_port', ...site, port: p }), done);
+
+  const app = card(
+    row(text('Type', typeSet ? 'Set by you' + (s.detected ? '; detected: ' + presetLabel(s.detected) : '; nothing detected')
+      : s.detected ? 'Detected from the project files' : 'Nothing detected; served as PHP, as before'),
+    typeSet ? btn('Use detected', () => act('Saving…', () => daemon({ cmd: 'app_reset', ...site }), host + ' follows detection again'), 'ghost') : null,
+    dropdown('Type', s.preset, PRESETS.map(([key, name]) => ({ value: key, label: name + (key === s.detected ? ' (detected)' : '') })),
+      (v) => set({ preset: v }, host + ' is now ' + presetLabel(v)))),
+    row(text('Serve as', { php: '.php files go to php-fpm; other files are served as they are.',
+      static: 'Files only, from the web root; no PHP runs.',
+      proxy: 'Every request goes to the dev server on localhost:' + s.upstream + ', WebSockets included.' }[s.mode]),
+    h('div.dv-seg', { role: 'group', 'aria-label': 'Serve as' }, Object.entries(MODES).map(([m, name]) =>
+      h('button', { type: 'button', 'aria-pressed': String(s.mode === m), disabled: !!S.busy,
+        onclick: () => { if (s.mode !== m) set({ mode: m }, host + ' is served as ' + name); } }, name)))),
+    s.mode === 'php' && row(text('PHP version', !s.php_installed ? 'PHP ' + s.php + ' is not installed; install it on the PHP page.'
+      : s.isolated ? 'This site\'s own version' : 'The default version'),
+      dropdown('PHP version for ' + host, s.php, versions.map((v) => ({ value: v, label: 'PHP ' + v + (v === st.default_php ? ' (default)' : '') })),
+        (version) => act('Switching…', () => daemon({ cmd: 'isolate', version, ...site }), host + ' now uses PHP ' + version))),
+    s.mode !== 'proxy' && row(label('app-root', 'Web root', 'Inside the project folder; "." is the folder itself.'),
+      field('app-root', rel, (v) => { if (v && v !== rel) set({ root: v }, 'Web root: ' + v); }, 'dv-mono')),
+    s.mode === 'static' && row(label('app-spa', 'Single-page app', 'Paths with no file load index.html, for client-side routing.'),
+      h('input.dv-switch', { id: 'app-spa', type: 'checkbox', role: 'switch', checked: !!s.spa, disabled: !!S.busy,
+        onchange: (e) => set({ spa: e.target.checked }, e.target.checked ? 'Single-page app on' : 'Single-page app off') })),
+    s.mode === 'proxy' && row(label('app-up', 'Forward to', 'The port the dev server listens on.'), h('span.dv-sub.dv-mono', {}, 'localhost:'),
+      field('app-up', String(s.upstream), (v) => asPort(v, (n) => { if (n !== s.upstream) set({ upstream: n }, 'Forwarding to localhost:' + n); }),
+        'dv-mono.port', { inputmode: 'numeric' })));
+
+  const local = card(
+    row(label('app-porton', 'Also serve on a local port', 'Plain HTTP on 127.0.0.1, for a tunnel or a tool that needs a fixed port.'),
+      h('input.dv-switch', { id: 'app-porton', type: 'checkbox', role: 'switch', checked: !!s.port, disabled: !!S.busy,
+        onchange: (e) => port(e.target.checked ? null : 0, 'Saving…', (r) => r.port ? host + ' is also served on 127.0.0.1:' + r.port : 'Local port off') })),
+    s.port && row(label('app-port', 'Port', 'http://127.0.0.1:' + s.port),
+      s.port_busy ? h('span.dv-chip.warn', {}, 'In use') : h('span.dv-chip.ok', {}, 'Serving'),
+      field('app-port', String(s.port), (v) => asPort(v, (n) => { if (n !== s.port) port(n, 'Saving…', host + ' is also served on 127.0.0.1:' + n); }),
+        'dv-mono.port', { inputmode: 'numeric' })),
+    s.port_busy && row(h('div.dv-grow.dv-sub', { role: 'status' }, s.port_busy + ' is listening on ' + s.port +
+      '. Devid leaves the port out until it is free; your other sites are not affected.'),
+    btn('Check again', () => port(null, 'Checking…', 'Checked port ' + s.port))));
+
+  const cmds = s.commands || [];
+  const running = cmds.filter((c) => c.state === 'running').length;
+  const req = (cmd, name) => daemon({ cmd, ...site, name: name ?? null });
+  const started = (r) => {
+    const bad = r.results.filter((x) => !x.ok);
+    if (bad.length) toast(bad.map((x) => x.name + ': ' + x.error).join('; '), true);
+    const ok = r.results.filter((x) => x.ok).map((x) => x.name);
+    return ok.length ? 'Started ' + andList(ok) : '';
+  };
+  const panel = S.logPanel && cmds.find((c) => c.name === S.logPanel);
+  let box = null;
+  if (panel) {
+    if (S.log.name !== panel.log) pickLog(panel.log, false);
+    box = h('div.dv-log.is-panel', { id: 'logbox', role: 'log', tabindex: '0', 'aria-label': 'Log of ' + panel.name });
+    fillLog(box);
+  }
+  return [
+    h('h2.dv-h2', {}, 'App'), app,
+    h('p.dv-sub.dv-note', {}, 'https://' + host + ' keeps its certificate from the Devid CA in every mode.'),
+    h('h2.dv-h2', {}, 'Local port'), local,
+    h('div.dv-head', {}, h('h2.dv-h2', {}, 'Commands ', h('span.dv-light', {}, '(' + cmds.length + ')')),
+      h('div.dv-tools', {},
+        cmds.length ? btn([icon('play'), 'Start all'], () => act('Starting…', () => req('command_start'), started), '', { disabled: !!S.busy || running === cmds.length }) : null,
+        cmds.length ? btn([icon('stop'), 'Stop all'], () => act('Stopping…', () => req('command_stop'),
+          (r) => r.stopped.length ? 'Stopped ' + andList(r.stopped) : 'Nothing was running'), '', { disabled: !!S.busy || !running }) : null,
+        btn([icon('plus'), 'Add command'], () => addCommand(s), 'primary'))),
+    card(cmds.length ? cmds.map((c) => commandRow(c, req)) : h('div.dv-empty', {}, h('div.dv-strong', {}, 'No commands yet'),
+      h('div.dv-sub', {}, 'Add the commands you run in Terminal for this project, such as a dev server or a queue worker.'))),
+    panel && h('div.dv-logbar', {}, h('span.dv-strong', {}, 'Log'),
+      h('span.dv-sub.dv-mono.dv-grow.dv-ellipsis', {}, (st.home || '~/.devid') + '/log/' + panel.log),
+      btn('Hide', () => { S.logPanel = null; renderPage(); }, 'ghost')),
+    box,
+    h('p.dv-sub.dv-note', {}, 'Commands run in ', h('span.dv-mono', {}, s.path), ' with your login shell\'s PATH (nvm, ~/.cargo/bin). ' +
+      'They start only when you press Start, never at login. A command that asks a question stops with an error; its log says why.'),
+  ];
+}
+
+function commandRow(c, req) {
+  const on = c.state === 'running';
+  const failed = c.state === 'exited' && c.code !== 0;
+  const state = on ? 'Running · pid ' + c.pid
+    : c.state === 'exited' ? (c.code != null ? 'Exited with code ' + c.code : 'Ended by signal ' + c.signal) : 'Stopped';
+  const logOpen = S.logPanel === c.name;
+  const toggleLog = () => { S.logPanel = logOpen ? null : c.name; renderPage(); };
+  const start = () => act('Starting ' + c.name + '…', () => req('command_start', c.name), 'Started ' + c.name);
+  const stop = () => act('Stopping ' + c.name + '…', () => req('command_stop', c.name), 'Stopped ' + c.name);
+  return row(h('span.dv-dot' + (on ? '.ok' : failed ? '.bad' : ''), { 'aria-hidden': 'true' }),
+    h('div.dv-grow', {},
+      h('div.dv-line', {}, h('span.dv-mono.dv-strong', {}, c.name), h('span.dv-sub', { role: 'status' }, state)),
+      h('div.dv-sub.dv-mono.dv-ellipsis', {}, c.run)),
+    on ? btn([icon('stop'), 'Stop'], stop, '', { 'aria-label': 'Stop ' + c.name })
+      : btn([icon('play'), 'Start'], start, '', { 'aria-label': 'Start ' + c.name }),
+    h('button.dv-btn.ghost.icon', { type: 'button', 'aria-pressed': String(logOpen), 'aria-label': 'Log of ' + c.name, title: 'Log', onclick: toggleLog }, icon('logs')),
+    moreBtn('More for ' + c.name, () => [
+      { header: c.name },
+      on && { label: 'Restart', run: () => act('Restarting ' + c.name + '…', async () => {
+        await req('command_stop', c.name);
+        return req('command_start', c.name);
+      }, 'Restarted ' + c.name) },
+      { label: logOpen ? 'Hide log' : 'Show log', run: toggleLog },
+      '-',
+      { label: 'Remove…', danger: true, run: async () => {
+        if (await ask('Remove ' + c.name + '?', (on ? 'It is stopped first. ' : '') + 'Devid forgets the command; its log stays as ' + c.log + '.', 'Remove', true))
+          act('Removing…', () => req('command_remove', c.name), 'Removed ' + c.name);
+      } },
     ]));
+}
+
+/** The prototype's "Add a command" dialog: a name, a shell line, and the site's suggestions. */
+function addCommand(s) {
+  const f = { name: '', run: '', error: '' };
+  const save = async () => {
+    const name = f.name.trim();
+    const run = f.run.trim();
+    if (!name || !run) { f.error = 'Fill in a name and a command.'; draw(); return; }
+    try {
+      await daemon({ cmd: 'command_add', site: s.name, cwd: '/', name, run });
+      closeDialog();
+      toast('Added ' + name + '; press Start to run it');
+      refresh(true);
+    } catch (e) { f.error = String(e); draw(); }
+  };
+  const draw = () => showDialog(h('div.dv-dialog', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'add-t' },
+    h('h2', { id: 'add-t' }, 'Add a command to ' + siteHost(s)),
+    h('p.dv-sub', {}, 'It runs in ' + s.path + ' and stays stopped until you press Start.'),
+    h('div.dv-form', {},
+      h('label.dv-field', {}, 'Name', h('input.dv-input.dv-mono', { value: f.name, placeholder: 'dev', 'aria-label': 'Name', 'data-focus': true,
+        spellcheck: 'false', autocomplete: 'off', oninput: (e) => { f.name = e.target.value; } })),
+      h('label.dv-field', {}, 'Command', h('input.dv-input.dv-mono', { value: f.run, placeholder: 'npm run dev', 'aria-label': 'Command',
+        spellcheck: 'false', autocomplete: 'off', oninput: (e) => { f.run = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') save(); } }))),
+    s.suggestions?.length ? h('div.dv-sugg', {}, h('div.dv-sub', {}, 'Suggestions from this project'),
+      h('div.dv-sugg-list', {}, s.suggestions.map((x) => h('button.dv-btn' + (f.run === x.run ? '.primary' : ''), { type: 'button',
+        'aria-pressed': String(f.run === x.run), 'aria-label': 'Use ' + x.run, title: x.run,
+        onclick: () => { Object.assign(f, { name: x.name, run: x.run, error: '' }); draw(); } }, x.name)))) : null,
+    f.error ? h('p.dv-error', { role: 'alert' }, f.error) : null,
+    h('div.dv-dialog-btns', {}, h('button.dv-btn', { type: 'button', onclick: closeDialog }, 'Cancel'),
+      h('button.dv-btn.primary', { type: 'button', onclick: save }, 'Add command'))), closeDialog);
+  draw();
 }
 
 function phpPage(d) {
@@ -465,7 +666,7 @@ function fillLog(box) {
   box.replaceChildren(...(lines.length ? lines.map((t) =>
     h('div.dv-ln' + (/error|crit|fatal|emerg|alert/i.test(t) ? '.error' : /warn/i.test(t) ? '.warning' : ''), {}, t)) :
     [h('div.dv-sub.dv-empty', {}, S.log.name + ' is empty.')]));
-  if (S.log.follow) box.scrollTop = box.scrollHeight;
+  if (S.log.follow || S.logPanel) box.scrollTop = box.scrollHeight;
 }
 
 /** What the daemon's automatic check found (D-028): a newer devid and the binary changes. */
@@ -724,7 +925,9 @@ function renderChrome() {
   const st = S.status;
   // Redraw only on a change, so keyboard focus in the sidebar survives the polling.
   const cardBusy = S.busyAt === 'card' ? S.busy : '';
-  const key = JSON.stringify([S.page, !!S.busy, cardBusy, autoUpdates(st)?.count, st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status)]]);
+  const heading = PAGES[S.page].heading?.() || PAGES[S.page].title;
+  const key = JSON.stringify([S.page, S.site, heading, PAGES[S.page].sub(), !!S.busy, cardBusy, autoUpdates(st)?.count,
+    st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status)]]);
   if (key === chromeKey) return;
   chromeKey = key;
   $('nav').replaceChildren(...Object.entries(PAGES).map(([key, p]) =>
@@ -732,7 +935,9 @@ function renderChrome() {
       onclick: () => go(key) }, icon(key), h('span.dv-grow', {}, p.title),
     key === 'sites' && st ? h('span.dv-chip', {}, String(st.sites)) : key === 'php' && st ? h('span.dv-chip', {}, st.default_php) :
       key === 'settings' && autoUpdates(st)?.count ? h('span.dv-navdot', { title: 'Updates available', 'aria-label': 'Updates available' }) : null)));
-  $('title').textContent = PAGES[S.page].title;
+  $('title').textContent = heading;
+  $('lead').replaceChildren(...(S.page === 'sites' && S.site ? [h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Back to Sites',
+    title: 'Back to Sites', onclick: () => openSite(null) }, icon('back'))] : []));
   $('subtitle').textContent = PAGES[S.page].sub();
   $('tools').replaceChildren(...(PAGES[S.page].tools?.() || []));
 
@@ -755,6 +960,8 @@ function renderChrome() {
 
 function renderPage() {
   if (menuOpen || (!$('overlay').hidden && !S.ext)) { S.dirty = true; return; }
+  // Typing in a field: redraw once it loses focus, so a poll never undoes what is typed.
+  if (document.activeElement?.matches('#page input.dv-input')) { S.dirty = true; return; }
   S.dirty = false;
   const page = $('page');
   if (!S.status) {
@@ -782,8 +989,10 @@ function versionBanner() {
 }
 
 function go(key) {
-  if (S.page === key) return;
+  if (S.page === key && !S.site) return;
   S.page = key;
+  S.site = null;
+  S.logPanel = null;
   closeMenu();
   $('page').parentElement.scrollTop = 0;
   renderChrome();
@@ -808,6 +1017,7 @@ async function refresh(force = false) {
       if (key !== S.page || (!force && json === S.keys[key])) return;
       S.keys[key] = json;
       S.data[key] = data;
+      renderChrome(); // the title may come from the data (a site's detail)
     } catch (e) {
       toast(String(e), true);
     }
@@ -825,12 +1035,16 @@ function poll() {
   if (document.hidden) return;
   timer = setInterval(() => {
     ticks++;
-    if (S.page === 'logs' && S.log.follow && S.log.name) readLog();
+    if (S.log.name && ((S.page === 'logs' && S.log.follow) || (S.page === 'sites' && S.logPanel))) readLog();
     if (ticks % 2 === 0 && !S.busy) refresh();
   }, 1000);
   refresh(true);
 }
 document.addEventListener('visibilitychange', poll);
+document.addEventListener('focusout', (e) => {
+  // After the field's own change handler, which may have started an action.
+  if (e.target.matches?.('#page input.dv-input')) setTimeout(() => { if (S.dirty && !S.busy) renderPage(); });
+});
 document.addEventListener('mousedown', (e) => { if (menuOpen && !menuOpen.m.contains(e.target) && !menuOpen.anchor.contains(e.target)) closeMenu(); });
 document.addEventListener('keydown', (e) => {
   if (!menuOpen) return;

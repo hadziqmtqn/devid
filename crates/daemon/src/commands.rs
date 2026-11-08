@@ -162,8 +162,10 @@ impl Commands {
         self.runs.lock().unwrap().keys().any(|(s, _)| s == site)
     }
 
-    pub fn running(&self) -> usize {
-        self.runs.lock().unwrap().values().filter(|r| r.exit.lock().unwrap().is_none()).count()
+    /// (site, command name) of every running command, sorted.
+    pub fn running(&self) -> Vec<(String, String)> {
+        let runs = self.runs.lock().unwrap();
+        runs.iter().filter(|(_, r)| r.exit.lock().unwrap().is_none()).map(|(k, _)| k.clone()).collect()
     }
 
     /// {"state": "running", "pid", "since"}, {"state": "exited", "code", "signal", "at"} or
