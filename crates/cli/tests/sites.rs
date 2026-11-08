@@ -126,3 +126,95 @@ fn park_link_isolate_and_nginx() {
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// App types (D-035, Phase 8 A2): detection, `devid app set/reset/show`, and php-fpm only for PHP sites.
+#[test]
+fn app_types_and_overrides() {
+    let root = temp_root("devid-apps-it");
+    let home = root.join("home");
+    let projects = root.join("projects");
+    let write = |rel: &str, text: &str| {
+        let p = projects.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    };
+    write("lara/artisan", "");
+    write("lara/composer.json", r#"{"require": {"laravel/framework": "^12"}}"#);
+    write("lara/public/index.php", "");
+    write("web/package.json", r#"{"devDependencies": {"vite": "^6"}}"#);
+    write("lp/index.html", "");
+    let (b84, b85, nginx) = (fake_build(&root, "8.4"), fake_build(&root, "8.5"), fake_nginx(&root, &home));
+    let s = |p: &Path| p.to_str().unwrap().to_string();
+
+    let daemon = start_daemon(&home);
+    for (v, b) in [("8.4", &b84), ("8.5", &b85)] {
+        assert!(devid(&home, &["php", "install", v, "--from", &s(b)]).status.success());
+    }
+    assert!(devid(&home, &["server", "install", "nginx", "--from", &s(&nginx)]).status.success());
+    assert!(devid(&home, &["park", &s(&projects)]).status.success());
+
+    let sites = json(&home, &["sites", "--json"]);
+    let kind = |sites: &Value, name: &str| {
+        let s = site(sites, name);
+        (s["preset"].as_str().unwrap().to_string(), s["mode"].as_str().unwrap().to_string())
+    };
+    assert_eq!(kind(&sites, "lara"), ("laravel".into(), "php".into()));
+    assert_eq!(kind(&sites, "web"), ("vite".into(), "proxy".into()));
+    assert_eq!(site(&sites, "web")["upstream"], 5173);
+    assert_eq!(kind(&sites, "lp"), ("static".into(), "static".into()));
+    let conf = fs::read_to_string(home.join("nginx/conf/nginx.conf")).unwrap();
+    assert!(conf.contains("proxy_pass http://localhost:5173;"));
+    assert!(conf.contains(&format!("root \"{}\";", s(&projects.join("lp")))));
+
+    // A static site's PHP version starts no php-fpm; switching it to php does.
+    assert!(devid(&home, &["isolate", "8.4", "--site", "web"]).status.success());
+    assert_eq!(proc_of(&json(&home, &["status", "--json"]), "8.4").0, "stopped", "web is a proxy site");
+    let out = devid(&home, &["app", "set", "web", "--mode", "static"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("serve as: static dist/ (SPA)"));
+    assert_eq!(site(&json(&home, &["sites", "--json"]), "web")["docroot"], s(&projects.join("web/dist")));
+    assert_eq!(proc_of(&json(&home, &["status", "--json"]), "8.4").0, "stopped", "static sites need no php-fpm");
+    assert!(devid(&home, &["app", "set", "web", "--mode", "php"]).status.success());
+    wait_for("8.4 running for a php site", || proc_of(&json(&home, &["status", "--json"]), "8.4").0 == "running");
+
+    // A preset brings its own defaults; reset goes back to detection; the config keeps only overrides.
+    assert!(devid(&home, &["app", "set", "web", "--preset", "node", "--upstream", "3010"]).status.success());
+    let web = site(&json(&home, &["sites", "--json"]), "web").clone();
+    assert_eq!(
+        (web["preset"].as_str(), web["mode"].as_str(), web["upstream"].as_u64()),
+        (Some("node"), Some("proxy"), Some(3010))
+    );
+    assert!(fs::read_to_string(home.join("config.toml")).unwrap().contains("[apps.web]"));
+    assert!(devid(&home, &["app", "reset", "web"]).status.success());
+    assert!(!fs::read_to_string(home.join("config.toml")).unwrap().contains("[apps.web]"));
+    wait_for("8.4 stopped again", || proc_of(&json(&home, &["status", "--json"]), "8.4").0 == "stopped");
+    assert!(devid(&home, &["app", "set", "lara", "--preset", "laravel"]).status.success());
+    assert!(
+        !fs::read_to_string(home.join("config.toml")).unwrap().contains("[apps"),
+        "choosing the detected preset stores nothing"
+    );
+
+    // `devid app show` inside a project picks that site.
+    let out = Command::new(BIN)
+        .args(["app", "show"])
+        .current_dir(projects.join("web"))
+        .env("DEVID_HOME", &home)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("type:     Vite (detected)") && text.contains("serve as: proxy to localhost:5173"), "{text}");
+
+    // Validation.
+    let port = TEST_HTTP_PORT.to_string();
+    assert!(
+        stderr(&devid(&home, &["app", "set", "web", "--upstream", &port])).contains("cannot be a dev server's port")
+    );
+    assert!(
+        stderr(&devid(&home, &["app", "set", "web", "--root", "../x"])).contains("must be a folder inside the project")
+    );
+    assert!(!devid(&home, &["app", "set", "web", "--preset", "rails"]).status.success());
+    assert!(stderr(&devid(&home, &["app", "set", "nope", "--mode", "php"])).contains("no site named nope"));
+
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}

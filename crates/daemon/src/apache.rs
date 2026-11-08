@@ -2,7 +2,15 @@
 //! mod_proxy_fcgi, mod_ssl and mod_http2; see the spike), run as the owner with a Devid-owned
 //! config. `/etc/apache2` is never read or touched.
 
-use crate::{ca, config::Config, nginx::quotable, paths::Paths, php, sites::Site, supervisor::Spec};
+use crate::{
+    ca,
+    config::Config,
+    nginx::quotable,
+    paths::Paths,
+    php,
+    sites::{Mode, Site},
+    supervisor::Spec,
+};
 use std::{
     fmt::Write as _,
     fs, io,
@@ -13,7 +21,7 @@ use std::{
 
 pub const SYSTEM_HTTPD: &str = "/usr/sbin/httpd";
 /// Modules from `ServerRoot` (/usr on macOS). Unix-only paths; Apache is a macOS adapter (D-013).
-const MODULES: [(&str, &str); 16] = [
+const MODULES: [(&str, &str); 17] = [
     ("mpm_event_module", "mod_mpm_event.so"),
     ("authz_core_module", "mod_authz_core.so"),
     ("unixd_module", "mod_unixd.so"),
@@ -26,6 +34,8 @@ const MODULES: [(&str, &str); 16] = [
     ("filter_module", "mod_filter.so"),
     ("proxy_module", "mod_proxy.so"),
     ("proxy_fcgi_module", "mod_proxy_fcgi.so"),
+    // Proxy sites (D-035); WebSockets through `upgrade=websocket`.
+    ("proxy_http_module", "mod_proxy_http.so"),
     ("socache_shmcb_module", "mod_socache_shmcb.so"),
     ("ssl_module", "mod_ssl.so"),
     ("http2_module", "mod_http2.so"),
@@ -121,36 +131,21 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
     // shortcut: the first HTTPS vhost also answers unknown hosts (Apache needs a certificate for its
     // default vhost); nginx refuses those handshakes instead. Upgrade if it ever matters.
     for site in sites {
-        let sock = php::socket(paths, &site.php);
-        let (Some(root), Some(crt), Some(key)) = (
-            quotable(&site.docroot),
-            quotable(&ca::site_cert(paths, &site.host)),
-            quotable(&ca::site_key(paths, &site.host)),
-        ) else {
+        let (Some(crt), Some(key)) =
+            (quotable(&ca::site_cert(paths, &site.host)), quotable(&ca::site_key(paths, &site.host)))
+        else {
             let _ = writeln!(c, "\n# skipped {}: path contains characters Apache cannot quote safely", site.name);
             continue;
         };
-        if quotable(&sock).is_none() {
-            let _ = writeln!(c, "\n# skipped {}: socket path cannot be quoted safely", site.name);
+        let (Some(http_body), Some(https_body)) = (site_body(paths, site, "http"), site_body(paths, site, "https"))
+        else {
+            let _ = writeln!(c, "\n# skipped {}: path contains characters Apache cannot quote safely", site.name);
             continue;
-        }
-        let common = format!(
-            "\x20   ServerName {host}\n\
-             \x20   DocumentRoot {root}\n\
-             \x20   <Directory {root}>\n\
-             \x20       AllowOverride All\n\
-             \x20       Require all granted\n\
-             \x20   </Directory>\n\
-             \x20   <FilesMatch \"\\.php$\">\n\
-             \x20       SetHandler \"proxy:unix:{sock}|fcgi://localhost\"\n\
-             \x20   </FilesMatch>\n",
-            host = site.host,
-            sock = sock.display(),
-        );
+        };
         let _ = write!(
             c,
-            "\n<VirtualHost 127.0.0.1:{http}>\n{common}</VirtualHost>\n\
-             <VirtualHost 127.0.0.1:{https}>\n{common}\
+            "\n<VirtualHost 127.0.0.1:{http}>\n{http_body}</VirtualHost>\n\
+             <VirtualHost 127.0.0.1:{https}>\n{https_body}\
              \x20   SSLEngine on\n\
              \x20   SSLCertificateFile {crt}\n\
              \x20   SSLCertificateKeyFile {key}\n\
@@ -158,6 +153,77 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
         );
     }
     c
+}
+
+/// A site's vhost lines for one scheme, by mode; None if a path cannot be quoted.
+fn site_body(paths: &Paths, site: &Site, scheme: &str) -> Option<String> {
+    let host = &site.host;
+    // `dir_rules` go inside <Directory>, where paths are relative to the web root: hidden files and
+    // folders (.git/config, .env) are refused there, as nginx does, but not on proxy sites, whose
+    // dev servers use paths such as /node_modules/.vite/.
+    let files = |root: &str, dir_rules: &str, extra: &str| {
+        format!(
+            "\x20   ServerName {host}\n\
+             \x20   DocumentRoot {root}\n\
+             \x20   <Directory {root}>\n\
+             \x20       AllowOverride All\n\
+             \x20       Require all granted\n\
+             \x20       RewriteEngine on\n\
+             \x20       RewriteRule \"(^|/)\\.(?!well-known)\" - [F]\n\
+             {dir_rules}\
+             \x20   </Directory>\n\
+             {extra}"
+        )
+    };
+    Some(match site.mode {
+        Mode::Php => {
+            let sock = php::socket(paths, &site.php);
+            quotable(&sock)?;
+            let handler = format!(
+                "\x20   <FilesMatch \"\\.php$\">\n\
+                 \x20       SetHandler \"proxy:unix:{sock}|fcgi://localhost\"\n\
+                 \x20   </FilesMatch>\n",
+                sock = sock.display(),
+            );
+            files(&quotable(&site.docroot)?, "", &handler)
+        }
+        Mode::Static => {
+            // /about serves about.html when there is no such file or folder, as nginx's `$uri.html`.
+            let html = "\x20       RewriteCond %{REQUEST_FILENAME} !-f\n\
+                        \x20       RewriteCond %{REQUEST_FILENAME} !-d\n\
+                        \x20       RewriteCond %{REQUEST_FILENAME}.html -f\n\
+                        \x20       RewriteRule ^ %{REQUEST_URI}.html [L]\n";
+            let spa = if site.spa { "\x20   FallbackResource /index.html\n" } else { "" };
+            files(&quotable(&site.docroot)?, html, spa)
+        }
+        Mode::Proxy => {
+            let up = site.upstream;
+            // As in nginx: Host and the site's own Origin become the dev server's (A1). mod_proxy
+            // would add X-Forwarded-Host from the rewritten Host, so Devid sets those headers itself.
+            let rewrite = match site.pass_host {
+                true => String::new(),
+                false => format!(
+                    "\x20   RequestHeader set Host \"localhost:{up}\"\n\
+                     \x20   RequestHeader set Origin \"http://localhost:{up}\" \"expr=%{{HTTP:Origin}} =~ m#^https?://{own}(:[0-9]+)?$#\"\n",
+                    own = host.replace('.', "[.]"),
+                ),
+            };
+            // retry=0: a dev server that was down is tried again on the next request, not after 60 s.
+            format!(
+                "\x20   ServerName {host}\n\
+                 \x20   ProxyPreserveHost On\n\
+                 \x20   ProxyAddHeaders Off\n\
+                 {rewrite}\
+                 \x20   RequestHeader set X-Forwarded-Host \"{host}\"\n\
+                 \x20   RequestHeader set X-Forwarded-Proto \"{scheme}\"\n\
+                 \x20   RequestHeader set X-Forwarded-For \"%{{REMOTE_ADDR}}s\"\n\
+                 \x20   ProxyPass / http://localhost:{up}/ upgrade=websocket retry=0\n\
+                 \x20   ProxyPassReverse / http://localhost:{up}/\n\
+                 \x20   ErrorDocument 502 \"Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid).\"\n\
+                 \x20   ErrorDocument 503 \"Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid).\"\n"
+            )
+        }
+    })
 }
 
 /// Write httpd.conf only if `httpd -t` accepts it. Returns whether it changed.
@@ -205,7 +271,8 @@ mod tests {
             docroot: "/p/blog/public".into(),
             php: "8.4".into(),
             isolated: true,
-            linked: false,
+            preset: "laravel",
+            ..Site::default()
         };
         let evil = Site { name: "evil".into(), host: "evil.test".into(), docroot: "/p/\"x".into(), ..blog.clone() };
         let conf = render(&paths, &Config::default(), &[blog, evil]);
@@ -216,5 +283,25 @@ mod tests {
         assert!(conf.contains("LoadModule proxy_fcgi_module"));
         assert!(conf.contains("# skipped evil"));
         assert!(!conf.contains("/etc/apache2/httpd.conf"), "never the system config");
+        assert!(!conf.contains("ProxyPass"));
+    }
+
+    #[test]
+    fn render_static_and_proxy() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let base = Site { name: "app".into(), host: "app.test".into(), path: "/p/app".into(), ..Site::default() };
+        let spa = Site { mode: Mode::Static, spa: true, docroot: "/p/app/dist".into(), ..base.clone() };
+        let dev = Site { name: "erd".into(), host: "erd.test".into(), mode: Mode::Proxy, upstream: 5173, ..base };
+        let conf = render(&paths, &Config::default(), &[spa, dev]);
+        assert!(conf.contains("DocumentRoot \"/p/app/dist\"") && conf.contains("FallbackResource /index.html"));
+        assert!(!conf.contains("SetHandler"));
+        assert!(conf.contains("LoadModule proxy_http_module libexec/apache2/mod_proxy_http.so"));
+        assert!(conf.contains("ProxyPass / http://localhost:5173/ upgrade=websocket retry=0"));
+        assert!(conf.contains("RequestHeader set Host \"localhost:5173\""));
+        assert!(conf.contains("\"expr=%{HTTP:Origin} =~ m#^https?://erd[.]test(:[0-9]+)?$#\""));
+        assert!(
+            conf.contains("RequestHeader set X-Forwarded-Proto \"https\"")
+                && conf.contains("X-Forwarded-Proto \"http\"")
+        );
     }
 }

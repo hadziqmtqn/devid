@@ -10,7 +10,11 @@ use devid_daemon::{
     protocol::{Request, request},
     server,
 };
-use std::{io::Write, path::PathBuf, process::ExitCode};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 #[derive(Parser)]
 #[command(name = "devid", version, about = "Local PHP development for macOS")]
@@ -159,6 +163,41 @@ enum Command {
         #[arg(long)]
         site: Option<String>,
     },
+    /// Show or change a site's app type: Laravel, Vite, Node.js… and how it is served (php, static, proxy)
+    App {
+        #[command(subcommand)]
+        action: AppAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AppAction {
+    /// Show a site's type (default: the site containing the current folder) and how it is served
+    Show { site: Option<String> },
+    /// Change how a site is served; only the options you pass change
+    Set {
+        site: Option<String>,
+        /// App type; resets mode, root and upstream to its defaults unless you pass them too
+        #[arg(long, value_parser = devid_daemon::sites::PRESETS.map(|p| p.key))]
+        preset: Option<String>,
+        /// php: PHP files through php-fpm; static: files only; proxy: forward to a dev server
+        #[arg(long, value_parser = devid_daemon::sites::Mode::NAMES)]
+        mode: Option<String>,
+        /// Web root inside the project, for php and static (e.g. public, dist, .)
+        #[arg(long)]
+        root: Option<String>,
+        /// Port of the dev server a proxy site forwards to
+        #[arg(long)]
+        upstream: Option<u16>,
+        /// Static: serve /index.html for paths with no file (single-page apps)
+        #[arg(long, value_parser = ["on", "off"])]
+        spa: Option<String>,
+        /// Proxy: send the .test Host and Origin unchanged (for apps that build links from Host)
+        #[arg(long, value_parser = ["on", "off"])]
+        pass_host: Option<String>,
+    },
+    /// Forget your changes; the detected type applies again
+    Reset { site: Option<String> },
 }
 
 #[derive(Subcommand)]
@@ -432,6 +471,83 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         }),
         Command::Unisolate { site } => send(Request::Unisolate { site, cwd: cwd()? })
             .map(|v| println!("{} uses the default PHP again", v["site"].as_str().unwrap_or("?"))),
+        Command::App { action } => app(action, paths),
+    }
+}
+
+fn app(action: AppAction, paths: &Paths) -> Result<(), String> {
+    let send = |req: Request| request(paths, &req);
+    let on = |v: Option<String>| v.map(|v| v == "on");
+    let name = match action {
+        AppAction::Show { site } => site,
+        AppAction::Set { site, preset, mode, root, upstream, spa, pass_host } => {
+            let req = Request::AppSet {
+                site,
+                cwd: cwd()?,
+                preset,
+                mode,
+                root,
+                upstream,
+                spa: on(spa),
+                pass_host: on(pass_host),
+            };
+            Some(send(req)?["site"].as_str().unwrap_or("?").to_string())
+        }
+        AppAction::Reset { site } => {
+            let v = send(Request::AppReset { site, cwd: cwd()? })?;
+            Some(v["site"].as_str().unwrap_or("?").to_string())
+        }
+    };
+    let cwd = cwd()?;
+    let reply = send(Request::Sites)?;
+    let list = reply["sites"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let site = match &name {
+        Some(n) => list.iter().find(|s| s["name"] == n.as_str()).ok_or(format!("no site named {n}"))?,
+        // The deepest site folder containing the current folder, as the daemon picks it.
+        None => list
+            .iter()
+            .filter(|s| s["path"].as_str().is_some_and(|p| Path::new(&cwd).starts_with(p)))
+            .max_by_key(|s| s["path"].as_str().map_or(0, |p| Path::new(p).components().count()))
+            .ok_or(format!("{cwd} is not inside a site; pass a site name"))?,
+    };
+    print_app(site);
+    Ok(())
+}
+
+fn print_app(s: &serde_json::Value) {
+    let text = |k: &str| s[k].as_str().unwrap_or("?").to_string();
+    let detected = s["detected"].as_str().and_then(devid_daemon::sites::find_preset).map(|p| p.label);
+    let typ = match (s["app"]["preset"].is_string(), detected) {
+        (true, Some(d)) => format!("{} (set by you; detected: {d})", text("preset_label")),
+        (true, None) => format!("{} (set by you; nothing detected)", text("preset_label")),
+        (false, Some(_)) => format!("{} (detected)", text("preset_label")),
+        (false, None) => "PHP (nothing detected; served as before)".into(),
+    };
+    println!("{}", text("url"));
+    println!("  type:     {typ}");
+    println!("  serve as: {}", serving(s));
+    let changed: Vec<&str> = s["app"].as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
+    if !changed.is_empty() {
+        println!("  changed:  {} (`devid app reset` goes back to the detected type)", changed.join(", "));
+    }
+}
+
+/// How a site is served, in a few words: "PHP 8.4", "static dist/", "proxy to localhost:3000".
+fn serving(s: &serde_json::Value) -> String {
+    let path = s["path"].as_str().unwrap_or("");
+    let docroot = s["docroot"].as_str().unwrap_or("");
+    let root = match docroot.strip_prefix(path).map(|r| r.trim_start_matches('/')) {
+        Some("") | None => String::new(),
+        Some(r) => format!(" {r}/"),
+    };
+    match s["mode"].as_str() {
+        Some("static") => format!("static{root}{}", if s["spa"] == true { " (SPA)" } else { "" }),
+        Some("proxy") => format!(
+            "proxy to localhost:{}{}",
+            s["upstream"],
+            if s["pass_host"] == true { " (Host passed through)" } else { "" }
+        ),
+        _ => format!("PHP {}{root}", s["php"].as_str().unwrap_or("?")),
     }
 }
 
@@ -500,12 +616,20 @@ fn print_sites(list: &serde_json::Value, json: bool) {
     }
     for s in sites {
         let php = s["php"].as_str().unwrap_or("?");
-        let note = match (s["isolated"] == true, s["php_installed"] == true) {
-            (_, false) => format!("PHP {php} (not installed!)"),
-            (true, _) => format!("PHP {php} (isolated)"),
-            (false, _) => format!("PHP {php}"),
+        let note = match (s["mode"].as_str(), s["isolated"] == true, s["php_installed"] == true) {
+            (Some("static" | "proxy"), ..) => serving(s),
+            (_, _, false) => format!("PHP {php} (not installed!)"),
+            (_, true, _) => format!("PHP {php} (isolated)"),
+            (_, false, _) => format!("PHP {php}"),
         };
-        println!("{:<40} {:<26} {}", s["url"].as_str().unwrap_or("?"), note, s["path"].as_str().unwrap_or("?"));
+        let typ = s["preset_label"].as_str().unwrap_or("PHP");
+        println!(
+            "{:<40} {:<14} {:<26} {}",
+            s["url"].as_str().unwrap_or("?"),
+            typ,
+            note,
+            s["path"].as_str().unwrap_or("?")
+        );
     }
 }
 

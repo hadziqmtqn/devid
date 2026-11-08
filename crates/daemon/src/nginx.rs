@@ -1,6 +1,13 @@
 //! nginx, the default web server (D-015): install, render the config for all sites, run.
 
-use crate::{ca, config::Config, paths::Paths, php, sites::Site, supervisor::Spec};
+use crate::{
+    ca,
+    config::Config,
+    paths::Paths,
+    php,
+    sites::{Mode, Site},
+    supervisor::Spec,
+};
 use std::{
     fmt::Write as _,
     fs, io,
@@ -108,17 +115,22 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
         fastcgi = q(&prefix(paths).join("tmp/fastcgi")),
         proxy = q(&prefix(paths).join("tmp/proxy")),
     );
+    // WebSocket upgrades (dev servers' HMR) pass through proxy sites.
+    c.push_str("    map $http_upgrade $connection_upgrade { default upgrade; '' close; }\n");
     for site in sites {
-        let sock = php::socket(paths, &site.php);
-        let (Some(root), Some(sock), Some(crt), Some(key)) = (
-            quotable(&site.docroot),
-            quotable(Path::new(&format!("unix:{}", sock.display()))),
-            quotable(&ca::site_cert(paths, &site.host)),
-            quotable(&ca::site_key(paths, &site.host)),
-        ) else {
+        let (Some(crt), Some(key)) =
+            (quotable(&ca::site_cert(paths, &site.host)), quotable(&ca::site_key(paths, &site.host)))
+        else {
             let _ = writeln!(c, "\n    # skipped {}: path contains characters nginx cannot quote safely", site.name);
             continue;
         };
+        let Some(body) = site_body(paths, site) else {
+            let _ = writeln!(c, "\n    # skipped {}: path contains characters nginx cannot quote safely", site.name);
+            continue;
+        };
+        if site.mode == Mode::Proxy && !site.pass_host {
+            let _ = write!(c, "{}", own_origin_map(config, site));
+        }
         let _ = write!(
             c,
             "\n    server {{\n\
@@ -128,25 +140,104 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
              \x20       ssl_certificate {crt};\n\
              \x20       ssl_certificate_key {key};\n\
              \x20       server_name {host};\n\
-             \x20       root {root};\n\
-             \x20       index index.php index.html;\n\
-             \x20       charset utf-8;\n\
-             \x20       location / {{ try_files $uri $uri/ /index.php?$query_string; }}\n\
-             \x20       location ~ \\.php$ {{\n\
-             \x20           fastcgi_pass {sock};\n\
-             \x20           fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;\n\
-             \x20           include fastcgi_params;\n\
-             \x20           # Laravel/Inertia headers exceed nginx's 4k default (spike, D-015).\n\
-             \x20           fastcgi_buffer_size 32k;\n\
-             \x20           fastcgi_buffers 16 16k;\n\
-             \x20       }}\n\
-             \x20       location ~ /\\.(?!well-known).* {{ deny all; }}\n\
+             {body}\
              \x20   }}\n",
             host = site.host,
         );
     }
     c.push_str("}\n");
     c
+}
+
+/// nginx variable holding the Origin a proxy site sends upstream (site names are DNS labels).
+fn origin_var(site: &Site) -> String {
+    format!("$devid_origin_{}", site.name.replace('-', "_"))
+}
+
+/// The site's own origins (any port) become the dev server's, so Next.js and Vite accept their
+/// own pages (A1); any other Origin passes unchanged and is still refused by the dev server.
+fn own_origin_map(config: &Config, site: &Site) -> String {
+    let (host, up) = (&site.host, site.upstream);
+    let mut m = format!("\n    map $http_origin {} {{\n        default $http_origin;\n", origin_var(site));
+    for origin in [
+        format!("https://{host}"),
+        format!("https://{host}:{}", config.https_port),
+        format!("http://{host}"),
+        format!("http://{host}:{}", config.http_port),
+    ] {
+        let _ = writeln!(m, "        \"{origin}\" \"http://localhost:{up}\";");
+    }
+    m.push_str("    }\n");
+    m
+}
+
+/// The part of a site's server block that depends on its mode; None if a path cannot be quoted.
+fn site_body(paths: &Paths, site: &Site) -> Option<String> {
+    let hidden = "        location ~ /\\.(?!well-known).* { deny all; }\n";
+    Some(match site.mode {
+        Mode::Php => {
+            let root = quotable(&site.docroot)?;
+            let sock = quotable(Path::new(&format!("unix:{}", php::socket(paths, &site.php).display())))?;
+            format!(
+                "        root {root};\n\
+                 \x20       index index.php index.html;\n\
+                 \x20       charset utf-8;\n\
+                 \x20       location / {{ try_files $uri $uri/ /index.php?$query_string; }}\n\
+                 \x20       location ~ \\.php$ {{\n\
+                 \x20           fastcgi_pass {sock};\n\
+                 \x20           fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;\n\
+                 \x20           include fastcgi_params;\n\
+                 \x20           # Laravel/Inertia headers exceed nginx's 4k default (spike, D-015).\n\
+                 \x20           fastcgi_buffer_size 32k;\n\
+                 \x20           fastcgi_buffers 16 16k;\n\
+                 \x20       }}\n\
+                 {hidden}"
+            )
+        }
+        Mode::Static => {
+            let root = quotable(&site.docroot)?;
+            // `$uri.html` serves static exports such as Next.js `out/about.html` at /about.
+            let last = if site.spa { "/index.html" } else { "=404" };
+            format!(
+                "        root {root};\n\
+                 \x20       index index.html;\n\
+                 \x20       charset utf-8;\n\
+                 \x20       location / {{ try_files $uri $uri.html $uri/ {last}; }}\n\
+                 {hidden}"
+            )
+        }
+        Mode::Proxy => {
+            let up = site.upstream;
+            let (host, origin) = match site.pass_host {
+                true => ("$host".to_string(), "$http_origin".to_string()),
+                false => (format!("localhost:{up}"), origin_var(site)),
+            };
+            // `localhost` resolves to 127.0.0.1 and ::1, and nginx tries both: Vite listens on
+            // [::1] only by default (A1).
+            format!(
+                "        location / {{\n\
+                 \x20           proxy_pass http://localhost:{up};\n\
+                 \x20           proxy_http_version 1.1;\n\
+                 \x20           proxy_set_header Host {host};\n\
+                 \x20           proxy_set_header Origin {origin};\n\
+                 \x20           proxy_set_header Upgrade $http_upgrade;\n\
+                 \x20           proxy_set_header Connection $connection_upgrade;\n\
+                 \x20           proxy_set_header X-Forwarded-Host $host;\n\
+                 \x20           proxy_set_header X-Forwarded-Proto $scheme;\n\
+                 \x20           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
+                 \x20           # Dev servers stream (SSE, HMR); keep idle WebSockets open.\n\
+                 \x20           proxy_buffering off;\n\
+                 \x20           proxy_read_timeout 1h;\n\
+                 \x20       }}\n\
+                 \x20       error_page 502 504 = @devid_down;\n\
+                 \x20       location @devid_down {{\n\
+                 \x20           default_type text/plain;\n\
+                 \x20           return 502 \"Nothing answers on localhost:{up} for {name}. Start its dev server (or its command in Devid).\\n\";\n\
+                 \x20       }}\n",
+                name = site.host,
+            )
+        }
+    })
 }
 
 /// Write the config only if `nginx -t` accepts it; on failure the previous config stays active.
@@ -213,8 +304,9 @@ mod tests {
             path: PathBuf::from(docroot),
             docroot: PathBuf::from(docroot),
             php: php.into(),
-            isolated: false,
             linked: true,
+            preset: "php",
+            ..Site::default()
         }
     }
 
@@ -239,5 +331,38 @@ mod tests {
         assert!(conf.contains("# skipped evil"), "unsafe path is skipped, not injected");
         assert!(!conf.contains("$evil"));
         assert_eq!(conf.matches("server {").count(), 3, "HTTP and HTTPS default servers + blog");
+        assert!(!conf.contains("proxy_pass"), "PHP sites are served as before");
+    }
+
+    #[test]
+    fn render_static_and_proxy() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let spa = Site { mode: Mode::Static, spa: true, ..site("app", "/p/app/dist", "8.4") };
+        let plain = Site { mode: Mode::Static, ..site("lp", "/p/lp", "8.4") };
+        let dev = Site { mode: Mode::Proxy, upstream: 5173, ..site("erd-pro", "/p/erd", "8.4") };
+        let raw = Site { mode: Mode::Proxy, upstream: 3000, pass_host: true, ..site("raw", "/p/raw", "8.4") };
+        let conf = render(&paths, &Config::default(), &[spa, plain, dev, raw]);
+
+        assert!(conf.contains("root \"/p/app/dist\";") && conf.contains("try_files $uri $uri.html $uri/ /index.html;"));
+        assert!(conf.contains("try_files $uri $uri.html $uri/ =404;"), "no SPA fallback unless asked");
+        assert!(!conf.contains("fastcgi_pass"), "static and proxy sites need no php-fpm");
+
+        assert!(conf.contains("proxy_pass http://localhost:5173;"));
+        assert!(conf.contains("proxy_set_header Host localhost:5173;"));
+        assert!(conf.contains("map $http_origin $devid_origin_erd_pro {"));
+        for own in
+            ["https://erd-pro.test", "https://erd-pro.test:8443", "http://erd-pro.test", "http://erd-pro.test:8088"]
+        {
+            assert!(conf.contains(&format!("\"{own}\" \"http://localhost:5173\";")), "{own}");
+        }
+        assert!(conf.contains("proxy_set_header Origin $devid_origin_erd_pro;"));
+        assert!(conf.contains("proxy_set_header Connection $connection_upgrade;"));
+        assert!(conf.contains("return 502 \"Nothing answers on localhost:5173 for erd-pro.test."));
+
+        assert!(
+            conf.contains("proxy_set_header Host $host;") && conf.contains("proxy_set_header Origin $http_origin;")
+        );
+        assert!(!conf.contains("$devid_origin_raw"), "pass_host keeps Host and Origin");
+        assert_eq!(conf.matches("map $http_upgrade").count(), 1);
     }
 }

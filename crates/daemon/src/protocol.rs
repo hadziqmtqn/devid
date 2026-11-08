@@ -124,6 +124,30 @@ pub enum Request {
         site: Option<String>,
         cwd: String,
     },
+    /// Change how a site is served (D-035); the site is `site` or the one containing `cwd`. Only the
+    /// given fields change. A new `preset` without `mode` drops the old mode, root and upstream,
+    /// so the preset's defaults apply.
+    AppSet {
+        site: Option<String>,
+        cwd: String,
+        #[serde(default)]
+        preset: Option<String>,
+        #[serde(default)]
+        mode: Option<String>,
+        #[serde(default)]
+        root: Option<String>,
+        #[serde(default)]
+        upstream: Option<u16>,
+        #[serde(default)]
+        spa: Option<bool>,
+        #[serde(default)]
+        pass_host: Option<bool>,
+    },
+    /// Forget a site's app overrides: the detected type applies again.
+    AppReset {
+        site: Option<String>,
+        cwd: String,
+    },
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.
