@@ -63,6 +63,16 @@ pub struct App {
     /// Also serve the site on http://127.0.0.1:<port>, for a tunnel or a tool (D-037).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    /// Commands the owner starts and stops from Devid (D-036), in the order they were added.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<AppCommand>,
+}
+
+/// One saved command: `[[apps.<site>.commands]]` with `name` and `run` (a shell line).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AppCommand {
+    pub name: String,
+    pub run: String,
 }
 
 impl App {
@@ -143,6 +153,12 @@ mod tests {
         apps.save(&path).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("[apps.shop]") && !text.contains("preset"), "only the overrides are written: {text}");
+        fs::write(&path, "[[apps.erd.commands]]\nname = \"dev:pg:local\"\nrun = \"npm run dev:pg:local\"\n").unwrap();
+        let erd = &Config::load_or_create(&path).unwrap().apps["erd"];
+        assert_eq!(
+            (erd.commands[0].name.as_str(), erd.commands[0].run.as_str()),
+            ("dev:pg:local", "npm run dev:pg:local")
+        );
         Config::default().save(&path).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("apps"), "no empty [apps] table");
 

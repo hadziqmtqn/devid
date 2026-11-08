@@ -155,6 +155,34 @@ pub enum Request {
         cwd: String,
         port: Option<u16>,
     },
+    /// Save a command for a site (D-036): `name` is how it is shown and logged, `run` a shell line
+    /// run in the site's folder. Saving a name again replaces its line.
+    CommandAdd {
+        site: Option<String>,
+        cwd: String,
+        name: String,
+        run: String,
+    },
+    /// Forget a site's command; a running one is stopped first.
+    CommandRemove {
+        site: Option<String>,
+        cwd: String,
+        name: String,
+    },
+    /// Start one of a site's commands, or all of them when `name` is None. Replies with one result
+    /// per command.
+    CommandStart {
+        site: Option<String>,
+        cwd: String,
+        name: Option<String>,
+    },
+    /// Stop one of a site's commands, or all of them when `name` is None, and wait until nothing of
+    /// them is left.
+    CommandStop {
+        site: Option<String>,
+        cwd: String,
+        name: Option<String>,
+    },
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

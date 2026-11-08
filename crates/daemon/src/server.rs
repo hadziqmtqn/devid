@@ -2,7 +2,8 @@
 
 use crate::{
     ca,
-    config::Config,
+    commands::{self, Commands},
+    config::{App, AppCommand, Config},
     dns, helper, install, logs, nginx,
     paths::Paths,
     php, phpext, ports,
@@ -51,6 +52,8 @@ struct State {
     own_ports: Mutex<BTreeSet<u16>>,
     /// Sites whose local port another program holds: site name -> that program ("php (pid 38571)").
     busy_ports: Mutex<BTreeMap<String, String>>,
+    /// The owner's commands (D-036) started from Devid.
+    commands: Commands,
 }
 
 /// Progress of a `PhpExtInstall`. Downloads count for 0–90 % by bytes (the archive's size on disk
@@ -261,6 +264,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
             format!("failed: {e}")
         }
     };
+    let commands = Commands::new(paths.clone());
     let state = Arc::new(State {
         dns,
         supervisor: Supervisor::new(),
@@ -274,7 +278,15 @@ pub fn run(paths: Paths) -> io::Result<()> {
         update_lock: Mutex::new(()),
         own_ports: Mutex::new(BTreeSet::new()),
         busy_ports: Mutex::new(BTreeMap::new()),
+        commands,
     });
+    // D-036: commands a crashed daemon left running are stopped. Found before any request can
+    // start a new one; stopped in the background, as that may take 10 s.
+    let leftovers = state.commands.leftovers();
+    if !leftovers.is_empty() {
+        eprintln!("devid: stopping {} command(s) a previous daemon left running", leftovers.len());
+        std::thread::spawn(move || commands::stop_groups(&leftovers));
+    }
     spawn_signal_thread(Arc::clone(&state));
     spawn_update_checks(Arc::clone(&state));
     if !config.autostart {
@@ -302,6 +314,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
             Err(e) => eprintln!("devid: accept failed: {e}"),
         }
     }
+    state.commands.stop_all();
     state.supervisor.stop_all();
     let _ = fs::remove_file(state.paths.socket());
     Ok(())
@@ -422,6 +435,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "login_item": install::app_agent_program(),
                 "update_check_minutes": config.update_check_minutes,
                 "updates": *state.updates.lock().unwrap(),
+                "commands_running": state.commands.running(),
             }))
         }
         Request::Stop => {
@@ -600,6 +614,22 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             let list: Vec<Value> = sites::resolve(&config)
                 .into_iter()
                 .map(|s| {
+                    let saved = config.apps.get(&s.name).map(|a| a.commands.as_slice()).unwrap_or_default();
+                    let commands: Vec<Value> = saved
+                        .iter()
+                        .map(|c| {
+                            let mut v = state.commands.state(&s.name, &c.name);
+                            v["name"] = c.name.clone().into();
+                            v["run"] = c.run.clone().into();
+                            v["log"] = commands::log_name(&s.name, &c.name).into();
+                            v
+                        })
+                        .collect();
+                    let suggestions: Vec<Value> = sites::suggest_commands(&s.path, s.preset)
+                        .into_iter()
+                        .filter(|(name, run)| !saved.iter().any(|c| c.name == *name || c.run == *run))
+                        .map(|(name, run)| json!({"name": name, "run": run}))
+                        .collect();
                     json!({
                         "name": s.name,
                         "url": if standard_ports(&config, &state.paths) {
@@ -624,6 +654,8 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                         "app": config.apps.get(&s.name),
                         "port": s.port,
                         "port_busy": busy.get(&s.name),
+                        "commands": commands,
+                        "suggestions": suggestions,
                     })
                 })
                 .collect();
@@ -743,7 +775,13 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         }),
         Request::AppReset { site, cwd } => state.mutate(|c, sites| {
             let name = pick_site(sites, site, &cwd)?;
-            c.apps.remove(&name);
+            // The type goes back to detection; the local port and the commands stay.
+            if let Some(app) = c.apps.get_mut(&name) {
+                *app = App { port: app.port, commands: std::mem::take(&mut app.commands), ..App::default() };
+                if app.is_empty() {
+                    c.apps.remove(&name);
+                }
+            }
             Ok(json!({"ok": true, "site": name}))
         }),
         Request::AppPort { site, cwd, port } => state.mutate(|c, sites| {
@@ -770,7 +808,93 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             }
             Ok(json!({"ok": true, "site": name, "port": port}))
         }),
+        Request::CommandAdd { site, cwd, name, run } => {
+            let run = run.trim().to_string();
+            if !commands::valid_name(&name) {
+                return Err(format!("{name:?} is not a command name (letters, digits, - _ . :; up to 40)"));
+            }
+            if run.is_empty() {
+                return Err("the command line is empty".into());
+            }
+            state.mutate(|c, sites| {
+                let site = pick_site(sites, site, &cwd)?;
+                let app = c.apps.entry(site.clone()).or_default();
+                match app.commands.iter_mut().find(|x| x.name == name) {
+                    Some(saved) => saved.run = run,
+                    None => app.commands.push(AppCommand { name: name.clone(), run }),
+                }
+                Ok(json!({"ok": true, "site": site, "name": name}))
+            })
+        }
+        Request::CommandRemove { site, cwd, name } => {
+            let (site, _, saved) = site_commands(state, site, &cwd)?;
+            if !saved.iter().any(|c| c.name == name) {
+                return Err(format!("{site} has no command named {name}"));
+            }
+            state.commands.stop(&site, Some(&name));
+            state.mutate(|c, _| {
+                if let Some(app) = c.apps.get_mut(&site) {
+                    app.commands.retain(|x| x.name != name);
+                    if app.is_empty() {
+                        c.apps.remove(&site);
+                    }
+                }
+                Ok(json!({"ok": true, "site": site}))
+            })
+        }
+        Request::CommandStart { site, cwd, name } => {
+            let (site, dir, saved) = site_commands(state, site, &cwd)?;
+            let add = |n: &str| format!("add it with `devid cmd add {site} {n} -- <command>`");
+            let chosen: Vec<AppCommand> = match &name {
+                Some(n) => vec![
+                    saved
+                        .iter()
+                        .find(|c| c.name == *n)
+                        .cloned()
+                        .ok_or(format!("{site} has no command named {n}; {}", add(n)))?,
+                ],
+                None if saved.is_empty() => return Err(format!("{site} has no commands; {}", add("<name>"))),
+                None => saved,
+            };
+            let results: Vec<Value> = chosen
+                .iter()
+                .map(|c| match state.commands.start(&site, &c.name, &c.run, &dir) {
+                    Ok(pid) => {
+                        json!({"name": c.name, "ok": true, "pid": pid, "log": commands::log_name(&site, &c.name)})
+                    }
+                    Err(e) => json!({"name": c.name, "ok": false, "error": e}),
+                })
+                .collect();
+            if let [one] = results.as_slice()
+                && name.is_some()
+                && one["ok"] == false
+            {
+                return Err(one["error"].as_str().unwrap_or("could not start it").to_string());
+            }
+            Ok(json!({"ok": true, "site": site, "results": results}))
+        }
+        Request::CommandStop { site, cwd, name } => {
+            // A site that was ignored or unlinked meanwhile can still have commands running.
+            let site = match site_commands(state, site.clone(), &cwd) {
+                Ok((site, ..)) => site,
+                Err(e) => match site {
+                    Some(s) if state.commands.has_runs(&s) => s,
+                    _ => return Err(e),
+                },
+            };
+            let stopped = state.commands.stop(&site, name.as_deref());
+            Ok(json!({"ok": true, "site": site, "stopped": stopped}))
+        }
     }
+}
+
+/// The site `site` (or the one containing `cwd`), its folder and its saved commands.
+fn site_commands(state: &State, site: Option<String>, cwd: &str) -> Result<(String, PathBuf, Vec<AppCommand>), String> {
+    let config = state.config.lock().unwrap();
+    let sites = sites::resolve(&config);
+    let name = pick_site(&sites, site, cwd)?;
+    let dir = sites.iter().find(|s| s.name == name).map(|s| s.path.clone()).unwrap_or_default();
+    Ok((name.clone(), dir, config.apps.get(&name).map(|a| a.commands.clone()).unwrap_or_default()))
 }
 
 fn service_status(state: &State, name: &str, installed: bool) -> &'static str {

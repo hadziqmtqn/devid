@@ -1,8 +1,8 @@
 # Phase 8 Plan: apps, commands and sharing
 
 > Scope: app types detected per site (PHP, static, Node), a local port per site, user commands the daemon runs, and sharing a site through a quick tunnel (D-035, D-036, D-037)
-> Verified against: 2026-11-08 (A3 built on branch `feat/a3-local-port`)
-> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 built, see "A3 as built"; A4 next
+> Verified against: 2026-11-08 (A4 built on branch `feat/a4-commands`)
+> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 released in 0.9.0, see "A3 as built"; A4 built, see "A4 as built"; A5 next
 
 Today Devid serves every site as PHP through php-fpm, and the docroot is `public/` when it exists (`daemon::sites`). Everything else the owner runs is still started by hand in a terminal:
 
@@ -355,6 +355,36 @@ The proxy tests used a throwaway nginx (Devid's 1.30 binary, its own prefix and 
   - The owner's daemon, sites and dev servers were not touched.
 
 **Owner's migration** (after the release, A3 part of "Owner's migration" above): stop `php artisan serve`, then `devid app port erdbpro-saas 8000`. If `artisan serve` is still running, Devid says so and keeps serving everything else.
+
+### A4 as built (2026-11-08)
+
+- **Config:** `[[apps.<site>.commands]]` with `name` and `run`, in the order they were added. A name is letters, digits, `-`, `_`, `.` and `:` (as npm scripts are named), up to 40 characters. Saving a name again replaces its line.
+- **`daemon::commands`:**
+  - **Start:** `$SHELL -c '<run>'` in the site's folder, in its own session (`setsid`), stdin `/dev/null`, the signal mask cleared (the daemon blocks its stop signals), stdout and stderr appended to the log.
+  - **Environment:** `$SHELL -l -c 'env -0'` once per daemon, at the first start, ten seconds at most. If it fails, the daemon's own environment is used and the log says so. `PATH` is Devid's `bin` (its `php` and `composer` shims), then nvm's Node for the folder, then the login shell's `PATH`.
+  - **nvm:** `.nvmrc`, else `alias/default`, following aliases (`lts/*` → `lts/jod` → `v22.…`), then the highest installed `versions/node/v…` that matches; `node` means the newest. No match leaves `PATH` alone.
+  - **Stop:** SIGINT to the group, SIGTERM after 5 s, SIGKILL after 10 s; it returns when no process of the group is left. Stopping several commands signals them together.
+  - **State:** `running` (pid, since), `exited` (code or signal, when) or `stopped`. A watcher thread per running command checks once a second; nothing restarts.
+  - **Log:** `~/.devid/log/app-<site>-<name>.log`, emptied at each start, headed by `$ <run>`, cut to its last 1 MB from a line start once it passes 10 MB (checked every 30 s). `devid logs` and the Logs page show it; log names may now contain `:`.
+  - **Leftovers:** `~/.devid/run/app-<site>-<name>.pid` holds the pid and its `ps` start time. A starting daemon stops every group whose leader still has that start time (in the background), and removes the files. A daemon stop stops every command.
+- **Requests:** `CommandAdd`, `CommandRemove` (stops it first), `CommandStart` and `CommandStop` (one command, or all of the site's when `name` is None). `CommandStop` also takes a site that was ignored or unlinked while its commands ran.
+- **`sites` reply:** `commands` (name, run, log and the state above) and `suggestions`: `package.json` scripts named `dev*`, `start*` or `watch*` with the lockfile's package manager (pnpm, yarn, bun, else npm), and for Laravel `queue:work`, `schedule:work` and `reverb:start` when `laravel/reverb` is required. A suggestion whose name or line is already saved is left out. `status` adds `commands_running`.
+- **`app reset`** now keeps the local port as well as the commands: it resets the type only. In A3 it also dropped the port.
+- **CLI:** `devid cmd [list] [site]`, `devid cmd add [site] <name> -- <command…>`, `devid cmd rm [site] <name>`, `devid cmd start|stop [site] [name]`. Inside a project, one argument to start or stop is a command of that site when it has one by that name, else a site. `devid status` shows the number of running commands.
+- **Version:** 0.10.0.
+
+**Verification:**
+- **Checks:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass (78 tests).
+- **New unit tests:** nvm resolution (`.nvmrc`, default alias, alias chains, `node`, numeric order, no match, a path in `.nvmrc`); name validation; log cutting; suggestions; `[[apps.<site>.commands]]` in the config.
+- **New integration test** (`commands`), with `SHELL=/bin/sh`: suggestions; add and validation; start all; an exited command's code and log; the command runs in the site's folder with Devid's `bin` first on `PATH`; stop one; stop all, where a command that ignores SIGINT with a child needs SIGTERM (5 s) and nothing is left; `kill -9` of the daemon leaves a command running and the next daemon stops it; `app reset` keeps the commands; `cmd rm` stops a running one; `daemon stop` stops them all.
+- **Acceptance on the owner's Mac:** a second daemon (own `DEVID_HOME`) with launchd's environment (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `HOME`, `SHELL`), erd-builder-pro linked there, `PORT=3010 npm run dev:pg:local` and `npm run dev:tauri` saved, then `devid cmd start` in the project:
+  - npm and Node v24.20.0 came from Devid's nvm lookup; cargo from the script's own `$HOME/.cargo/bin`.
+  - Vite (3098) answered after 29 s, the API (3100) and `dev:pg:local` (3010) after 74 s. The cold Tauri debug build took 11 min 28 s while the Mac was busy (load average up to 50), and the "ERD Builder Pro" dev window opened (the owner saw it).
+  - With both running: `dev:pg:local` was 6 processes and 477 MB RSS, `dev:tauri` 15 processes (npm, concurrently, tsx, node, esbuild, the app) and 930 MB. The daemon (debug build) was 5.3 MB RSS with 6 threads.
+  - `devid cmd stop erd-builder-pro` took 1 s: no process of either group was left, ports 3010, 3100, 3098 and 24678 were closed, the window was gone and the pid files were removed.
+  - The owner's own `dev:pg:local` on port 3000 and their other erd-builder-pro instance kept running; the repository was unchanged.
+
+**Owner's migration** (A4 part): `devid unignore erd-builder-pro`, then in the project `devid cmd add dev:pg:local -- npm run dev:pg:local` and `devid cmd add tauri -- npm run dev:tauri`, and `devid cmd start` once the terminal copies are stopped (the saved `dev:pg:local` needs port 3000).
 
 ## Not in this phase
 
