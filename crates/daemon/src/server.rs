@@ -297,6 +297,10 @@ pub fn run(paths: Paths) -> io::Result<()> {
         // Keep the daemon reachable so `devid status` can show the problem.
         eprintln!("devid: {e}");
     }
+    // D-040: the commands a Devid-made restart (an update) interrupted run again; off the main
+    // thread, since reading the login shell's environment can take a few seconds.
+    let resuming = Arc::clone(&state);
+    std::thread::spawn(move || resume_commands(&resuming));
 
     for stream in listener.incoming() {
         if state.stopping.load(Ordering::SeqCst) {
@@ -868,7 +872,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             let warning = port_warning(state, &site);
             let results: Vec<Value> = chosen
                 .iter()
-                .map(|c| match state.commands.start(&site, &c.name, &c.run, &dir) {
+                .map(|c| match state.commands.start(&site, &c.name, &c.run, &dir, None) {
                     Ok(pid) => {
                         json!({"name": c.name, "ok": true, "pid": pid, "log": commands::log_name(&site, &c.name)})
                     }
@@ -914,7 +918,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 share_origin(local, standard_ports(&config, &state.paths), config.http_port),
                 config.tld
             );
-            state.commands.start(&site, commands::SHARE, &run, &dir)?;
+            state.commands.start(&site, commands::SHARE, &run, &dir, None)?;
             // The URL shows in cloudflared's log a few seconds after it starts.
             let deadline = Instant::now() + std::time::Duration::from_secs(30);
             loop {
@@ -938,6 +942,20 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 }
             }
         }
+        Request::RememberRunning => {
+            let running: Vec<Value> = state
+                .commands
+                .running()
+                .into_iter()
+                .filter(|(_, n)| n != commands::SHARE)
+                .map(|(site, name)| json!({"site": site, "name": name}))
+                .collect();
+            let note = json!({"at": now_secs(), "commands": running});
+            let path = resume_file(&state.paths);
+            let tmp = path.with_extension("json.tmp");
+            fs::write(&tmp, note.to_string()).and_then(|_| fs::rename(&tmp, &path)).map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true, "remembered": running}))
+        }
         Request::ShareStop { site, cwd } => {
             let site = match site_commands(state, site.clone(), &cwd) {
                 Ok((site, ..)) => site,
@@ -948,6 +966,54 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             };
             let stopped = !state.commands.stop(&site, Some(commands::SHARE)).is_empty();
             Ok(json!({"ok": true, "site": site, "stopped": stopped}))
+        }
+    }
+}
+
+/// Where `RememberRunning` notes the commands to start again (D-040).
+fn resume_file(paths: &Paths) -> PathBuf {
+    paths.run_dir().join("resume.json")
+}
+
+/// A note older than this is not followed: it was not this restart's.
+const RESUME_WITHIN_SECS: u64 = 600;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// D-040: start again the commands `RememberRunning` noted just before this daemon's start (an
+/// update or `devid setup`). The note is used once; an old one, a removed command or a site that
+/// is gone is skipped. Never at login or after a crash: nothing writes the note then.
+fn resume_commands(state: &State) {
+    let path = resume_file(&state.paths);
+    let Ok(text) = fs::read_to_string(&path) else { return };
+    let note: Value = serde_json::from_str(&text).unwrap_or_default();
+    if now_secs().saturating_sub(note["at"].as_u64().unwrap_or(0)) <= RESUME_WITHIN_SECS {
+        start_noted(state, &note);
+    }
+    // Removed last: once it is gone, this restart's resume is done.
+    let _ = fs::remove_file(&path);
+}
+
+fn start_noted(state: &State, note: &Value) {
+    let config = state.config.lock().unwrap().clone();
+    let sites = sites::resolve(&config);
+    for c in note["commands"].as_array().into_iter().flatten() {
+        let (site, name) = (c["site"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default());
+        let saved = config.apps.get(site).and_then(|a| a.commands.iter().find(|x| x.name == name));
+        let dir = sites.iter().find(|s| s.name == site).map(|s| s.path.clone());
+        if let (Some(saved), Some(dir)) = (saved, dir) {
+            match state.commands.start(
+                site,
+                name,
+                &saved.run,
+                &dir,
+                Some("started again after Devid restarted for an update"),
+            ) {
+                Ok(_) => eprintln!("devid: started {site} · {name} again after the restart"),
+                Err(e) => eprintln!("devid: could not start {site} · {name} again: {e}"),
+            }
         }
     }
 }

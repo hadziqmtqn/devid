@@ -276,3 +276,50 @@ fn a_busy_dev_server_port_is_named_when_a_command_starts() {
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// D-040: a restart Devid does itself (`devid setup`, run by an update) notes the running
+/// commands, and the next daemon starts exactly those again, once. A plain daemon stop, as at
+/// logout, notes nothing, and an old note is not followed.
+#[test]
+fn commands_run_again_after_an_update_restart_only() {
+    use devid_daemon::{
+        paths::Paths,
+        protocol::{Request, request},
+    };
+    let root = temp_root("devid-resume-it");
+    let home = root.join("home");
+    fs::create_dir_all(root.join("projects/app")).unwrap();
+    let env = [("SHELL", "/bin/sh")];
+    let daemon = start_daemon_env(&home, &env);
+    ok(&home, &["park", root.join("projects").to_str().unwrap()]);
+    ok(&home, &["cmd", "add", "app", "dev", "--", "sleep 300"]);
+    ok(&home, &["cmd", "add", "app", "queue", "--", "sleep 300"]);
+    ok(&home, &["cmd", "start", "app", "dev"]);
+
+    // What setup asks the old daemon right before it restarts it.
+    let reply = request(&Paths { home: home.clone() }, &Request::RememberRunning).unwrap();
+    assert_eq!(reply["remembered"], json!([{"site": "app", "name": "dev"}]));
+    daemon.stop();
+
+    let daemon = start_daemon_env(&home, &env);
+    wait_for("dev to run again", || command(&home, "dev")["state"] == "running");
+    assert_eq!(command(&home, "queue")["state"], "stopped", "only what was running");
+    assert!(!home.join("run/resume.json").exists(), "the note is used once");
+    let log = fs::read_to_string(home.join("log/app-app-dev.log")).unwrap();
+    assert!(log.starts_with("devid: started again after Devid restarted for an update\n$ sleep 300"), "{log}");
+
+    // A plain stop (logout, `devid daemon stop`) notes nothing: nothing starts.
+    daemon.stop();
+    let daemon = start_daemon_env(&home, &env);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(command(&home, "dev")["state"], "stopped");
+
+    // A note from long ago is not this restart's.
+    daemon.stop();
+    fs::write(home.join("run/resume.json"), r#"{"at": 1000, "commands": [{"site": "app", "name": "dev"}]}"#).unwrap();
+    let daemon = start_daemon_env(&home, &env);
+    wait_for("the old note to be dropped", || !home.join("run/resume.json").exists());
+    assert_eq!(command(&home, "dev")["state"], "stopped");
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}

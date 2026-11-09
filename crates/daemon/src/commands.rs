@@ -87,8 +87,9 @@ impl Commands {
         self.paths.run_dir().join(format!("app-{site}-{name}.pid"))
     }
 
-    /// Start `run` in `dir` unless it is running already; returns its pid.
-    pub fn start(&self, site: &str, name: &str, run: &str, dir: &Path) -> Result<u32, String> {
+    /// Start `run` in `dir` unless it is running already; returns its pid. `note` heads the log
+    /// ("started again after an update").
+    pub fn start(&self, site: &str, name: &str, run: &str, dir: &Path, note: Option<&str>) -> Result<u32, String> {
         let key = (site.to_string(), name.to_string());
         let old = {
             let mut runs = self.runs.lock().unwrap();
@@ -108,8 +109,8 @@ impl Commands {
             File::create(&log_path)?;
             // O_APPEND: when the log is cut (cap_log), the command carries on at the new end.
             let mut log = OpenOptions::new().append(true).open(&log_path)?;
-            if let Some(w) = &warning {
-                writeln!(log, "devid: {w}")?;
+            for line in [warning.as_deref(), note].into_iter().flatten() {
+                writeln!(log, "devid: {line}")?;
             }
             writeln!(log, "$ {run}")?;
             Ok(log)

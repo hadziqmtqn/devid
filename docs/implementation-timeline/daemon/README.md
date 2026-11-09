@@ -24,3 +24,4 @@
 | 2026-11-08 | [Phase 8 A6: Share through a Cloudflare quick tunnel (v0.12.0)](2026-11-08-a6-share.md) |
 | 2026-11-09 | [Fix: Share reaches the site on its local port or :80, not on 8088 (v0.12.1)](2026-11-09-share-origin.md) |
 | 2026-11-09 | [Starting a command warns when the dev server port is held outside Devid (v0.12.2)](2026-11-09-command-port-warning.md) |
+| 2026-11-09 | [Commands run again after Devid restarts for an update (D-040, v0.12.3)](2026-11-09-resume-after-update.md) |

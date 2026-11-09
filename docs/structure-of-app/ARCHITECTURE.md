@@ -213,7 +213,7 @@ Implemented in T5:
   - The environment is the login shell's (`$SHELL -l -c 'env -0'`, read once per daemon), with Devid's `bin` and nvm's Node for the folder first on `PATH`.
   - Stop: SIGINT to the group, SIGTERM after 5 s, SIGKILL after 10 s, until no process of the group is left.
   - A watcher thread per running command records its exit; `~/.devid/run/app-<site>-<name>.pid` (pid and start time) lets the next daemon stop what a crashed one left.
-- **Lifetime:** the daemon stops every command when it stops (logout, `devid daemon stop`, a self-update).
+- **Lifetime:** the daemon stops every command when it stops (logout, `devid daemon stop`, a self-update). Before `devid setup` reloads the daemon (an update), `remember_running` notes the running commands in `run/resume.json`. The next daemon starts them again and removes the note (D-040); a note older than 10 minutes is dropped.
 - **Requests and CLI:** `command_add`, `command_remove`, `command_start`, `command_stop`; `devid cmd [list|add|rm|start|stop]`. The `sites` reply carries each command's state and suggestions from `package.json` and Laravel; `status` lists `running_commands` for the menu bar.
 - **Share (A6, D-037):** `share_start` runs an existing `cloudflared tunnel --url http://127.0.0.1:<http_port> --http-host-header <site>.<tld>` as the site's `.share` command entry and reads its `trycloudflare.com` URL from `share-<site>.log`; `share_stop` ends it. `sites` reports `share` per site, `status` the `shares`.
 - **Desktop app (A5):** a site's detail view (type, serving, local port, commands with their log) and the menu bar's running commands with Stop; every action is a daemon request the CLI also sends.
