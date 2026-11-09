@@ -194,6 +194,9 @@ pub enum Request {
         site: Option<String>,
         cwd: String,
     },
+    /// Before a restart Devid does itself (`devid setup`, also run by `self-update`): note the
+    /// running commands so the next daemon starts them again (D-040). Not shares.
+    RememberRunning,
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

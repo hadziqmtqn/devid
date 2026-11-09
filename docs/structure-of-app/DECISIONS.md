@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-040 | 2026-11-09 | accepted (amends D-036) | Commands that a Devid-made restart (an update, `devid setup`) interrupts start again in the new daemon; never at login or after a crash |
 | D-039 | 2026-11-09 | accepted | The desktop app updates devid in the background and reopens as the new version; Terminal only for a step that needs sudo |
 | D-038 | 2026-11-08 | accepted (amends D-016's release layout) | The newest stable devid is GitHub's "Latest" release in `devid-binaries`; the PHP/nginx builds move to a rolling `runtime-latest` release; tags with a suffix are pre-releases |
 
@@ -606,4 +607,18 @@ See ARCHITECTURE, "PHP runtime".
   - `--no-sudo` (also on `devid setup`) skips a system setup step that would need the password and reports it (exit code 3). Everything else installs.
   - The app then offers Terminal for `devid setup`. That is the only case left for Terminal, besides `setup` and `uninstall` started on purpose.
 - **Why it is safe:** an update needs sudo only when the system setup (resolver, CA trust, port forwarding) is missing or changes. The download is still sha256-checked, and the new binary installs itself as before.
+- **Accepted:** by the owner on 2026-11-09.
+
+## D-040: commands run again after Devid restarts itself (accepted 2026-11-09, amends D-036)
+
+- **Context:** D-036 says commands never start by themselves, and a daemon stop stops them all. An update restarts the daemon (`self-update` runs the new `devid setup`, which reloads the LaunchAgent). After updating to 0.12.2 from the app, the owner found erd-builder-pro's `start` stopped, and asked whether Devid should start again what was running.
+- **Decision:**
+  - Right before `devid setup` reloads the daemon, it sends `remember_running`. The running daemon writes its running commands (not shares) to `~/.devid/run/resume.json`, with the time.
+  - The next daemon, after applying its config, starts those commands again in the background. Each log is headed "started again after Devid restarted for an update".
+  - Then it removes the note. A note older than 10 minutes, a command that was removed and a site that is gone are skipped.
+- **What stays as D-036 says:**
+  - At login, after a crash, after `devid daemon stop` and at logout, no note is written, so nothing starts.
+  - Shares are not started again, because their link would change without notice.
+- **Why:** an update is an interruption Devid makes itself, minutes after the owner chose what to run. Login and crashes give no such signal, and on a 2-core Mac a dev server costs 0.5–1 GB.
+- **Limit:** the old daemon must know `remember_running`, so this works from the update after 0.12.3 is installed.
 - **Accepted:** by the owner on 2026-11-09.

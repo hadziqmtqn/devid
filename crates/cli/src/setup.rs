@@ -79,6 +79,9 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
             .map_err(|e| e.to_string())
     })?;
     step(dry_run, "run the daemon as a LaunchAgent (now and at every login)", || {
+        // D-040: the running commands start again in the new daemon. An older daemon does not know
+        // the request, and none may run; either way there is nothing to note.
+        let _ = request(paths, &Request::RememberRunning);
         // A daemon started by hand would hold the socket; hand over to launchd.
         if !install::agent_loaded() && request(paths, &Request::Stop).is_ok() {
             wait_until(Duration::from_secs(15), || !paths.socket().exists());
