@@ -159,3 +159,78 @@ fn share_runs_cloudflared_and_reads_its_url() {
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// A pid file left by a crashed daemon names a process group; if that pid now belongs to another
+/// program (a different start time), the next daemon must leave it alone and drop the file.
+#[test]
+fn a_reused_pid_is_never_stopped() {
+    use std::os::unix::process::CommandExt;
+    let root = temp_root("devid-pidreuse-it");
+    let home = root.join("home");
+    fs::create_dir_all(home.join("run")).unwrap();
+    // Another program, leading its own process group like a command would.
+    let mut other = Command::new("sleep").arg("300").process_group(0).spawn().unwrap();
+    let pid = other.id();
+    fs::write(home.join("run/app-shop-dev.pid"), format!("{pid} Mon Jan  1 00:00:00 2001\n")).unwrap();
+
+    let daemon = start_daemon_env(&home, &[("SHELL", "/bin/sh")]);
+    assert!(!home.join("run/app-shop-dev.pid").exists(), "the stale pid file is removed");
+    // The daemon decides before it answers; a wrong decision would signal at once. Watch for a second.
+    let until = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < until {
+        assert!(other.try_wait().unwrap().is_none(), "the other program was stopped");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    daemon.stop();
+    let _ = other.kill();
+    let _ = other.wait();
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// When the login shell's environment cannot be read, the command still starts with the daemon's,
+/// and its log says why, instead of failing silently.
+#[test]
+fn a_broken_login_shell_is_named_in_the_log() {
+    let root = temp_root("devid-badshell-it");
+    let home = root.join("home");
+    fs::create_dir_all(root.join("projects/app")).unwrap();
+    let daemon = start_daemon_env(&home, &[("SHELL", "/usr/bin/false")]);
+    ok(&home, &["park", root.join("projects").to_str().unwrap()]);
+    ok(&home, &["cmd", "add", "app", "dev", "--", "echo hello"]);
+    ok(&home, &["cmd", "start", "app", "dev"]);
+    wait_for("dev to end", || command(&home, "dev")["state"] == "exited");
+    let log = fs::read_to_string(home.join("log/app-app-dev.log")).unwrap();
+    assert!(log.starts_with("devid: could not read your login shell's environment (/usr/bin/false -l failed"), "{log}");
+    assert!(log.contains("$ echo hello"));
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A cloudflared that gives up (no quick tunnel) is reported with the end of its log.
+#[test]
+fn a_failed_share_reports_cloudflareds_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temp_root("devid-sharefail-it");
+    let home = root.join("home");
+    fs::create_dir_all(root.join("projects/app")).unwrap();
+    let fake = root.join("cloudflared");
+    fs::write(
+        &fake,
+        "#!/bin/sh\necho 'ERR failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": dial tcp: i/o timeout' >&2\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    let daemon = start_daemon_env(&home, &[("SHELL", "/bin/sh"), ("DEVID_CLOUDFLARED", fake.to_str().unwrap())]);
+    ok(&home, &["park", root.join("projects").to_str().unwrap()]);
+    let nginx = fake_nginx(&root, &home);
+    ok(&home, &["server", "install", "nginx", "--from", nginx.to_str().unwrap()]);
+
+    let out = devid(&home, &["share", "app"]);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(err.contains("cloudflared stopped") && err.contains("failed to request quick Tunnel"), "{err}");
+    assert!(!err.contains("trycloudflare.com  →"), "the API endpoint is not mistaken for a link");
+    assert_eq!(site(&home)["share"]["state"], "exited");
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}

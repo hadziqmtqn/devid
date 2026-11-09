@@ -224,7 +224,12 @@ fn doctor_checks(text: &str) -> Vec<Value> {
 /// Terminal for it.
 #[tauri::command]
 pub async fn self_update() -> Result<Value, String> {
-    let out = output(Command::new(devid_bin()).args(["self-update", "--no-sudo"]), Duration::from_secs(600))?;
+    update_reply(output(Command::new(devid_bin()).args(["self-update", "--no-sudo"]), Duration::from_secs(600))?)
+}
+
+/// What the page needs from `devid self-update`'s output: the version it installed (none when
+/// devid was already the newest), or its last error line.
+fn update_reply(out: Output) -> Result<Value, String> {
     if !out.ok {
         let lines: Vec<&str> = out.stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
         let last = lines.last().copied().unwrap_or("`devid self-update` failed");
@@ -353,6 +358,38 @@ fn first_line(text: &str, otherwise: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn self_update_output_becomes_the_pages_reply() {
+        let out = |ok: bool, stdout: &str, stderr: &str| Output { ok, stdout: stdout.into(), stderr: stderr.into() };
+        let installed = update_reply(out(
+            true,
+            "downloading devid 0.13.0 (sha256-checked)…\ndevid setup:\n  ok  install …\n\ndone. Next: …\n",
+            "",
+        ))
+        .unwrap();
+        assert_eq!(installed["installed"], "0.13.0", "relaunch only after a new version");
+
+        let newest = update_reply(out(true, "devid 0.12.1 is the newest version\n", "")).unwrap();
+        assert_eq!(
+            (newest["installed"].is_null(), newest["text"].as_str()),
+            (true, Some("devid 0.12.1 is the newest version"))
+        );
+
+        let sudo = update_reply(out(
+            false,
+            "downloading devid 0.13.0 (sha256-checked)…\n  !!  system setup … needs your password\n",
+            "devid: system setup … needs your password\ndevid: devid 0.13.0 is installed, but its system setup (.test DNS, ports 80/443, CA trust) needs your password: run `devid setup` in Terminal\n",
+        ))
+        .unwrap_err();
+        assert!(sudo.starts_with("devid 0.13.0 is installed, but") && sudo.contains("needs your password"), "{sudo}");
+
+        assert_eq!(
+            update_reply(out(false, "", "")).unwrap_err(),
+            "`devid self-update` failed",
+            "no output still says what failed"
+        );
+    }
 
     #[test]
     fn doctor_output_becomes_checks_with_their_fixes() {
