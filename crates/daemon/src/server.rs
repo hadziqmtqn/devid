@@ -865,6 +865,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 None if saved.is_empty() => return Err(format!("{site} has no commands; {}", add("<name>"))),
                 None => saved,
             };
+            let warning = port_warning(state, &site);
             let results: Vec<Value> = chosen
                 .iter()
                 .map(|c| match state.commands.start(&site, &c.name, &c.run, &dir) {
@@ -880,7 +881,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             {
                 return Err(one["error"].as_str().unwrap_or("could not start it").to_string());
             }
-            Ok(json!({"ok": true, "site": site, "results": results}))
+            Ok(json!({"ok": true, "site": site, "results": results, "warning": warning}))
         }
         Request::CommandStop { site, cwd, name } => {
             // A site that was ignored or unlinked meanwhile can still have commands running.
@@ -987,6 +988,22 @@ fn cloudflared() -> Option<PathBuf> {
         .chain(std::env::split_paths(&path))
         .map(|d| d.join("cloudflared"))
         .find(|p| p.is_file())
+}
+
+/// A proxy site's dev server port held by a program Devid did not start (none of the site's
+/// commands runs): a dev server on that port would only fail with EADDRINUSE in its log, so the
+/// start reply says so first. Owner's case, 2026-11-09: an `npm start` left from a closed Terminal.
+fn port_warning(state: &State, site: &str) -> Option<String> {
+    let config = state.config.lock().unwrap().clone();
+    let s = sites::resolve(&config).into_iter().find(|s| s.name == site)?;
+    let ours = state.commands.running().iter().any(|(x, n)| x == site && n != commands::SHARE);
+    (s.mode == Mode::Proxy && !ours && ports::in_use(s.upstream)).then(|| {
+        let who = ports::holder(s.upstream).unwrap_or_else(|| "another program".into());
+        format!(
+            "port {} is already in use by {who}, which Devid did not start; a dev server on that port cannot start until it stops",
+            s.upstream
+        )
+    })
 }
 
 /// The site `site` (or the one containing `cwd`), its folder and its saved commands.
