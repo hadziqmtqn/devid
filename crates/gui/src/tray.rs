@@ -34,6 +34,8 @@ pub struct View {
     pub updates: usize,
     /// Running commands (D-036) as (site, name); their number shows next to the icon.
     pub commands: Vec<(String, String)>,
+    /// Shared sites (D-037).
+    pub shares: Vec<String>,
 }
 
 pub fn view(status: Result<&Value, &str>) -> View {
@@ -45,6 +47,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
             server: String::new(),
             updates: 0,
             commands: Vec::new(),
+            shares: Vec::new(),
         };
     };
     let failed = s["php"].as_array().into_iter().flatten().filter(|p| p["status"] == "failed").count()
@@ -66,6 +69,8 @@ pub fn view(status: Result<&Value, &str>) -> View {
         .flatten()
         .map(|c| (c["site"].as_str().unwrap_or("?").to_string(), c["name"].as_str().unwrap_or("?").to_string()))
         .collect();
+    let shares =
+        s["shares"].as_array().into_iter().flatten().filter_map(|x| x["site"].as_str().map(String::from)).collect();
     View {
         icon: if failed > 0 {
             "bad"
@@ -79,6 +84,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
         server,
         updates,
         commands,
+        shares,
     }
 }
 
@@ -183,6 +189,12 @@ fn menu(app: &AppHandle, v: &View, error: Option<&str>) -> tauri::Result<Menu<Wr
         }
         m.append(&item("cmd-stop-all", "Stop all commands", true, None)?)?;
     }
+    if !v.shares.is_empty() {
+        m.append(&sep()?)?;
+        for site in &v.shares {
+            m.append(&item(&format!("share-stop:{site}"), &format!("Stop sharing {site}"), true, None)?)?;
+        }
+    }
     match v.running {
         Some(true) => {
             m.append(&sep()?)?;
@@ -208,6 +220,14 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
         "open" => crate::open_window(app, None),
         "settings" | "updates" => crate::open_window(app, Some("settings")),
         "quit" => app.exit(0),
+        id if id.starts_with("share-stop:") => {
+            let (app, site) = (app.clone(), id.trim_start_matches("share-stop:").to_string());
+            std::thread::spawn(move || {
+                let req = Request::ShareStop { site: Some(site), cwd: "/".into() };
+                *app.state::<TrayState>().error.lock().unwrap() = request(&Paths::from_env(), &req).err();
+                refresh(&app);
+            });
+        }
         id if id == "cmd-stop-all" || id.starts_with("cmd-stop:") => {
             // A stop waits until nothing of the command is left (up to 10 s).
             let (app, id) = (app.clone(), id.to_string());
@@ -281,6 +301,9 @@ mod tests {
 
         let commands = json!({"server": "nginx", "server_status": "running", "php": [],
             "running_commands": [{"site": "erd", "name": "dev:pg:local"}, {"site": "erd", "name": "tauri"}]});
+        let shared = json!({"server": "nginx", "server_status": "running", "php": [],
+            "shares": [{"site": "erd", "url": "https://a-b.trycloudflare.com"}]});
+        assert_eq!(view(Ok(&shared)).shares, ["erd"]);
         assert_eq!(
             view(Ok(&commands)).commands,
             [("erd".to_string(), "dev:pg:local".to_string()), ("erd".to_string(), "tauri".to_string())]

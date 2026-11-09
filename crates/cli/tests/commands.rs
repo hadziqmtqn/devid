@@ -107,3 +107,55 @@ fn commands_start_stop_and_survive_nothing() {
     assert!(!group_alive(&env_show));
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// Share (D-037) with a fake cloudflared that prints its quick-tunnel URL the way the real one
+/// does; nothing reaches the internet.
+#[test]
+fn share_runs_cloudflared_and_reads_its_url() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temp_root("devid-share-it");
+    let home = root.join("home");
+    fs::create_dir_all(root.join("projects/app")).unwrap();
+    let fake = root.join("cloudflared");
+    fs::write(
+        &fake,
+        "#!/bin/sh\necho \"$*\" > \"$DEVID_HOME/cloudflared-args\"\nsleep 1\n\
+         echo '2026-11-08T10:00:02Z INF |  https://test-lamp-river.trycloudflare.com    |' >&2\nsleep 300\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    let env = [("SHELL", "/bin/sh"), ("DEVID_CLOUDFLARED", fake.to_str().unwrap())];
+    let daemon = start_daemon_env(&home, &env);
+    ok(&home, &["park", root.join("projects").to_str().unwrap()]);
+
+    let out = devid(&home, &["share", "app"]);
+    assert!(!out.status.success() && stderr(&out).contains("is not running"), "no web server: {}", stderr(&out));
+    let nginx = fake_nginx(&root, &home);
+    ok(&home, &["server", "install", "nginx", "--from", nginx.to_str().unwrap()]);
+
+    let out = devid(&home, &["share", "app"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("https://test-lamp-river.trycloudflare.com  →  app"));
+    let args = fs::read_to_string(home.join("cloudflared-args")).unwrap();
+    assert_eq!(
+        args.trim(),
+        format!("tunnel --no-autoupdate --url http://127.0.0.1:{TEST_HTTP_PORT} --http-host-header app.test")
+    );
+    let share = site(&home)["share"].clone();
+    assert_eq!((share["state"].as_str(), share["log"].as_str()), (Some("running"), Some("share-app.log")));
+    let status = json(&home, &["status", "--json"]);
+    assert_eq!(status["shares"][0]["url"], "https://test-lamp-river.trycloudflare.com");
+    assert_eq!(status["commands_running"], 0, "a share is not a command");
+    let pid = Command::new("pgrep").args(["-f", fake.to_str().unwrap()]).output().unwrap();
+    let pid = String::from_utf8_lossy(&pid.stdout).lines().next().unwrap().to_string();
+
+    ok(&home, &["cmd", "stop", "app"]);
+    assert_eq!(site(&home)["share"]["state"], "running", "stopping the site's commands leaves its share");
+    let out = devid(&home, &["share", "app", "--stop"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("stopped sharing app"));
+    assert!(site(&home)["share"].is_null());
+    // A zombie answers kill -0 until the daemon's watcher reaps it (within a second).
+    wait_for("cloudflared to be gone", || !Command::new("kill").args(["-0", &pid]).status().unwrap().success());
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}

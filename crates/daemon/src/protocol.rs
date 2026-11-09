@@ -183,6 +183,17 @@ pub enum Request {
         cwd: String,
         name: Option<String>,
     },
+    /// Share a site through a Cloudflare quick tunnel (D-037); replies with its trycloudflare.com
+    /// URL, or none yet if cloudflared is still connecting. Sent again, it only reports the URL.
+    ShareStart {
+        site: Option<String>,
+        cwd: String,
+    },
+    /// Stop sharing a site.
+    ShareStop {
+        site: Option<String>,
+        cwd: String,
+    },
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

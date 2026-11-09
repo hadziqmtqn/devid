@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "devid-cli"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "clap",
  "devid-daemon",
@@ -829,7 +829,7 @@ dependencies = [
 
 [[package]]
 name = "devid-daemon"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "libc",
  "rcgen",
@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "devid-gui"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "devid-daemon",
  "serde",

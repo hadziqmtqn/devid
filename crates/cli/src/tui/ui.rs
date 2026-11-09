@@ -170,6 +170,9 @@ fn draw_sites(frame: &mut Frame, app: &App, area: Rect) {
         if running > 0 {
             serving.push(Span::styled(format!(" · ● {running} running"), ok(app)));
         }
+        if site["share"]["url"].is_string() {
+            serving.push(Span::styled(" · shared", ok(app)));
+        }
         Row::new(vec![
             Cell::from(s(&site["url"]).to_string()),
             Cell::from(site["preset_label"].as_str().unwrap_or_default().to_string()),

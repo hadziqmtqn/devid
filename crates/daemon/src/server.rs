@@ -435,9 +435,14 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "login_item": install::app_agent_program(),
                 "update_check_minutes": config.update_check_minutes,
                 "updates": *state.updates.lock().unwrap(),
-                "commands_running": state.commands.running().len(),
+                "commands_running": state.commands.running().iter().filter(|(_, n)| n != commands::SHARE).count(),
                 "running_commands": state.commands.running().into_iter()
+                    .filter(|(_, n)| n != commands::SHARE)
                     .map(|(site, name)| json!({"site": site, "name": name}))
+                    .collect::<Vec<_>>(),
+                "shares": state.commands.running().into_iter()
+                    .filter(|(_, n)| n == commands::SHARE)
+                    .map(|(site, _)| json!({"site": site, "url": share_state(state, &site)["url"]}))
                     .collect::<Vec<_>>(),
             }))
         }
@@ -659,6 +664,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                         "port_busy": busy.get(&s.name),
                         "commands": commands,
                         "suggestions": suggestions,
+                        "share": share_state(state, &s.name),
                     })
                 })
                 .collect();
@@ -888,7 +894,89 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             let stopped = state.commands.stop(&site, name.as_deref());
             Ok(json!({"ok": true, "site": site, "stopped": stopped}))
         }
+        Request::ShareStart { site, cwd } => {
+            let (site, dir, _) = site_commands(state, site, &cwd)?;
+            let bin = cloudflared().ok_or(
+                "cloudflared is not installed. Get it from https://developers.cloudflare.com/cloudflare-one/connections/\
+                 connect-networks/downloads/ (Devid uses an existing one and does not download it).",
+            )?;
+            let config = state.config.lock().unwrap().clone();
+            if !matches!(state.supervisor.state().get(&config.server), Some(ProcState::Running(_))) {
+                return Err(format!("{} is not running; start it first (`devid start all`)", config.server));
+            }
+            // Plain HTTP to the web server with the site's Host; cloudflared serves it over HTTPS.
+            let run = format!(
+                "exec '{}' tunnel --no-autoupdate --url http://127.0.0.1:{} --http-host-header {site}.{}",
+                bin.display(),
+                config.http_port,
+                config.tld
+            );
+            state.commands.start(&site, commands::SHARE, &run, &dir)?;
+            // The URL shows in cloudflared's log a few seconds after it starts.
+            let deadline = Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                let share = share_state(state, &site);
+                match share["state"].as_str() {
+                    Some("running") => {
+                        return Ok(json!({"ok": true, "site": site, "url": share["url"], "log": share["log"]}));
+                    }
+                    Some("exited") => {
+                        let log =
+                            fs::read_to_string(state.paths.log_dir().join(commands::log_name(&site, commands::SHARE)))
+                                .unwrap_or_default();
+                        let tail: Vec<&str> = log.lines().rev().take(3).collect();
+                        let tail: Vec<&str> = tail.into_iter().rev().collect();
+                        return Err(format!("cloudflared stopped: {}", tail.join(" | ")));
+                    }
+                    _ if Instant::now() > deadline => {
+                        return Ok(json!({"ok": true, "site": site, "url": null, "log": share["log"]}));
+                    }
+                    _ => std::thread::sleep(std::time::Duration::from_millis(250)),
+                }
+            }
+        }
+        Request::ShareStop { site, cwd } => {
+            let site = match site_commands(state, site.clone(), &cwd) {
+                Ok((site, ..)) => site,
+                Err(e) => match site {
+                    Some(s) if state.commands.has_runs(&s) => s,
+                    _ => return Err(e),
+                },
+            };
+            let stopped = !state.commands.stop(&site, Some(commands::SHARE)).is_empty();
+            Ok(json!({"ok": true, "site": site, "stopped": stopped}))
+        }
     }
+}
+
+/// A site's Share (D-037): null, or its state ("starting" until cloudflared prints the URL,
+/// "running", "exited"), URL and log name.
+fn share_state(state: &State, site: &str) -> Value {
+    let run = state.commands.state(site, commands::SHARE);
+    let log = commands::log_name(site, commands::SHARE);
+    match run["state"].as_str() {
+        Some("running") => {
+            let url = fs::read_to_string(state.paths.log_dir().join(&log)).ok().and_then(|t| commands::share_url(&t));
+            json!({"state": if url.is_some() { "running" } else { "starting" }, "url": url, "log": log})
+        }
+        Some("exited") => json!({"state": "exited", "url": null, "log": log}),
+        _ => Value::Null,
+    }
+}
+
+/// An existing cloudflared (D-037: Devid does not download it). `DEVID_CLOUDFLARED` overrides it
+/// for tests.
+fn cloudflared() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("DEVID_CLOUDFLARED").filter(|p| !p.is_empty()) {
+        return Some(PathBuf::from(p)).filter(|p| p.is_file());
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    ["/usr/local/bin", "/opt/homebrew/bin"]
+        .into_iter()
+        .map(PathBuf::from)
+        .chain(std::env::split_paths(&path))
+        .map(|d| d.join("cloudflared"))
+        .find(|p| p.is_file())
 }
 
 /// The site `site` (or the one containing `cwd`), its folder and its saved commands.
