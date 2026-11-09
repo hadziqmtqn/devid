@@ -218,6 +218,38 @@ fn doctor_checks(text: &str) -> Vec<Value> {
     checks
 }
 
+/// `devid self-update --no-sudo` in the background, as an app updates itself: download, check,
+/// install, restart the daemon and swap Devid.app; `relaunch` then opens the new version. A step
+/// that needs sudo is not run; the error says so ("needs your password") and the page offers
+/// Terminal for it.
+#[tauri::command]
+pub async fn self_update() -> Result<Value, String> {
+    let out = output(Command::new(devid_bin()).args(["self-update", "--no-sudo"]), Duration::from_secs(600))?;
+    if !out.ok {
+        let lines: Vec<&str> = out.stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        let last = lines.last().copied().unwrap_or("`devid self-update` failed");
+        return Err(last.strip_prefix("devid: ").unwrap_or(last).to_string());
+    }
+    // "downloading devid 0.13.0 (sha256-checked)…", or "devid 0.12.0 is the newest version".
+    let installed = out
+        .stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("downloading devid "))
+        .and_then(|rest| rest.split_whitespace().next())
+        .map(String::from);
+    Ok(json!({"installed": installed, "text": first_line(&out.stdout, "done")}))
+}
+
+/// Restart this app as the binary now at its path, with its window on `page` (after an update).
+#[tauri::command]
+pub fn relaunch(app: tauri::AppHandle, page: Option<String>) {
+    let page = page.and_then(|p| crate::start_page(&p));
+    let _ = app.run_on_main_thread(move || match page {
+        Some(p) => crate::restart(&["--page", p]),
+        None => crate::restart(&[]),
+    });
+}
+
 /// `devid self-update --check`: its one line, as the CLI prints it.
 #[tauri::command]
 pub async fn devid_check() -> Result<String, String> {

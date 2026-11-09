@@ -39,7 +39,17 @@ pub struct Pick {
     pub no_server: bool,
     /// Install the desktop app (an installed one is always updated).
     pub gui: bool,
+    /// Never ask for a password: a system setup step that needs sudo is skipped and reported, as
+    /// for an update started from the desktop app with no terminal.
+    pub no_sudo: bool,
 }
+
+/// The exit code of `setup --no-sudo` when it skipped a sudo step.
+pub const NEEDS_PASSWORD_EXIT: u8 = 3;
+
+/// The message for a skipped sudo step; the desktop app looks for "needs your password".
+pub const NEEDS_PASSWORD: &str =
+    "system setup (.test DNS, ports 80/443, CA trust) needs your password: run `devid setup` in Terminal";
 
 /// PHP versions to install and the version to make the default. Without `--php`, the configured
 /// default is installed only when no PHP is installed at all, so a re-run changes nothing.
@@ -87,8 +97,13 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
     })?;
 
     let plan = helper_plan(paths)?;
+    let mut needs_password = false;
     if !dry_run && h::status(&plan).iter().all(|(_, ok)| *ok) {
         println!("  ok  system setup (.test DNS, ports 80/443, CA trust) already in place");
+    } else if pick.no_sudo && !dry_run {
+        // Everything else still installs; the caller finishes this step in Terminal.
+        println!("  !!  {NEEDS_PASSWORD}");
+        needs_password = true;
     } else {
         println!("  {} system setup (.test DNS, ports 80/443, CA trust) via sudo:", if dry_run { "-" } else { ".." });
         helper(HelperAction::Install { dry_run }, paths)?;
@@ -136,6 +151,9 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
         step(dry_run, &format!("install the Devid app ({}, sha256-checked)", app.display()), || {
             install_app(paths).map(|_| "open it from Spotlight or ~/Applications".into())
         })?;
+    }
+    if needs_password {
+        return Err(NEEDS_PASSWORD.into());
     }
     if !dry_run {
         println!("\ndone. Next: `devid park ~/Projects` (or `devid link` in one project), then `devid doctor`.");
@@ -363,7 +381,7 @@ pub fn latest_devid(paths: &Paths) -> Result<String, String> {
 
 /// `devid self-update`: download the newest devid from the `devid-latest` release, verify it against
 /// that release's checksums.txt, then run its `setup`, which installs it and restarts the daemon.
-pub fn self_update(paths: &Paths, check: bool) -> Result<(), String> {
+pub fn self_update(paths: &Paths, check: bool, no_sudo: bool) -> Result<(), String> {
     use devid_daemon::releases;
     let get = |name: &str| fetch_latest(paths, name);
     let latest = latest_devid(paths)?;
@@ -389,9 +407,20 @@ pub fn self_update(paths: &Paths, check: bool) -> Result<(), String> {
     }
     std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).map_err(|e| e.to_string())?;
     // The new binary installs itself (copy to ~/.devid/bin, LaunchAgent reload); same steps as setup.
-    let status = std::process::Command::new(&bin).arg("setup").status().map_err(|e| e.to_string())?;
+    let mut setup = std::process::Command::new(&bin);
+    setup.arg("setup");
+    if no_sudo {
+        setup.arg("--no-sudo");
+    }
+    let status = setup.status().map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&bin);
-    if status.success() { Ok(()) } else { Err(format!("devid {latest} setup failed ({status})")) }
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(code) if no_sudo && code == i32::from(NEEDS_PASSWORD_EXIT) => {
+            Err(format!("devid {latest} is installed, but its {NEEDS_PASSWORD}"))
+        }
+        _ => Err(format!("devid {latest} setup failed ({status})")),
+    }
 }
 
 #[cfg(test)]

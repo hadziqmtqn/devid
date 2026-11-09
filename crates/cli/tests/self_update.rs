@@ -23,7 +23,7 @@ fn publish_to(rel: &Path, version: &str, tamper: bool) {
     fs::write(
         &bin,
         format!(
-            "#!/bin/sh\ncase \"$1\" in\n  --version) echo \"devid {version}\" ;;\n  setup) echo \"setup by {version}\" > \"$DEVID_HOME/setup-marker\" ;;\nesac\n"
+            "#!/bin/sh\ncase \"$1\" in\n  --version) echo \"devid {version}\" ;;\n  setup) [ \"$2\" = --no-sudo ] && [ -n \"$FAKE_NEEDS_SUDO\" ] && exit 3\n    echo \"setup by {version} $2\" > \"$DEVID_HOME/setup-marker\" ;;\nesac\n"
         ),
     )
     .unwrap();
@@ -65,6 +65,26 @@ fn self_update_checks_verifies_and_hands_over() {
         fs::read_to_string(home.join("setup-marker")).unwrap().trim(),
         "setup by 9.9.9",
         "the new binary ran setup"
+    );
+
+    // From the desktop app: no password prompt. The new setup gets --no-sudo, and a sudo step it
+    // had to skip (exit 3) is reported as such.
+    let o = run(&home, &base, &["self-update", "--no-sudo"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(fs::read_to_string(home.join("setup-marker")).unwrap().trim(), "setup by 9.9.9 --no-sudo");
+    let o = Command::new(BIN)
+        .args(["self-update", "--no-sudo"])
+        .env("DEVID_HOME", &home)
+        .env("DEVID_RELEASE_BASE", format!("file://{}", base.display()))
+        .env("FAKE_NEEDS_SUDO", "1")
+        .output()
+        .unwrap();
+    assert!(!o.status.success());
+    assert!(
+        stderr(&o).contains("devid 9.9.9 is installed, but its system setup")
+            && stderr(&o).contains("needs your password"),
+        "{}",
+        stderr(&o)
     );
     assert!(!home.join(format!("downloads/self-update-{ASSET}")).exists(), "download cleaned up");
 

@@ -18,8 +18,10 @@ static RUNNING: Mutex<Option<(u64, u64)>> = Mutex::new(None);
 
 fn main() {
     *RUNNING.lock().unwrap() = binary_id();
-    // `--background` starts with the menu-bar icon only, for launch at login (G3).
+    // `--background` starts with the menu-bar icon only, for launch at login (G3); `--page
+    // settings` opens the window on that page (after an update from the app).
     let background = std::env::args().any(|a| a == "--background");
+    let page = std::env::args().skip_while(|a| a != "--page").nth(1).and_then(|p| start_page(&p));
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             api::daemon,
@@ -31,6 +33,8 @@ fn main() {
             api::devid_check,
             api::in_terminal,
             api::login_item,
+            api::self_update,
+            api::relaunch,
         ])
         .setup(move |app| {
             // Menu bar only while no window is open; in the Dock and Cmd+Tab with one (D-030).
@@ -42,7 +46,7 @@ fn main() {
             });
             tray::start(app)?;
             if !background {
-                open_window(app.handle(), None);
+                open_window(app.handle(), page);
             }
             Ok(())
         })
@@ -55,7 +59,7 @@ fn main() {
         // graphics, stays in the process after the window and its web view are gone (D-027).
         RunEvent::ExitRequested { code: None, api, .. } => {
             api.prevent_exit();
-            restart(true);
+            restart(&["--background"]);
         }
         // Opened again from Finder or Spotlight while running.
         #[cfg(target_os = "macos")]
@@ -82,7 +86,7 @@ pub fn open_window(app: &AppHandle, page: Option<&'static str>) {
     // Updated while only the menu-bar icon ran (the icon checks every 15 s): open the window in
     // the new version, not in this one.
     if updated() {
-        restart(false);
+        restart(&[]);
     }
     let (width, height) = fit(app);
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -124,19 +128,18 @@ fn replaced(running: Option<(u64, u64)>, now: Option<(u64, u64)>) -> bool {
     running.is_some() && now.is_some() && now != running
 }
 
-/// Replaces this process with a fresh copy of the app binary at the same path (same pid):
-/// `--background` for the menu-bar icon only, else with its window. Returns only if that fails;
-/// the app then keeps running as it is and does not try again for this binary.
-pub fn restart(background: bool) {
+/// One of the window's pages, by name.
+pub fn start_page(name: &str) -> Option<&'static str> {
+    ["sites", "php", "server", "logs", "settings"].into_iter().find(|p| *p == name)
+}
+
+/// Replaces this process with a fresh copy of the app binary at the same path (same pid), with
+/// `args`: `--background` for the menu-bar icon only, none for its window. Returns only if that
+/// fails; the app then keeps running as it is and does not try again for this binary.
+pub fn restart(args: &[&str]) {
     use std::os::unix::process::CommandExt;
     let err = match std::env::current_exe() {
-        Ok(exe) => {
-            let mut cmd = std::process::Command::new(exe);
-            if background {
-                cmd.arg("--background");
-            }
-            cmd.exec()
-        }
+        Ok(exe) => std::process::Command::new(exe).args(args).exec(),
         Err(e) => e,
     };
     eprintln!("devid-gui: cannot restart: {err}");
