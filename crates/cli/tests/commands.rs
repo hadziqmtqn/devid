@@ -246,3 +246,33 @@ fn a_failed_share_reports_cloudflareds_error() {
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// Starting a command of a proxy site whose dev server port another program holds warns at once,
+/// instead of leaving only EADDRINUSE in the command's log. With one of the site's own commands
+/// running, the port may be that command's, so there is no warning.
+#[test]
+fn a_busy_dev_server_port_is_named_when_a_command_starts() {
+    let root = temp_root("devid-portwarn-it");
+    let home = root.join("home");
+    fs::create_dir_all(root.join("projects/app")).unwrap();
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = held.local_addr().unwrap().port().to_string();
+    let daemon = start_daemon_env(&home, &[("SHELL", "/bin/sh")]);
+    ok(&home, &["park", root.join("projects").to_str().unwrap()]);
+    ok(&home, &["app", "set", "app", "--mode", "proxy", "--upstream", &port]);
+    ok(&home, &["cmd", "add", "app", "dev", "--", "sleep 300"]);
+    ok(&home, &["cmd", "add", "app", "queue", "--", "sleep 300"]);
+
+    let out = devid(&home, &["cmd", "start", "app", "dev"]);
+    assert!(out.status.success(), "a warning does not stop the start: {}", stderr(&out));
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert!(printed.contains(&format!("warning: port {port} is already in use by")), "{printed}");
+    assert!(printed.contains("which Devid did not start"), "{printed}");
+    assert_eq!(command(&home, "dev")["state"], "running");
+
+    let out = devid(&home, &["cmd", "start", "app", "queue"]);
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("warning:"), "the port may be dev's");
+    drop(held);
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}

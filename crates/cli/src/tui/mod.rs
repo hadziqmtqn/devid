@@ -68,7 +68,11 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
     };
     match effect {
         Effect::Daemon { request: req, done } => match request(paths, &req) {
-            Ok(_) => (done, false),
+            // A start that went through but will likely fail (a busy dev server port) says why.
+            Ok(v) => match v["warning"].as_str() {
+                Some(w) => (format!("{done}; {w}"), true),
+                None => (done, false),
+            },
             Err(e) => (e, true),
         },
         Effect::OpenUrl(url) => run(Command::new("open").arg(&url), format!("opened {url}")),

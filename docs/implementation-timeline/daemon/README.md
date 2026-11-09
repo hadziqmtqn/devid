@@ -23,3 +23,4 @@
 | 2026-11-08 | [devid is GitHub's Latest release; PHP/nginx builds from `runtime-latest` (D-038, v0.10.1)](2026-11-08-github-latest.md) |
 | 2026-11-08 | [Phase 8 A6: Share through a Cloudflare quick tunnel (v0.12.0)](2026-11-08-a6-share.md) |
 | 2026-11-09 | [Fix: Share reaches the site on its local port or :80, not on 8088 (v0.12.1)](2026-11-09-share-origin.md) |
+| 2026-11-09 | [Starting a command warns when the dev server port is held outside Devid (v0.12.2)](2026-11-09-command-port-warning.md) |

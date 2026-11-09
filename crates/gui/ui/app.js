@@ -436,6 +436,7 @@ function siteDetail(s) {
   const running = cmds.filter((c) => c.state === 'running').length;
   const req = (cmd, name) => daemon({ cmd, ...site, name: name ?? null });
   const started = (r) => {
+    if (r.warning) toast(r.warning, true);
     const bad = r.results.filter((x) => !x.ok);
     if (bad.length) toast(bad.map((x) => x.name + ': ' + x.error).join('; '), true);
     const ok = r.results.filter((x) => x.ok).map((x) => x.name);
@@ -497,7 +498,10 @@ function commandRow(c, req) {
     : c.state === 'exited' ? (c.code != null ? 'Exited with code ' + c.code : 'Ended by signal ' + c.signal) : 'Stopped';
   const logOpen = S.logPanel === c.name;
   const toggleLog = () => { S.logPanel = logOpen ? null : c.name; renderPage(); };
-  const start = () => act('Starting ' + c.name + '…', () => req('command_start', c.name), 'Started ' + c.name);
+  const start = () => act('Starting ' + c.name + '…', () => req('command_start', c.name), (r) => {
+    if (r.warning) toast(r.warning, true);
+    return 'Started ' + c.name;
+  });
   const stop = () => act('Stopping ' + c.name + '…', () => req('command_stop', c.name), 'Stopped ' + c.name);
   return row(h('span.dv-dot' + (on ? '.ok' : failed ? '.bad' : ''), { 'aria-hidden': 'true' }),
     h('div.dv-grow', {},

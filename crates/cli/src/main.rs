@@ -604,6 +604,9 @@ fn cmd(action: CmdAction, paths: &Paths) -> Result<(), String> {
                     false => println!("{name} did not start: {}", r["error"].as_str().unwrap_or("?")),
                 }
             }
+            if let Some(w) = v["warning"].as_str() {
+                println!("warning: {w}");
+            }
             v["site"].as_str().map(String::from)
         }
         CmdAction::Stop { args } => {
