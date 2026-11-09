@@ -46,7 +46,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 5 | Ad-hoc signing, self-update, PHP build pipeline (notarization only if public, D-010); plan in `docs/roadmap/phase-5.md` | done 2026-11-02 (R1–R5) |
 | 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | done (2026-11-05): apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole for 8.3–8.5; Devid v0.4.1 installs them (CLI and TUI); recipe PRs are built, tested and published (E6) |
 | 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | done 2026-11-06 (G1–G5): Devid.app ships with v0.7.0, installed with `devid setup --gui` |
-| 8 | Apps, commands and sharing: app types and presets (D-035), user commands (D-036), a local port per site and Share (D-037); plan in `docs/roadmap/phase-8.md` | accepted 2026-11-08; A1 (spike) done; A2 (app types) released in v0.8.0; A3 (local ports) in v0.9.0; A4 (commands) in v0.10.0; A5 (desktop app, menu bar and TUI, v0.11.0) built 2026-11-08; A6 Share (v0.12.0) built 2026-11-08; the devid-site docs and the release next |
+| 8 | Apps, commands and sharing: app types and presets (D-035), user commands (D-036), a local port per site and Share (D-037); plan in `docs/roadmap/phase-8.md` | done 2026-11-09 (v0.12.1 installed): A2 in v0.8.0, A3 in v0.9.0, A4 in v0.10.0, A5 and A6 in v0.12.0, fixes in v0.12.1; one owner check left (both erd-builder-pro commands from Devid.app) |
 
 ## Open risks (Phase 1 must prove)
 
@@ -163,6 +163,8 @@ Dev commands started the way the daemon will, plus a throwaway nginx in front of
 - **erd-builder-pro:** `PORT=3010 npm run dev:pg:local` ran next to the owner's own instance on 3000. It was ready in 14 s at 784 MB, served through the proxy rules, and stopped cleanly (6 processes). Its HMR runs on Vite's separate port 24678, which an HTTPS page cannot reach. That is a setting in the app (`server.hmr.server`), not in Devid.
 
 ## Machine state
+
+**2026-11-09: devid 0.12.1 installed** (Phase 8 done). erdbpro-saas is also served on `127.0.0.1:8000` (`[apps.erdbpro-saas] port = 8000`), which the owner's static Cloudflare tunnel (`local-erdsaas.bkn.my.id`) now targets in place of `php artisan serve`. erd-builder-pro is served again (proxy to its dev server on 3000), with its two commands saved (`dev:pg:local`, `tauri`). Share works through the site's local port or `:80`. New direct connections to `127.0.0.1:8088`/`8443` hang on this Mac (cause open; see ARCHITECTURE Unknowns).
 
 **2026-11-06: devid 0.7.0 and Devid.app installed** (owner ran `devid self-update`, then `devid setup --gui`). `~/Applications/Devid.app` runs as a menu-bar icon after its window closes. At login, sites are served and the app does not open (the app's login item is off).
 

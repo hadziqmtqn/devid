@@ -130,6 +130,10 @@ All behaviour lives in `daemon` and is reached through its socket API. `cli` and
 
 - Whether future macOS releases keep `/usr/sbin/httpd` (used for the Apache adapter; see PROJECT_CONTEXT spike results).
 - The daemon socket protocol and the on-disk config format are not designed yet.
+- **On the owner's Mac (2026-11-09), new direct connections to `127.0.0.1:8088` and `127.0.0.1:8443` hang in `SYN_RCVD`.** These are the targets of pf's 80/443 redirect. `:80`, `:443` and a local port on the same nginx answer.
+  - Ruled out: pf state (the table is empty) and nginx (a restart does not help).
+  - Candidates: the application firewall (on, with Devid's nginx not listed) and a leftover Cloudflare WARP daemon.
+  - Share avoids the path since 0.12.1. Tests and checks on that Mac should use `:80`/`:443` or a local port.
 
 ## TUI (Phase 4)
 
