@@ -1,8 +1,8 @@
 # Phase 8 Plan: apps, commands and sharing
 
 > Scope: app types detected per site (PHP, static, Node), a local port per site, user commands the daemon runs, and sharing a site through a quick tunnel (D-035, D-036, D-037)
-> Verified against: 2026-11-08 (A6 Share built on branch `feat/a6-share`)
-> Status: accepted 2026-11-08; A1 (spike) done, see "A1 results"; A2 released in 0.8.0, see "A2 as built"; A3 released in 0.9.0, see "A3 as built"; A4 released in 0.10.0, see "A4 as built"; A5 (desktop app, menu bar, TUI) built, see "A5 as built"; A6 Share built, see "A6 as built"; the devid-site docs and the release next
+> Verified against: 2026-11-09 (v0.12.1 installed on the owner's Mac)
+> Status: done 2026-11-09. A1 (spike) done, see "A1 results". Released: A2 in 0.8.0, A3 in 0.9.0, A4 in 0.10.0, A5 and A6 in 0.12.0, and fixes in 0.12.1; see "… as built" and "Closing". One check is left: the owner runs both erd-builder-pro commands from Devid.app (A5's "done when").
 
 Today Devid serves every site as PHP through php-fpm, and the docroot is `public/` when it exists (`daemon::sites`). Everything else the owner runs is still started by hand in a terminal:
 
@@ -461,6 +461,37 @@ Branch `feat/a6-share`, 0.12.0.
   - `--stop` ends the process.
 - **The Share card** with a fixture, unchanged `app.js`/`app.css` in Chrome.
 - **Not run yet:** a real quick tunnel and cloudflared's RSS while sharing. A real share opens a public URL, so it waits for the owner's go-ahead (see "A1 results").
+
+### Closing (2026-11-09)
+
+**Releases.** All are in `devid-binaries`; from 0.10.1 the newest one is GitHub's Latest (D-038).
+
+| Version | Contents |
+|---|---|
+| 0.8.0 | A2: app types |
+| 0.9.0 | A3: local port per site |
+| 0.9.1 | self-update falls back to the GitHub API |
+| 0.10.0 | A4: user commands |
+| 0.10.1 | the app moves to a newly installed version by itself; devid becomes GitHub's Latest release (D-038) |
+| 0.12.0 | A5: site detail in Devid.app, commands in the menu bar and TUI. A6: Share |
+| 0.12.1 | the app updates devid in the background (D-039); Share goes through the site's local port or `:80` |
+
+0.11.0 was never tagged: A5 and A6 shipped together in 0.12.0.
+
+**"Done when", milestone by milestone:**
+
+- **A2 (done):** erd-builder-pro opens at `https://erd-builder-pro.test` through its dev server (200, proxy to `localhost:3000`). erdbpro-saas and phpMyAdmin are served as before.
+- **A3 (done):** erdbpro-saas is served by Devid on `127.0.0.1:8000`, and `php artisan serve` is no longer needed.
+  - The owner's static Cloudflare tunnel (`local-erdsaas.bkn.my.id`) points there.
+  - In the share investigation, `:8000` answered 20/20.
+- **A4 (done):** both erd-builder-pro commands started from `devid cmd start` on a second daemon with launchd's environment; stop left nothing behind (see "A4 as built"). The owner's migration saved both commands in the real config.
+- **A5 (left):** the owner runs and stops `dev:pg:local` and `tauri` from Devid.app with no terminal. The app part was checked with real daemon data in a browser (see "A5 as built").
+- **A6 (done):** released and installed on the owner's Mac (0.12.1).
+  - **phpmyadmin.test, with the owner's go-ahead:** the link came in 5.5 s, the public page answered 200 with phpMyAdmin, and cloudflared used 31 MB RSS while the daemon stayed at 3.3 MB. After `--stop`, the link answered 530 and the process was gone. The owner's own tunnel (`cloudflared tunnel run`) ran on, untouched.
+  - **erdbpro-saas.test, on 0.12.1:** the share used `url:http://127.0.0.1:8000` with no "unable to reach the origin" errors, and the owner opened the link.
+  - The Phase 8 docs are on devid-site: Apps and dev servers, Commands, and Local port and Share (devid-site#2).
+
+**Found on the way, still open:** on the owner's Mac, new direct connections to `127.0.0.1:8088` and `127.0.0.1:8443` (the targets of pf's 80/443 redirect) hang in `SYN_RCVD`, while `:80`, `:443` and a local port on the same nginx answer. pf's state table is empty, and restarting nginx does not help. Nothing in Devid depends on that path any more (0.12.1); see `docs/implementation-timeline/daemon/2026-11-09-share-origin.md` and Unknowns in ARCHITECTURE.
 
 ## Not in this phase
 
