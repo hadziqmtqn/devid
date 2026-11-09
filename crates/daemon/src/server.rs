@@ -905,10 +905,12 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 return Err(format!("{} is not running; start it first (`devid start all`)", config.server));
             }
             // Plain HTTP to the web server with the site's Host; cloudflared serves it over HTTPS.
+            let local = sites::resolve(&config).into_iter().find(|s| s.name == site).and_then(|s| s.port);
+            let local = local.filter(|_| !state.busy_ports.lock().unwrap().contains_key(&site));
             let run = format!(
                 "exec '{}' tunnel --no-autoupdate --url http://127.0.0.1:{} --http-host-header {site}.{}",
                 bin.display(),
-                config.http_port,
+                share_origin(local, standard_ports(&config, &state.paths), config.http_port),
                 config.tld
             );
             state.commands.start(&site, commands::SHARE, &run, &dir)?;
@@ -962,6 +964,14 @@ fn share_state(state: &State, site: &str) -> Value {
         Some("exited") => json!({"state": "exited", "url": null, "log": log}),
         _ => Value::Null,
     }
+}
+
+/// The port cloudflared reaches a shared site on: the site's own local port when Devid serves it
+/// there (D-037), else 80 when pf forwards it to the web server, else the web server's port. On the
+/// owner's Mac (2026-11-09) new direct connections to pf's redirect targets (8088, 8443) hung in
+/// the kernel while :80 and a local port answered, so the redirect target is the last choice.
+fn share_origin(local_port: Option<u16>, standard_ports: bool, http_port: u16) -> u16 {
+    local_port.unwrap_or(if standard_ports { 80 } else { http_port })
 }
 
 /// An existing cloudflared (D-037: Devid does not download it). `DEVID_CLOUDFLARED` overrides it
@@ -1284,6 +1294,13 @@ fn check_updates(state: &State) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn share_avoids_pfs_redirect_target() {
+        assert_eq!(super::share_origin(Some(8000), true, 8088), 8000, "the site's own local port first");
+        assert_eq!(super::share_origin(None, true, 8088), 80, "then :80 when pf forwards it");
+        assert_eq!(super::share_origin(None, false, 8088), 8088, "the web server's port without pf");
+    }
+
     #[test]
     fn extension_progress_counts_bytes_then_steps() {
         let dir = std::env::temp_dir().join(format!("devid-extjob-{}", std::process::id()));
