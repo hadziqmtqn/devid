@@ -146,11 +146,23 @@ fn share_runs_cloudflared_and_reads_its_url() {
     let status = json(&home, &["status", "--json"]);
     assert_eq!(status["shares"][0]["url"], "https://test-lamp-river.trycloudflare.com");
     assert_eq!(status["commands_running"], 0, "a share is not a command");
-    let pid = Command::new("pgrep").args(["-f", fake.to_str().unwrap()]).output().unwrap();
-    let pid = String::from_utf8_lossy(&pid.stdout).lines().next().unwrap().to_string();
 
     ok(&home, &["cmd", "stop", "app"]);
     assert_eq!(site(&home)["share"]["state"], "running", "stopping the site's commands leaves its share");
+
+    // A site with a local port is shared through that port, not the web server's main one.
+    ok(&home, &["share", "app", "--stop"]);
+    ok(&home, &["app", "port", "app"]);
+    let port = site(&home)["port"].as_u64().unwrap();
+    ok(&home, &["share", "app"]);
+    let args = fs::read_to_string(home.join("cloudflared-args")).unwrap();
+    assert!(args.contains(&format!("--url http://127.0.0.1:{port} --http-host-header app.test")), "{args}");
+    let pid =
+        String::from_utf8_lossy(&Command::new("pgrep").args(["-f", fake.to_str().unwrap()]).output().unwrap().stdout)
+            .lines()
+            .next()
+            .unwrap()
+            .to_string();
     let out = devid(&home, &["share", "app", "--stop"]);
     assert!(String::from_utf8_lossy(&out.stdout).contains("stopped sharing app"));
     assert!(site(&home)["share"].is_null());

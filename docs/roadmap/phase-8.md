@@ -433,6 +433,9 @@ Branch `feat/a6-share`, 0.12.0.
   - It refuses while the web server is not running.
   - It runs `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:<http_port> --http-host-header <site>.<tld>` through the command machinery (D-036): its own session, the login shell's environment, a log, stop by group, leftovers after a crash and a daemon stop.
   - It waits up to 30 s for the `https://….trycloudflare.com` line in the log and replies with the URL, or with none while cloudflared is still connecting. Sent again, it only reports the URL.
+- **Fix (2026-11-09):** cloudflared now reaches the site on its own local port when it has one, else on `:80` when pf forwards it, and on `http_port` only without pf. On the owner's Mac a share of erdbpro-saas showed "host down": every request failed with `dial tcp 127.0.0.1:8088: connect: operation timed out`.
+  - In measurements, new direct connections to pf's redirect targets 8088 and 8443 hung in `SYN_RCVD` (0/20 and 1/20; only a first one, after 100 ms, got through). `:80`, `:443` and the local port 8000, served by the same nginx, answered 20/20.
+  - pf's state table was empty, and restarting nginx changed nothing. The exact cause stays open; the share no longer depends on that path.
 - **`ShareStop { site, cwd }`** stops it. It also accepts a site that was ignored meanwhile.
 - **Internals:**
   - A share is the site's command entry `.share`, a name no user command can have.
