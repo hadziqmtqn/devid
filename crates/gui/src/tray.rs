@@ -129,7 +129,7 @@ pub fn refresh(app: &AppHandle) {
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
             if handle.get_webview_window("main").is_none() {
-                crate::restart(true);
+                crate::restart(&["--background"]);
             }
         });
         return;

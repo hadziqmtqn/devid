@@ -61,6 +61,9 @@ enum Command {
         /// Do not install a web server
         #[arg(long, conflicts_with = "server")]
         no_server: bool,
+        /// Never ask for a password; a system setup step that needs sudo is skipped and reported
+        #[arg(long)]
+        no_sudo: bool,
         /// Also install the Devid desktop app into ~/Applications (an installed one is always updated)
         #[arg(long)]
         gui: bool,
@@ -104,6 +107,9 @@ enum Command {
         /// Only show whether a newer devid exists
         #[arg(long)]
         check: bool,
+        /// Never ask for a password; a system setup step that needs sudo is skipped and reported
+        #[arg(long)]
+        no_sudo: bool,
     },
     /// Update installed PHP, nginx and Caddy to the newest versions in Devid's releases
     Update {
@@ -339,7 +345,8 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("devid: {e}");
-            ExitCode::FAILURE
+            // `setup --no-sudo` skipped a sudo step: `self-update --no-sudo` tells that apart.
+            if e == setup::NEEDS_PASSWORD { ExitCode::from(setup::NEEDS_PASSWORD_EXIT) } else { ExitCode::FAILURE }
         }
     }
 }
@@ -464,8 +471,8 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             }
         }),
         Command::Helper { action } => helper(action, paths),
-        Command::Setup { dry_run, php, server, no_php, no_server, gui } => {
-            setup::setup(paths, dry_run, setup::Pick { php, server, no_php, no_server, gui })
+        Command::Setup { dry_run, php, server, no_php, no_server, no_sudo, gui } => {
+            setup::setup(paths, dry_run, setup::Pick { php, server, no_php, no_server, gui, no_sudo })
         }
         Command::Doctor => setup::doctor(paths),
         Command::Tui => match tui::run(paths)? {
@@ -477,7 +484,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             }
             None => Ok(()),
         },
-        Command::SelfUpdate { check } => setup::self_update(paths, check),
+        Command::SelfUpdate { check, no_sudo } => setup::self_update(paths, check, no_sudo),
         Command::Uninstall { dry_run, purge } => setup::uninstall(paths, dry_run, purge),
         Command::Sites { json } => send(Request::Sites).map(|v| {
             print_sites(&v["sites"], json);

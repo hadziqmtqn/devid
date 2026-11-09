@@ -12,6 +12,8 @@
     "allow-devid-check",
     "allow-in-terminal",
     "allow-login-item",
+    "allow-self-update",
+    "allow-relaunch",
     "core:window:allow-start-dragging"
   ]
 }

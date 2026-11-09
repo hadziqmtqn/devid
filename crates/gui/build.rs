@@ -10,6 +10,8 @@ fn main() {
         "devid_check",
         "in_terminal",
         "login_item",
+        "self_update",
+        "relaunch",
     ]));
     tauri_build::try_build(attributes).expect("tauri-build failed");
 }

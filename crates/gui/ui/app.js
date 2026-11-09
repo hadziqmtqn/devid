@@ -731,7 +731,7 @@ function settingsPage() {
     h('h2.dv-h2', {}, 'Updates'),
     card(
       row(text('Devid ' + st.version, devidText || 'Updates the Devid app itself'),
-        S.devid?.available || (!S.devid && auto?.devid) ? btn('Update Devid…', updateDevid, 'primary') : null,
+        S.devid?.available || (!S.devid && auto?.devid) ? busyBtn('devid-update', 'Update Devid…', updateDevid, 'primary') : null,
         busyBtn('devid-check', 'Check for updates', () => act('Checking…', async () => {
           const line = await invoke('devid_check');
           S.devid = { text: line, available: / is available /.test(line) };
@@ -767,9 +767,30 @@ function settingsPage() {
   ];
 }
 
+/**
+ * Updates devid, its daemon and this app in the background (sha256-checked), then opens the new
+ * version's window on Settings. Sites are down for a few seconds while the daemon restarts. Only a
+ * system setup step that needs the password goes to Terminal.
+ */
 async function updateDevid() {
-  if (await ask('Update Devid?', 'Terminal opens and runs devid self-update, which installs the new version and restarts the daemon.', 'Update'))
-    act('Opening Terminal…', () => invoke('in_terminal', { action: 'self-update' }), (m) => m);
+  if (!await ask('Update Devid?', 'Devid downloads the new version, checks it and installs it. The daemon restarts, so your sites are down for a few seconds, then this window opens again in the new version.', 'Update'))
+    return;
+  let reply = null;
+  let error = '';
+  await act('Updating Devid…', async () => {
+    try { reply = await invoke('self_update'); } catch (e) { error = String(e); }
+  }, null, 'devid-update');
+  if (reply?.installed) {
+    toast('Devid ' + reply.installed + ' is installed; opening it…');
+    setTimeout(() => invoke('relaunch', { page: 'settings' }), 600);
+  } else if (reply) {
+    toast(reply.text);
+  } else if (/needs your password/.test(error)) {
+    if (await ask('Finish in Terminal?', error.replace(/`/g, '') + '.', 'Open Terminal'))
+      act('Opening Terminal…', () => invoke('in_terminal', { action: 'setup' }), (m) => m);
+  } else {
+    toast(error, true);
+  }
 }
 
 async function updateBinaries() {

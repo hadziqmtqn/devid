@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-039 | 2026-11-09 | accepted | The desktop app updates devid in the background and reopens as the new version; Terminal only for a step that needs sudo |
 | D-038 | 2026-11-08 | accepted (amends D-016's release layout) | The newest stable devid is GitHub's "Latest" release in `devid-binaries`; the PHP/nginx builds move to a rolling `runtime-latest` release; tags with a suffix are pre-releases |
 
 ## D-001: native app, no Homebrew, no VM
@@ -595,3 +596,14 @@ See ARCHITECTURE, "PHP runtime".
 - **Order of the switch:** `runtime-latest` exists before the first devid release with `--latest` (0.10.1), because that release copies its manifest.
 - **Amends:** D-016's release layout.
 - **Accepted:** by the owner on 2026-11-08.
+
+## D-039: the desktop app updates devid in the background (accepted 2026-11-09)
+
+- **Context:** "Update Devid…" opened Terminal and ran `devid self-update` there, because `setup` may ask for the sudo password. On the owner's Mac (2026-11-09, 0.10.1 → 0.12.0) the Terminal window stayed open at "[Process completed]", and the app window stayed on the old version until it was closed by hand. The owner asked for an update like other desktop apps.
+- **Decision:**
+  - The app runs `devid self-update --no-sudo` itself, with no Terminal, and the button shows "Updating Devid…".
+  - When it is done, the app restarts as the new binary (same pid) with its window on Settings.
+  - `--no-sudo` (also on `devid setup`) skips a system setup step that would need the password and reports it (exit code 3). Everything else installs.
+  - The app then offers Terminal for `devid setup`. That is the only case left for Terminal, besides `setup` and `uninstall` started on purpose.
+- **Why it is safe:** an update needs sudo only when the system setup (resolver, CA trust, port forwarding) is missing or changes. The download is still sha256-checked, and the new binary installs itself as before.
+- **Accepted:** by the owner on 2026-11-09.
