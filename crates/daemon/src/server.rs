@@ -870,9 +870,11 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 None => saved,
             };
             let warning = port_warning(state, &site);
+            let config = state.config.lock().unwrap().clone();
+            let port = sites::resolve(&config).into_iter().find(|s| s.name == site).and_then(|s| s.dev_port());
             let results: Vec<Value> = chosen
                 .iter()
-                .map(|c| match state.commands.start(&site, &c.name, &c.run, &dir, None) {
+                .map(|c| match state.commands.start(&site, &c.name, &c.run, &dir, port, None) {
                     Ok(pid) => {
                         json!({"name": c.name, "ok": true, "pid": pid, "log": commands::log_name(&site, &c.name)})
                     }
@@ -918,7 +920,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 share_origin(local, standard_ports(&config, &state.paths), config.http_port),
                 config.tld
             );
-            state.commands.start(&site, commands::SHARE, &run, &dir, None)?;
+            state.commands.start(&site, commands::SHARE, &run, &dir, None, None)?;
             // The URL shows in cloudflared's log a few seconds after it starts.
             let deadline = Instant::now() + std::time::Duration::from_secs(30);
             loop {
@@ -1002,13 +1004,13 @@ fn start_noted(state: &State, note: &Value) {
     for c in note["commands"].as_array().into_iter().flatten() {
         let (site, name) = (c["site"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default());
         let saved = config.apps.get(site).and_then(|a| a.commands.iter().find(|x| x.name == name));
-        let dir = sites.iter().find(|s| s.name == site).map(|s| s.path.clone());
-        if let (Some(saved), Some(dir)) = (saved, dir) {
+        if let (Some(saved), Some(s)) = (saved, sites.iter().find(|s| s.name == site)) {
             match state.commands.start(
                 site,
                 name,
                 &saved.run,
-                &dir,
+                &s.path,
+                s.dev_port(),
                 Some("started again after Devid restarted for an update"),
             ) {
                 Ok(_) => eprintln!("devid: started {site} · {name} again after the restart"),

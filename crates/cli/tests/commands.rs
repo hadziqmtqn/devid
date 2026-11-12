@@ -323,3 +323,33 @@ fn commands_run_again_after_an_update_restart_only() {
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// D-041: a proxy site's commands get its dev server port ("Forward to") as PORT, so a Next.js
+/// or Express dev server listens where Devid forwards. A `PORT=` in the command line still
+/// wins, and a PHP site's commands get none.
+#[test]
+fn a_proxy_sites_commands_get_its_port() {
+    let root = temp_root("devid-cmdport-it");
+    let home = root.join("home");
+    fs::create_dir_all(root.join("projects/app")).unwrap();
+    let daemon = start_daemon_env(&home, &[("SHELL", "/bin/sh")]);
+    ok(&home, &["park", root.join("projects").to_str().unwrap()]);
+    // One command per case: one that just ended may still count as running, and would not start again.
+    for name in ["php", "proxy"] {
+        ok(&home, &["cmd", "add", "app", name, "--", "echo port=${PORT:-none}"]);
+    }
+    ok(&home, &["cmd", "add", "app", "own", "--", "PORT=4999 sh -c 'echo port=$PORT'"]);
+    let printed = |name: &str| {
+        ok(&home, &["cmd", "start", "app", name]);
+        let log = || fs::read_to_string(home.join(format!("log/app-app-{name}.log"))).unwrap_or_default();
+        wait_for("the command to print", || log().contains("\nport="));
+        log()
+    };
+
+    assert!(printed("php").ends_with("port=none\n"), "a PHP site");
+    ok(&home, &["app", "set", "app", "--mode", "proxy", "--upstream", "45123"]);
+    assert!(printed("proxy").ends_with("port=45123\n"));
+    assert!(printed("own").ends_with("port=4999\n"));
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}

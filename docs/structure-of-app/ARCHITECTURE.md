@@ -210,7 +210,7 @@ Implemented in T5:
 - **What it does:** a site keeps named shell lines in `[[apps.<site>.commands]]`, which the daemon starts and stops one by one or all at once. Nothing starts at login or restarts by itself.
 - **`daemon::commands`:**
   - Each command is `$SHELL -c '<run>'` in the site's folder, in its own session, so its pid is its process group. stdin is `/dev/null`; output is appended to `~/.devid/log/app-<site>-<name>.log` (emptied at start, cut to 1 MB past 10 MB).
-  - The environment is the login shell's (`$SHELL -l -c 'env -0'`, read once per daemon), with Devid's `bin` and nvm's Node for the folder first on `PATH`.
+  - The environment is the login shell's (`$SHELL -l -c 'env -0'`, read once per daemon), with Devid's `bin` and nvm's Node for the folder first on `PATH`. A proxy site's commands also get `PORT=<upstream>` (D-041).
   - Stop: SIGINT to the group, SIGTERM after 5 s, SIGKILL after 10 s, until no process of the group is left.
   - A watcher thread per running command records its exit; `~/.devid/run/app-<site>-<name>.pid` (pid and start time) lets the next daemon stop what a crashed one left.
 - **Lifetime:** the daemon stops every command when it stops (logout, `devid daemon stop`, a self-update). Before `devid setup` reloads the daemon (an update), `remember_running` notes the running commands in `run/resume.json`. The next daemon starts them again and removes the note (D-040); a note older than 10 minutes is dropped.

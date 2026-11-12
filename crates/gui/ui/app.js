@@ -416,7 +416,7 @@ function siteDetail(s) {
     s.mode === 'static' && row(label('app-spa', 'Single-page app', 'Paths with no file load index.html, for client-side routing.'),
       h('input.dv-switch', { id: 'app-spa', type: 'checkbox', role: 'switch', checked: !!s.spa, disabled: !!S.busy,
         onchange: (e) => set({ spa: e.target.checked }, e.target.checked ? 'Single-page app on' : 'Single-page app off') })),
-    s.mode === 'proxy' && row(label('app-up', 'Forward to', 'The port the dev server listens on.'), h('span.dv-sub.dv-mono', {}, 'localhost:'),
+    s.mode === 'proxy' && row(label('app-up', 'Forward to', 'The port the dev server listens on. Commands get it as PORT.'), h('span.dv-sub.dv-mono', {}, 'localhost:'),
       field('app-up', String(s.upstream), (v) => asPort(v, (n) => { if (n !== s.upstream) set({ upstream: n }, 'Forwarding to localhost:' + n); }),
         'dv-mono.port', { inputmode: 'numeric' })));
 
