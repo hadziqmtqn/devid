@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-042 | 2026-11-12 | accepted (amends D-035) | A new proxy site whose default dev server port another site uses gets the next free port, saved |
 | D-041 | 2026-11-12 | accepted (amends D-036) | A proxy site's commands get its dev server port ("Forward to") as `PORT` |
 | D-040 | 2026-11-09 | accepted (amends D-036) | Commands that a Devid-made restart (an update, `devid setup`) interrupts start again in the new daemon; never at login or after a crash |
 | D-039 | 2026-11-09 | accepted | The desktop app updates devid in the background and reopens as the new version; Terminal only for a step that needs sudo |
@@ -638,4 +639,22 @@ See ARCHITECTURE, "PHP runtime".
 - **Trade-off:** a site that runs two servers which both read `PORT` now gives both the same port; the second one sets its own in its command line.
   - The owner's commands were checked on 2026-11-12. erd-builder-pro reads `PORT || 3000` and forwards to 3000. erd-selfhost-local's `.env` has `PORT=3001`, and it forwards to 3001. The Tauri servers set `PORT=3100` themselves.
 - **Limit:** a running command keeps the `PORT` it started with. After "Forward to" changes, restart it.
+- **Accepted:** by the owner on 2026-11-12.
+
+## D-042: a new proxy site gets a free dev server port (accepted 2026-11-12, amends D-035)
+
+- **Context:**
+  - Every site of a type starts with that type's port (Next.js and Node.js: 3000, Vite: 5173).
+  - A second project of the same type therefore forwards to the first one's dev server, and its own fails with EADDRINUSE.
+  - D-041 made commands follow "Forward to", so a different "Forward to" is now enough to keep them apart. The owner asked for Devid to pick it.
+- **Decision:**
+  - **Which sites:** a proxy site that Devid has nothing saved for (no `[apps.<site>]` before the change) and that has no `PORT` in `.env`.
+  - **When it moves:** when another site already forwards to its default port, it gets the next port that no site uses (as upstream or local port) and no program listens on. The port is saved as its upstream, so it never moves again.
+  - **Who keeps the default:** of two such sites, the older folder (by creation time, then name) keeps it, so a new project never moves an existing one.
+  - **When it runs:** on every change made through Devid (park, link, `app set`, `cmd add`…) and when the daemon starts. A first `cmd add` on a new site still counts as new.
+  - **Not touched:** sites with settings or commands, a port the owner typed, and `PORT` from `.env`. Two sites the owner set to the same port stay as they are.
+- **Limits:**
+  - A folder created while the daemon runs gets its port at the next change in Devid. Until then it is not in the web server's config either.
+  - Vite ignores `PORT`. Its command still needs `--port <n> --strictPort`.
+  - The owner's sites on 2026-11-12 all have settings, so none of them moves.
 - **Accepted:** by the owner on 2026-11-12.

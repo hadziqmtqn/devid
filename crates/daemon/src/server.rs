@@ -195,6 +195,7 @@ impl State {
         let mut current = self.config.lock().unwrap();
         let mut next = current.clone();
         let reply = change(&mut next, &sites::resolve(&current))?;
+        log_moved(sites::spread_ports(&current, &mut next, ports::in_use));
         if let Err(e) = self.apply(&next) {
             // Put services back in line with the config that stays in force.
             let _ = self.apply(&current);
@@ -203,6 +204,13 @@ impl State {
         next.save(&self.paths.config()).map_err(|e| e.to_string())?;
         *current = next;
         Ok(reply)
+    }
+}
+
+/// D-042: say in the daemon's log which new sites got their own dev server port.
+fn log_moved(moved: Vec<(String, u16)>) {
+    for (site, port) in moved {
+        eprintln!("devid: {site} forwards to port {port}, because another site uses its type's default port");
     }
 }
 
@@ -249,7 +257,13 @@ fn spawn_signal_thread(state: Arc<State>) {
 /// Run the daemon until a `stop` request or a stop signal arrives.
 pub fn run(paths: Paths) -> io::Result<()> {
     block_stop_signals();
-    let config = Config::load_or_create(&paths.config())?;
+    let mut config = Config::load_or_create(&paths.config())?;
+    // D-042: projects added while the daemon was stopped.
+    let moved = sites::spread_ports(&config.clone(), &mut config, ports::in_use);
+    if !moved.is_empty() {
+        config.save(&paths.config())?;
+        log_moved(moved);
+    }
     fs::create_dir_all(paths.run_dir())?;
     let listener = bind(&paths)?;
     if ca::ensure_ca(&paths, &config.tld)? {

@@ -295,6 +295,40 @@ pub fn resolve(config: &Config) -> Vec<Site> {
         .collect()
 }
 
+/// D-042: a proxy site Devid has nothing saved for (no `[apps.<site>]` in `known`) and no `PORT`
+/// in `.env` forwards to its type's default port. When another site already forwards there, it
+/// gets the next port no site uses and `busy` does not report, saved as its upstream so it never
+/// moves again. Older folders keep the default, so a new project never moves an existing one.
+/// Returns the sites it moved.
+pub fn spread_ports(known: &Config, config: &mut Config, busy: impl Fn(u16) -> bool) -> Vec<(String, u16)> {
+    let sites = resolve(config);
+    let movable = |s: &Site| {
+        s.mode == Mode::Proxy
+            && !known.apps.contains_key(&s.name)
+            && config.apps.get(&s.name).and_then(|a| a.upstream).is_none()
+            && env_port(&s.path).is_none()
+    };
+    let mut taken: BTreeSet<u16> = sites
+        .iter()
+        .filter(|s| s.mode == Mode::Proxy && !movable(s))
+        .map(|s| s.upstream)
+        .chain(sites.iter().filter_map(|s| s.port))
+        .collect();
+    let mut candidates: Vec<&Site> = sites.iter().filter(|s| movable(s)).collect();
+    candidates.sort_by_key(|s| (fs::metadata(&s.path).and_then(|m| m.created()).ok(), s.name.clone()));
+    let mut moved = Vec::new();
+    for s in candidates {
+        if taken.insert(s.upstream) {
+            continue;
+        }
+        let Some(free) = (s.upstream..=u16::MAX).find(|p| !taken.contains(p) && !busy(*p)) else { continue };
+        taken.insert(free);
+        config.apps.entry(s.name.clone()).or_default().upstream = Some(free);
+        moved.push((s.name.clone(), free));
+    }
+    moved
+}
+
 /// The site name an ignored folder had (D-029): its folder name as a site name.
 pub fn ignored_name(path: &str) -> String {
     let folder = Path::new(path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
@@ -362,6 +396,45 @@ mod tests {
         assert_eq!(names, ["api", "shop"]);
         assert_eq!(ignored_name(&root.join("parked/My_App").display().to_string()), "my-app");
 
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn spread_ports_moves_only_new_sites_on_a_taken_port() {
+        let root = std::env::temp_dir().join(format!("devid-spread-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        // Created in this order, so the older folder of a pair keeps the default port.
+        for (name, dep) in [("used", "next"), ("vold", "vite"), ("env", "next"), ("zeta", "next"), ("avite", "vite")] {
+            fs::create_dir_all(root.join("p").join(name)).unwrap();
+            fs::write(
+                root.join("p").join(name).join("package.json"),
+                format!(r#"{{"dependencies": {{"{dep}": "1"}}}}"#),
+            )
+            .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if fs::metadata(root.join("p/used")).and_then(|m| m.created()).is_err() {
+            return; // shortcut: no folder birth times on this file system, so no order to check.
+        }
+        fs::write(root.join("p/env/.env"), "PORT=3001\n").unwrap();
+        let cmd = || App {
+            commands: vec![crate::config::AppCommand { name: "dev".into(), run: "x".into() }],
+            ..App::default()
+        };
+        let mut known = Config { parked: vec![root.join("p").display().to_string()], ..Config::default() };
+        known.apps.insert("used".into(), cmd());
+        // This change saves zeta's first command: it is still new to Devid.
+        let mut config = known.clone();
+        config.apps.insert("zeta".into(), cmd());
+
+        let moved = spread_ports(&known, &mut config, |p| p == 3002);
+        assert_eq!(moved, [("zeta".to_string(), 3003), ("avite".to_string(), 5174)]);
+        assert_eq!(config.apps["zeta"].upstream, Some(3003));
+        assert_eq!(config.apps["zeta"].commands.len(), 1, "its command stays");
+        assert_eq!(config.apps["used"].upstream, None, "a site with settings keeps its port");
+        assert!(!config.apps.contains_key("vold"), "the older Vite folder keeps 5173, unsaved");
+        assert!(!config.apps.contains_key("env"), ".env's PORT is the project's choice");
+        assert!(spread_ports(&config.clone(), &mut config, |_| false).is_empty(), "nothing moves twice");
         fs::remove_dir_all(&root).unwrap();
     }
 

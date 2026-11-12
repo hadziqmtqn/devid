@@ -175,9 +175,12 @@ enum Command {
         action: AppAction,
     },
     /// A site's own commands (npm run dev, queue workers…), started and stopped by Devid
+    #[command(args_conflicts_with_subcommands = true)]
     Cmd {
         #[command(subcommand)]
         action: Option<CmdAction>,
+        /// List this site's commands, as `devid cmd list <site>` does
+        site: Option<String>,
     },
     /// Share a site on the internet through a Cloudflare quick tunnel (a temporary
     /// trycloudflare.com link; needs cloudflared). Default: the site containing the current folder
@@ -526,7 +529,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
         Command::Unisolate { site } => send(Request::Unisolate { site, cwd: cwd()? })
             .map(|v| println!("{} uses the default PHP again", v["site"].as_str().unwrap_or("?"))),
         Command::App { action } => app(action, paths),
-        Command::Cmd { action } => cmd(action.unwrap_or(CmdAction::List { site: None }), paths),
+        Command::Cmd { action, site } => cmd(action.unwrap_or(CmdAction::List { site }), paths),
         Command::Share { site, stop: true } => send(Request::ShareStop { site, cwd: cwd()? }).map(|v| {
             let site = v["site"].as_str().unwrap_or("?");
             match v["stopped"] == true {
