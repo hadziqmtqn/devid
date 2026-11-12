@@ -180,6 +180,7 @@ Implemented in T5:
   - then `index.html`.
   It never runs project code.
 - **Preset:** the label filling in a mode, a dev-server port and a static build folder. `config.toml` `[apps.<site>]` holds only the owner's overrides, and `resolve` combines both.
+- **Free dev server ports (D-042):** `sites::spread_ports` runs in `mutate` and at daemon start. A proxy site with nothing saved and no `.env` `PORT`, whose default port another site uses, gets the next free port saved as its upstream; the older folder keeps the default.
 - **Modes:**
   - **php:** as before.
   - **static:** files only, `$uri.html`, optional SPA fallback.

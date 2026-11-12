@@ -283,3 +283,33 @@ fn local_port() {
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// D-042: a second Next.js project gets its own dev server port when it is parked. The older
+/// folder keeps 3000; the newer one's port is saved, so it stays and its commands get it as PORT.
+/// `devid cmd <site>` lists that site's commands.
+#[test]
+fn a_new_project_gets_a_free_dev_server_port() {
+    let root = temp_root("devid-spread-it");
+    let home = root.join("home");
+    let projects = root.join("projects");
+    // Created in name order, so the result is the same with or without folder birth times.
+    for name in ["a-old", "b-new"] {
+        fs::create_dir_all(projects.join(name)).unwrap();
+        fs::write(projects.join(name).join("package.json"), r#"{"dependencies": {"next": "16"}}"#).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let daemon = start_daemon(&home);
+    assert!(devid(&home, &["park", projects.to_str().unwrap()]).status.success());
+
+    let sites = json(&home, &["sites", "--json"]);
+    assert_eq!(site(&sites, "a-old")["upstream"], 3000);
+    let moved = site(&sites, "b-new")["upstream"].as_u64().unwrap();
+    assert!(moved > 3000, "{moved}");
+    let config = fs::read_to_string(home.join("config.toml")).unwrap();
+    assert!(config.contains(&format!("upstream = {moved}")), "{config}");
+
+    let out = devid(&home, &["cmd", "b-new"]);
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("https://b-new.test"), "{}", stderr(&out));
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}
