@@ -87,9 +87,18 @@ impl Commands {
         self.paths.run_dir().join(format!("app-{site}-{name}.pid"))
     }
 
-    /// Start `run` in `dir` unless it is running already; returns its pid. `note` heads the log
-    /// ("started again after an update").
-    pub fn start(&self, site: &str, name: &str, run: &str, dir: &Path, note: Option<&str>) -> Result<u32, String> {
+    /// Start `run` in `dir` unless it is running already; returns its pid. `port` is set as `PORT`
+    /// (D-041; the command line's own `PORT=` still wins). `note` heads the log ("started again
+    /// after an update").
+    pub fn start(
+        &self,
+        site: &str,
+        name: &str,
+        run: &str,
+        dir: &Path,
+        port: Option<u16>,
+        note: Option<&str>,
+    ) -> Result<u32, String> {
         let key = (site.to_string(), name.to_string());
         let old = {
             let mut runs = self.runs.lock().unwrap();
@@ -124,6 +133,9 @@ impl Commands {
         let shell = env.iter().find(|(k, _)| k == "SHELL").map_or_else(|| "/bin/zsh".into(), |(_, v)| v.clone());
         let mut cmd = Command::new(shell);
         cmd.arg("-c").arg(run).current_dir(dir).env_clear().envs(env).stdin(Stdio::null());
+        if let Some(port) = port {
+            cmd.env("PORT", port.to_string());
+        }
         cmd.stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log);
         // SAFETY: runs between fork and exec; setsid, sigemptyset and pthread_sigmask are
         // async-signal-safe.

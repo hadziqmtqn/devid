@@ -103,6 +103,13 @@ pub struct Site {
     pub port: Option<u16>,
 }
 
+impl Site {
+    /// D-041: the `PORT` a proxy site's commands get, its dev server port ("Forward to").
+    pub fn dev_port(&self) -> Option<u16> {
+        (self.mode == Mode::Proxy).then_some(self.upstream)
+    }
+}
+
 /// Keys of the given top-level objects in a JSON file (dependencies, scripts…); empty if unreadable.
 fn json_keys(file: &Path, sections: &[&str]) -> BTreeSet<String> {
     let Ok(text) = fs::read_to_string(file) else { return BTreeSet::new() };

@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-041 | 2026-11-12 | accepted (amends D-036) | A proxy site's commands get its dev server port ("Forward to") as `PORT` |
 | D-040 | 2026-11-09 | accepted (amends D-036) | Commands that a Devid-made restart (an update, `devid setup`) interrupts start again in the new daemon; never at login or after a crash |
 | D-039 | 2026-11-09 | accepted | The desktop app updates devid in the background and reopens as the new version; Terminal only for a step that needs sudo |
 | D-038 | 2026-11-08 | accepted (amends D-016's release layout) | The newest stable devid is GitHub's "Latest" release in `devid-binaries`; the PHP/nginx builds move to a rolling `runtime-latest` release; tags with a suffix are pre-releases |
@@ -622,3 +623,19 @@ See ARCHITECTURE, "PHP runtime".
 - **Why:** an update is an interruption Devid makes itself, minutes after the owner chose what to run. Login and crashes give no such signal, and on a 2-core Mac a dev server costs 0.5–1 GB.
 - **Limit:** the old daemon must know `remember_running`, so this works from the update after 0.12.3 is installed.
 - **Accepted:** by the owner on 2026-11-09.
+
+## D-041: a proxy site's commands get its dev server port as PORT (accepted 2026-11-12, amends D-036)
+
+- **Context:**
+  - A proxy site forwards to its dev server port ("Forward to"), but the dev server picks its own port. The two were set in two places and could disagree.
+  - Two Node sites of the same type both default to its port (Next.js and Node.js: 3000). Vite, and Next.js without a port, then move to the next free port, and the `.test` address shows the other project.
+  - The owner asked how a project can avoid a port another one uses, then asked for `PORT` to come from "Forward to" automatically.
+- **Decision:**
+  - A command of a proxy site starts with `PORT=<Forward to>` in its environment: started by hand, with Start all, or again after an update (D-040).
+  - A `PORT=` in the command line (`PORT=4000 npm run api`) still wins, because the shell sets it last.
+  - Shares, and the commands of PHP and static sites, get no `PORT`.
+- **What follows it:** dev servers that read `PORT`: Next.js, Express, Fastify and most Node servers. Vite ignores it (use `--port <n> --strictPort`), and a `-p` in the project's script wins over it.
+- **Trade-off:** a site that runs two servers which both read `PORT` now gives both the same port; the second one sets its own in its command line.
+  - The owner's commands were checked on 2026-11-12. erd-builder-pro reads `PORT || 3000` and forwards to 3000. erd-selfhost-local's `.env` has `PORT=3001`, and it forwards to 3001. The Tauri servers set `PORT=3100` themselves.
+- **Limit:** a running command keeps the `PORT` it started with. After "Forward to" changes, restart it.
+- **Accepted:** by the owner on 2026-11-12.
