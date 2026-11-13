@@ -2,13 +2,14 @@
 
 Devid is a local PHP development environment for macOS. Every folder you link or park is served at `https://<name>.test` with a trusted certificate. Devid runs PHP 8.3, 8.4 and 8.5 side by side, and nginx, Caddy or Apache as the web server. It needs no Homebrew, no Docker and no virtual machine. You use it from the command line, from a terminal UI (TUI) or from the menu-bar desktop app.
 
-> **Status:** v0.7, used daily on one Mac. It runs on macOS on Intel only. Apple Silicon builds come later (D-010). This repository holds the source and is private; the binaries and the user guide are published in the public [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries) repository.
+> **Status:** v0.12, used daily on one Mac. It runs on macOS on Intel only. Apple Silicon builds come later (D-010). This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043); the binaries and the user guide are published in the [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries) repository.
 
 ## Contents
 
 - [Using Devid](#using-devid)
 - [Roadmap](#roadmap)
 - [Developing Devid](#developing-devid)
+- [License](#license)
 
 ## Using Devid
 
@@ -61,7 +62,7 @@ The direction after v1 is D-019. Each item lists the decision it comes from. The
   - **Linux:** a second platform implementation for CA trust, `.test` DNS and ports 80/443 (D-013, D-018).
   - **Windows:** a goal, and the largest effort, since it needs its own PHP builds and has no php-fpm (D-018, D-019).
 - **Public release (D-010):**
-  - a license;
+  - a license: done, the GNU AGPL v3 with the source public (D-043);
   - signed and notarized macOS builds;
   - a clear notice about the system changes Devid makes.
 - **Developer tools (D-011):** a mail catcher, a dump viewer, a full log viewer, and sharing a site through a tunnel.
@@ -91,3 +92,7 @@ cargo test
 CI runs the same checks on every pull request. To publish a release, push a `v*` tag. The release workflow then publishes `devid` to `devid-binaries`.
 
 The plans and decisions are in [`docs/`](docs/README.md). Start with the project context, then read the architecture and the decisions.
+
+## License
+
+Devid is free software under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). It comes without any warranty. If you distribute Devid, changed or not, you must offer its source under the same license, and a changed version offered to users over a network must offer its source too.

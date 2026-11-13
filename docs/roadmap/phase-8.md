@@ -7,7 +7,7 @@
 Today Devid serves every site as PHP through php-fpm, and the docroot is `public/` when it exists (`daemon::sites`). Everything else the owner runs is still started by hand in a terminal:
 
 - `php artisan serve` for erdbpro-saas on `127.0.0.1:8000`, only because the Cloudflare tunnel targets that port. Devid already serves the same app at `https://erdbpro-saas.test`.
-- `npm run dev:pg:local` in `~/Projects/erd-builder-pro`: Express with Vite middleware on port 3000, which the tunnel exposes as `erd-loc-test.bkn.my.id`.
+- `npm run dev:pg:local` in `~/Projects/erd-builder-pro`: Express with Vite middleware on port 3000, which the owner's Cloudflare tunnel exposes.
 - `npm run dev:tauri` in the same repository: API on 3100, Vite on 3098, and a Tauri window.
 - Node apps on 3000, 3001 and 8080.
 
@@ -482,7 +482,7 @@ Branch `feat/a6-share`, 0.12.0.
 
 - **A2 (done):** erd-builder-pro opens at `https://erd-builder-pro.test` through its dev server (200, proxy to `localhost:3000`). erdbpro-saas and phpMyAdmin are served as before.
 - **A3 (done):** erdbpro-saas is served by Devid on `127.0.0.1:8000`, and `php artisan serve` is no longer needed.
-  - The owner's static Cloudflare tunnel (`local-erdsaas.bkn.my.id`) points there.
+  - The owner's static Cloudflare tunnel points there.
   - In the share investigation, `:8000` answered 20/20.
 - **A4 (done):** both erd-builder-pro commands started from `devid cmd start` on a second daemon with launchd's environment; stop left nothing behind (see "A4 as built"). The owner's migration saved both commands in the real config.
 - **A5 (left):** the owner runs and stops `dev:pg:local` and `tauri` from Devid.app with no terminal. The app part was checked with real daemon data in a browser (see "A5 as built").
