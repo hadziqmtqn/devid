@@ -8,7 +8,7 @@
 #   ... | sh -s -- --php 8.3 --server caddy   pass options to `devid setup`
 set -eu
 
-# Binaries live in the public devid-binaries repo (D-016); the source stays private.
+# Binaries live in the devid-binaries repo (D-016); the source is in hadziqmtqn/devid (D-043).
 REPO="hadziqmtqn/devid-binaries"
 BIN_DIR="${DEVID_HOME:-$HOME/.devid}/bin"
 VERSION="${DEVID_VERSION:-latest}"
