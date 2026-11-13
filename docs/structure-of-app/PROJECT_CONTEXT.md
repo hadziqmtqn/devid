@@ -164,7 +164,7 @@ Dev commands started the way the daemon will, plus a throwaway nginx in front of
 
 ## Machine state
 
-**2026-11-09: devid 0.12.1 installed** (Phase 8 done). erdbpro-saas is also served on `127.0.0.1:8000` (`[apps.erdbpro-saas] port = 8000`), which the owner's static Cloudflare tunnel (`local-erdsaas.bkn.my.id`) now targets in place of `php artisan serve`. erd-builder-pro is served again (proxy to its dev server on 3000), with its two commands saved (`dev:pg:local`, `tauri`). Share works through the site's local port or `:80`. New direct connections to `127.0.0.1:8088`/`8443` hang on this Mac (cause open; see ARCHITECTURE Unknowns).
+**2026-11-09: devid 0.12.1 installed** (Phase 8 done). erdbpro-saas is also served on `127.0.0.1:8000` (`[apps.erdbpro-saas] port = 8000`), which the owner's static Cloudflare tunnel now targets in place of `php artisan serve`. erd-builder-pro is served again (proxy to its dev server on 3000), with its two commands saved (`dev:pg:local`, `tauri`). Share works through the site's local port or `:80`. New direct connections to `127.0.0.1:8088`/`8443` hang on this Mac (cause open; see ARCHITECTURE Unknowns).
 
 **2026-11-06: devid 0.7.0 and Devid.app installed** (owner ran `devid self-update`, then `devid setup --gui`). `~/Applications/Devid.app` runs as a menu-bar icon after its window closes. At login, sites are served and the app does not open (the app's login item is off).
 

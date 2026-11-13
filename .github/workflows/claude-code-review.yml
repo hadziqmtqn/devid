@@ -12,9 +12,9 @@ on:
 
 jobs:
   claude-review:
-    # Dependabot PRs get no repository secrets, so this job would always fail on them;
-    # the `rust` CI job (fmt, clippy, tests) covers dependency updates instead.
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    # Dependabot and fork PRs get no repository secrets, so this job would always fail on them;
+    # the `rust` CI job (fmt, clippy, tests) covers them instead.
+    if: github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||

@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-08
+> Verified against: 2026-11-13
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -23,7 +23,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-013 | 2026-11-02 | accepted (Windows "not planned" superseded by D-019) | v1 is macOS only; OS-specific code isolated in a `platform` module |
 | D-014 | 2026-11-02 | accepted | Install with `install.sh` plus `devid setup`/`doctor`/`uninstall`; no Node |
 | D-015 | 2026-11-02 | accepted | nginx is the default web server; Caddy and Apache stay selectable |
-| D-016 | 2026-11-02 | accepted | Binaries are built and released from a separate public repo, `devid-binaries`; the code stays private |
+| D-016 | 2026-11-02 | accepted ("the code stays private" superseded by D-043) | Binaries are built and released from a separate public repo, `devid-binaries`; the code stays private |
 | D-017 | 2026-11-02 | accepted | TUI colors: semantic, from the terminal's own 16-color palette; not the prototype's exact colors |
 | D-018 | 2026-11-03 | proposed | Local HTTPS and the system pieces on other operating systems |
 | D-019 | 2026-11-03 | accepted (direction, not scheduled; desktop app technology and timing set by D-023) | After v1: a desktop app and support for every OS (macOS arm64, Linux, Windows) |
@@ -39,12 +39,13 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-029 | 2026-11-06 | accepted | A parked site can be removed (ignored) and restored; its folder is never touched |
 | D-030 | 2026-11-06 | accepted (amends D-023's "no Dock icon") | While its window is open, the desktop app is in the Dock and Cmd+Tab with the padlock-and-prompt icon; at idle it is in the menu bar only |
 | D-031 | 2026-11-06 | accepted | Two login settings: "Serve sites at login" (nginx and PHP, on by default) and "Open Devid at login" (the app, off by default) |
-| D-032 | 2026-11-06 | accepted | The `devid` source stays private; downloads, the desktop app included, come from `devid-binaries`, whose README and release notes carry D-010's notice |
+| D-032 | 2026-11-06 | accepted ("stays private" superseded by D-043; the downloads part stands) | The `devid` source stays private; downloads, the desktop app included, come from `devid-binaries`, whose README and release notes carry D-010's notice |
 | D-033 | 2026-11-06 | accepted (the guide's home moved by D-034) | The user guide is public, in `devid-binaries` |
 | D-034 | 2026-11-06 | accepted | A website, `devid-site`, with the landing page and the docs |
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-043 | 2026-11-13 | accepted (supersedes part of D-032) | The `devid` source is public under the GNU AGPL v3; binaries and releases stay in `devid-binaries` |
 | D-042 | 2026-11-12 | accepted (amends D-035) | A new proxy site whose default dev server port another site uses gets the next free port, saved |
 | D-041 | 2026-11-12 | accepted (amends D-036) | A proxy site's commands get its dev server port ("Forward to") as `PORT` |
 | D-040 | 2026-11-09 | accepted (amends D-036) | Commands that a Devid-made restart (an update, `devid setup`) interrupts start again in the new daemon; never at login or after a crash |
@@ -185,6 +186,7 @@ See ARCHITECTURE, "PHP runtime".
   - `install.sh`'s `REPO` changes to `devid-binaries` in R4.
 - **Plan:** `docs/roadmap/phase-5.md`.
 - **Amended by D-038 (2026-11-08):** devid releases are now GitHub's "Latest" in `devid-binaries`, and the PHP/nginx builds are read from `runtime-latest`.
+- **Amended by D-043 (2026-11-13):** the `devid` source is public under the AGPL. The binaries and releases stay in `devid-binaries`.
 
 ## D-017: TUI colors (accepted 2026-11-02)
 
@@ -507,6 +509,7 @@ See ARCHITECTURE, "PHP runtime".
 - **Cost:** macOS minutes in a private repository count 10x. With Devid.app, a release takes about 10–15 macOS minutes, or 100–150 of the 2,000 free monthly minutes.
 - **Still to do from D-010:** the notice at first launch, a signing approach, and an arm64 test plan.
 - **Accepted:** by the owner on 2026-11-06.
+- **Superseded in part by D-043 (2026-11-13):** the source is public under the AGPL. Downloads still come from `devid-binaries`, with D-010's notice.
 
 ## D-033: the user guide is public, in devid-binaries (accepted 2026-11-06)
 
@@ -658,3 +661,19 @@ See ARCHITECTURE, "PHP runtime".
   - Vite ignores `PORT`. Its command still needs `--port <n> --strictPort`.
   - The owner's sites on 2026-11-12 all have settings, so none of them moves.
 - **Accepted:** by the owner on 2026-11-12.
+
+## D-043: the `devid` source is public under the GNU AGPL v3 (accepted 2026-11-13, supersedes part of D-032)
+
+- **Context:**
+  - The release workflow builds on `macos-15-intel`. In a private repository, macOS minutes count 10x against the 2,000 free monthly minutes. The 22 release runs from 2026-11-02 to 2026-11-12 took about 192 runner minutes, so about 1,900 quota minutes, and the free quota is not enough.
+  - Standard GitHub-hosted runners are free in a public repository.
+  - Before the switch, the history was searched for private keys and tokens; none were found. Two hostnames of the owner's own Cloudflare tunnel were in the docs. They are removed, and older commits still have them.
+- **Decision:**
+  - `hadziqmtqn/devid` becomes public.
+  - **License:** GNU AGPL v3 only (`AGPL-3.0-only`), in `LICENSE`. Whoever distributes Devid, changed or not, must offer its source under the same license; a changed version offered to users over a network must offer its source too.
+  - **Downloads do not move:** `install.sh`, the binaries, the releases and the update checks stay in `devid-binaries` (D-016, D-038). Installed copies of Devid change nothing.
+  - **Workflows:** Claude Code Review skips pull requests from forks, which get no secrets. `@claude` answers only users with write access, the action's default.
+- **What becomes public:** the source and its whole history (the commit author's email included), the docs, past pull requests and issues, and old Actions logs (GitHub masks secrets in them). Actions secrets stay secret.
+- **Cannot be undone:** clones and forks made while the repository is public stay public.
+- **Still to do from D-010:** the notice at first launch, a signing approach, and an arm64 test plan.
+- **Accepted:** by the owner on 2026-11-13.
