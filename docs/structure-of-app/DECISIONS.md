@@ -242,7 +242,7 @@ See ARCHITECTURE, "PHP runtime".
     - then Linux (D-013, D-018);
     - then Windows.
 - **Supersedes:** D-013's "Windows is … not planned". Windows is a goal now, still the largest effort: it needs its own PHP builds and has no php-fpm.
-- **Not decided yet:** order and dates, the GUI technology (measure idle RAM first), and the public-release items of D-010 (license, signing/notarization, notice). *(2026-11-04: D-023 sets the desktop app's technology, Tauri v2, and its timing, Phase 7 after Phase 6.)*
+- **Not decided yet:** order and dates, the GUI technology (measure idle RAM first), and the public-release items of D-010 (license, signing/notarization, notice). *(2026-11-04: D-023 sets the desktop app's technology, Tauri v2, and its timing, Phase 7 after Phase 6.)* *(2026-11-14: D-044 sets the platform order: Apple silicon, then Linux, then Windows.)*
 - **Rule that keeps this possible:** all behaviour stays in the daemon behind its socket API, and OS-specific code stays in the `platform`/`helper` layer.
 - **Where it is tracked:** the README "Roadmap" section.
 
@@ -677,3 +677,18 @@ See ARCHITECTURE, "PHP runtime".
 - **Cannot be undone:** clones and forks made while the repository is public stay public.
 - **Still to do from D-010:** the notice at first launch, a signing approach, and an arm64 test plan.
 - **Accepted:** by the owner on 2026-11-13.
+
+## D-044: platforms come one at a time: Apple silicon, then Linux, then Windows (accepted 2026-11-14, amends D-019)
+
+- **Context:**
+  - D-019 lists macOS arm64 first, then Linux, then Windows, but left the order open. The landing page and the README then listed Apple silicon last, after Linux and Windows (devid-site #7, devid #77).
+  - Apple silicon runs the same macOS code. It needs arm64 builds of Devid, PHP, the extensions and the web servers, and tests, but no new platform layer. Today every release job runs on `macos-15-intel` and builds x86_64 only. GitHub's Apple silicon runners are free now that the repository is public (D-043).
+  - Linux needs its own DNS, CA trust and port forwarding in place of `/etc/resolver`, the System keychain and pf. Windows also needs its own PHP builds and has no php-fpm.
+  - The owner has an Intel Mac only, so arm64 is tested on CI runners, not by hand.
+- **Decision:**
+  - Apple silicon is next, in the roadmap's "Next" next to macOS 15 and later on Intel.
+  - Then Linux (Debian-based), then Windows, one platform at a time. Each one starts after the previous one ships.
+- **Unchanged:** no dates; OS-specific code stays in the `platform`/`helper` layer (D-019).
+- **Still to do:** the arm64 test plan (D-043).
+- **Where it shows:** the README "Roadmap", and the landing page's Roadmap and Requirements in `devid-site`.
+- **Accepted:** by the owner on 2026-11-14.
