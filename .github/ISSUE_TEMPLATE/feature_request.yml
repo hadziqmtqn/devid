@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest something new, including a PHP extension for the catalog.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Devid is a personal project, so not every request will be built. Saying what you are trying to do helps the most.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - PHP extension for the catalog
+        - Desktop app
+        - TUI
+        - CLI
+        - Web server
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem or workflow, before the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Devid to do?
+      description: For an extension, give its name, its PECL or source link and the PHP versions you need.
+    validations:
+      required: true

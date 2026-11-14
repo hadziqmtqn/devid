@@ -1,15 +1,15 @@
 # Devid Documentation
 
 > Scope: entry point for all Devid docs
-> Verified against: 2026-11-02 (repository has no commits and no code yet)
+> Verified against: 2026-11-14 (v0.13.0)
 > Status: current
 
-Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, no VM). The repository is at the planning stage: these docs record decisions and plans, not implemented behaviour.
+Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, no VM). These docs record the plans, the decisions and how the code in `crates/` works. To contribute, start with [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Start here
 
 1. [Project context](structure-of-app/PROJECT_CONTEXT.md): why Devid exists, scope, constraints, phases, machine state.
-2. [Architecture](structure-of-app/ARCHITECTURE.md): planned components and runtime flow (proposed, nothing built).
+2. [Architecture](structure-of-app/ARCHITECTURE.md): components and runtime flow.
 3. [Decisions](structure-of-app/DECISIONS.md): accepted and proposed decisions with rationale.
 
 ## Plans and records
@@ -30,6 +30,6 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 
 ## Conventions
 
-- Label every claim as implemented, accepted, proposed or unknown. Until code lands, nothing is "implemented".
+- Label every claim as implemented, accepted, proposed or unknown.
 - Update `DECISIONS.md` when a decision is made or reversed. Never delete an entry; mark it superseded instead.
 - Add a record under `implementation-timeline/` for each merged milestone, and update the "Verified against" headers that the change touches.

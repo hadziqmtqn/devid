@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/hadziqmtqn/devid/security/advisories/new
+    about: Report it privately here, not in a public issue. See SECURITY.md.
+  - name: User guide
+    url: https://devid.bekenweb.com/docs
+    about: Install, sites, PHP versions and extensions, updates and troubleshooting.

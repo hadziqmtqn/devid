@@ -4,7 +4,7 @@ Devid is a local development environment for Laravel, PHP and Node.js on Intel M
 
 **Website and guide:** [devid.bekenweb.com](https://devid.bekenweb.com), with the user guide at [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs).
 
-> **Status:** v0.13, used daily on one Mac. It runs on Intel Macs only for now. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). The builds, the releases and the issue tracker are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
+> **Status:** v0.13, used daily on one Mac. It runs on Intel Macs only for now. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
 
 ```sh
 devid park ~/Projects                  # every subfolder becomes <folder>.test
@@ -110,6 +110,8 @@ cargo test
 CI runs the same checks on every pull request. To publish a release, push a `v*` tag. The release workflow then publishes `devid` to `devid-binaries`. A change users can see also updates the guide, in a `devid-site` pull request that is merged when the release ships (D-034).
 
 The plans and decisions are in [`docs/`](docs/README.md). Start with the project context, then read the architecture and the decisions.
+
+To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md): where issues go, running a development copy next to an installed Devid, and what a pull request needs. Report security problems privately, as [SECURITY.md](SECURITY.md) explains.
 
 ## License
 
