@@ -9,10 +9,17 @@ name: Release devid
 # The PHP, nginx and Caddy builds are the rolling `runtime-latest` release (devid-binaries'
 # release.yml). A stable devid release also carries its manifest.json, which devid 0.10.0 and older
 # read from releases/latest.
+# Each version is built for Intel (x86_64) and Apple silicon (arm64) on its own runner, and both are
+# smoke-tested with the real PHP and nginx before anything is published (D-044).
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and check both arches, but publish nothing (e.g. to test a branch)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,10 +32,13 @@ env:
   BINARIES_REPO: hadziqmtqn/devid-binaries
 
 jobs:
-  release:
+  build:
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
     # Standard runners are free in a public repo (D-043). devid builds in a few minutes; Devid.app (Tauri) adds
     # about ten on a cold cache.
-    runs-on: macos-15-intel
+    runs-on: ${{ matrix.arch == 'arm64' && 'macos-15' || 'macos-15-intel' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -38,7 +48,6 @@ jobs:
       - name: Version must match the tag
         run: |
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v$VERSION" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version $VERSION" >&2; exit 1
           fi
@@ -50,24 +59,54 @@ jobs:
           cargo test --release
           cargo build --release
           mkdir -p dist
-          cp target/release/devid dist/devid-darwin-x86_64
-          codesign --force --sign - dist/devid-darwin-x86_64   # ad-hoc (D-010)
-          dist/devid-darwin-x86_64 --version
-          otool -L dist/devid-darwin-x86_64
-          cp install.sh dist/install.sh
-          echo "$VERSION" > dist/devid-version.txt
+          BIN=dist/devid-darwin-${{ matrix.arch }}
+          cp target/release/devid "$BIN"
+          codesign --force --sign - "$BIN"   # ad-hoc (D-010)
+          "$BIN" --version
+          otool -L "$BIN"
+          [ "$(lipo -archs "$BIN")" = "${{ matrix.arch }}" ]
           # Devid.app (Phase 7 G4), ad-hoc signed; `devid setup --gui` and self-update install it.
           scripts/bundle-app.sh dist
-          (cd dist && shasum -a 256 devid-darwin-x86_64 install.sh devid-version.txt Devid-darwin-x86_64.zip > checksums.txt)
+
+      - name: Smoke test with the real PHP and nginx
+        run: scripts/smoke.sh dist/devid-darwin-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: devid-${{ matrix.arch }}
+          path: |
+            dist/devid-darwin-${{ matrix.arch }}
+            dist/Devid-darwin-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Package
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          cp install.sh dist/install.sh
+          echo "$VERSION" > dist/devid-version.txt
+          (cd dist && sha256sum devid-darwin-x86_64 devid-darwin-arm64 install.sh devid-version.txt \
+            Devid-darwin-x86_64.zip Devid-darwin-arm64.zip > checksums.txt)
           cat dist/checksums.txt
 
       - name: Publish to devid-binaries
         env:
           GH_TOKEN: ${{ secrets.DEVID_BINARIES_TOKEN }}
         run: |
-          ASSETS="dist/devid-darwin-x86_64 dist/install.sh dist/devid-version.txt dist/Devid-darwin-x86_64.zip dist/checksums.txt"
+          ASSETS="dist/devid-darwin-x86_64 dist/devid-darwin-arm64 dist/install.sh dist/devid-version.txt dist/Devid-darwin-x86_64.zip dist/Devid-darwin-arm64.zip dist/checksums.txt"
           # D-010's notice, on the page the landing page links to (D-032).
-          NOTES="devid $VERSION and the Devid desktop app for macOS on Intel (x86_64). A personal project, provided as is, without warranty; tested on Intel macOS 14 only. Ad-hoc signed, not notarized: install with the command below (no Gatekeeper prompt), adding '-s -- --gui' after 'sh' for the desktop app; a browser download needs 'xattr -dr com.apple.quarantine Devid.app'. 'devid setup' asks for sudo once to add /etc/resolver/test, trust Devid's CA and forward ports 80/443; 'devid uninstall' undoes it. Install: curl -fsSL https://github.com/$BINARIES_REPO/releases/download/devid-latest/install.sh | sh"
+          NOTES="devid $VERSION and the Devid desktop app for macOS on Intel (x86_64) and Apple silicon (arm64). A personal project, provided as is, without warranty; tested by hand on Intel macOS 14 only, and on Apple silicon by GitHub's runners. Ad-hoc signed, not notarized: install with the command below (no Gatekeeper prompt), adding '-s -- --gui' after 'sh' for the desktop app; a browser download needs 'xattr -dr com.apple.quarantine Devid.app'. 'devid setup' asks for sudo once to add /etc/resolver/test, trust Devid's CA and forward ports 80/443; 'devid uninstall' undoes it. Install: curl -fsSL https://github.com/$BINARIES_REPO/releases/download/devid-latest/install.sh | sh"
           case "$VERSION" in
             *-*)
               # A pre-release: never Latest, and devid-latest stays on the last stable devid.

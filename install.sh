@@ -38,7 +38,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 say "downloading $asset ($tag)"
 curl -fsSL --proto '=https,file' -o "$tmp/$asset" "$BASE/$tag/$asset" \
-  || die "no $asset in release $tag (arm64 builds come later, see D-010)"
+  || die "no $asset in release $tag (Apple silicon builds start with a newer release)"
 curl -fsSL --proto '=https,file' -o "$tmp/checksums.txt" "$BASE/$tag/checksums.txt" || die "checksums.txt missing"
 
 expected=$(awk -v f="$asset" '$2 == f || $2 == "*"f {print $1}' "$tmp/checksums.txt")
