@@ -22,6 +22,10 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 - [Phase 8 plan](roadmap/phase-8.md): app types, user commands, a local port per site and Share (D-035 to D-037; accepted 2026-11-08, done 2026-11-09 in v0.12.1).
 - [Implementation timeline](implementation-timeline/README.md): one record per merged milestone.
 
+## Research
+
+- [Competitors, 2026-11](research/competitors-2026-11.md): pricing, limits and complaints of Herd, Valet, ServBay, MAMP, Local, Laragon, FlyEnv, Yerd, EnvKit, DDEV, Lando and others, with sources; the opportunities it suggests for Devid are proposed, not accepted.
+
 ## External sources
 
 - User guide (public, D-034): [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs), from the public `devid-site` repository (Next.js + Fumadocs on Vercel), with the landing page at `/`. User-facing changes update it there; this repository's README links to it.
