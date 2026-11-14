@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-13
+> Verified against: 2026-11-14
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -45,6 +45,8 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-045 | 2026-11-14 | accepted (amends D-043) | Issues move from `devid-binaries` to `devid`, next to the code; `devid` gains a contributor guide and a security policy |
+| D-044 | 2026-11-14 | accepted (amends D-019) | Platforms come one at a time: Apple silicon, then Debian-based Linux, then Windows |
 | D-043 | 2026-11-13 | accepted (supersedes part of D-032) | The `devid` source is public under the GNU AGPL v3; binaries and releases stay in `devid-binaries` |
 | D-042 | 2026-11-12 | accepted (amends D-035) | A new proxy site whose default dev server port another site uses gets the next free port, saved |
 | D-041 | 2026-11-12 | accepted (amends D-036) | A proxy site's commands get its dev server port ("Forward to") as `PORT` |
@@ -691,4 +693,19 @@ See ARCHITECTURE, "PHP runtime".
 - **Unchanged:** no dates; OS-specific code stays in the `platform`/`helper` layer (D-019).
 - **Still to do:** the arm64 test plan (D-043).
 - **Where it shows:** the README "Roadmap", and the landing page's Roadmap and Requirements in `devid-site`.
+- **Accepted:** by the owner on 2026-11-14.
+
+## D-045: issues live in `devid`, next to the code (accepted 2026-11-14, amends D-043)
+
+- **Context:**
+  - Since D-043 the source is public, but bug reports and feature requests still went to `devid-binaries`, which holds only build scripts and releases. A pull request in `devid` cannot close an issue there with `Fixes #n`.
+  - Both repositories had no issues yet, so nothing has to move.
+- **Decision:**
+  - Bug reports, feature requests and extension requests go to `hadziqmtqn/devid`. Its bug and feature forms are the ones `devid-binaries` had. Blank issues are off; the chooser also links the security form and the guide.
+  - `devid-binaries` keeps its Issues tab, with blank issues off and its forms replaced by links to `devid`.
+  - `devid` gets `CONTRIBUTING.md`, `SECURITY.md` and a pull request template.
+  - **Security reports:** GitHub's private vulnerability reporting, turned on in `devid` on 2026-11-14. No email address is published.
+  - **Contributions:** licensed as `AGPL-3.0-only`, the same as the project (inbound = outbound), with no separate agreement.
+- **Not now:** a code of conduct; one line in `CONTRIBUTING.md` asks for kindness.
+- **Where it shows:** the `devid` README, the `devid-binaries` README, and the guide's troubleshooting and extensions pages and the landing page footer in `devid-site`.
 - **Accepted:** by the owner on 2026-11-14.

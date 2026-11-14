@@ -1,0 +1,71 @@
+name: Bug report
+description: Something in Devid (CLI, TUI or the desktop app) does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Devid is a personal project, provided as is. It is built and tested on Intel Macs with macOS 14 only, so replies may take a while.
+        This repository is public: remove anything private (user names, project names, domains, tokens) from what you paste.
+  - type: input
+    id: version
+    attributes:
+      label: Devid version
+      description: Output of `devid --version`
+      placeholder: devid 0.13.0
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac
+      description: Output of `sw_vers -productVersion; uname -m` (x86_64 is Intel, arm64 is Apple silicon)
+      placeholder: 14.8, x86_64
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Install or setup (install.sh, devid setup)
+        - Desktop app (Devid.app or its menu-bar icon)
+        - TUI
+        - CLI command
+        - Sites in the browser (.test, HTTPS)
+        - PHP or a PHP extension
+        - Web server (nginx, Caddy, Apache)
+        - Updates (devid self-update, devid update)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Include the exact error message, if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `devid link` in a Laravel project
+        2. Open https://myapp.test
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `devid doctor`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: "`devid logs` lists them; `devid logs <name> -n 50` shows the last lines of one."
+      render: text
