@@ -87,6 +87,12 @@ pub enum Request {
         name: Option<String>,
         path: String,
     },
+    /// What `link` would make of `path`, without saving it: the name, type, mode, dev server port
+    /// and PHP version, and `taken`, the path of a site that already has that name.
+    LinkPreview {
+        name: Option<String>,
+        path: String,
+    },
     Unlink {
         name: String,
     },

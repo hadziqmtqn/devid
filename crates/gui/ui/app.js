@@ -122,24 +122,28 @@ function toast(message, bad = false, sub = '') {
 }
 
 let menuOpen = null;
-function menu(anchor, entries, list = false) {
+/** `side`: an element to open beside, bottoms aligned (the status card), instead of below the anchor. */
+function menu(anchor, entries, list = false, side = null) {
   closeMenu();
+  const pick = (e) => ({ type: 'button', disabled: !!S.busy, onclick: () => { closeMenu(); e.run(); } });
   const m = h('div.dv-menu' + (list ? '.is-list' : ''), { role: 'menu' },
     entries.filter(Boolean).map((e) =>
       e === '-' ? h('hr.dv-sep') :
-      e.header ? h('div.dv-menu-h', {}, e.header) :
-      h('button.dv-mi' + (e.danger ? '.danger' : ''), { type: 'button', role: 'checked' in e ? 'menuitemradio' : 'menuitem',
-        'aria-checked': 'checked' in e ? String(e.checked) : null, disabled: !!S.busy, onclick: () => { closeMenu(); e.run(); } },
+      e.header ? h('div.dv-menu-h', {}, e.dot ? h('span.dv-dot.' + e.dot, { 'aria-hidden': 'true' }) : null, e.header) :
+      e.row ? h('div.dv-menu-row', { role: 'group', 'aria-label': e.label }, e.row.map((x) =>
+        h('button.dv-btn' + (x.checked ? '.primary' : ''), { ...pick(x), role: 'menuitemradio', 'aria-checked': String(x.checked) }, x.label))) :
+      h('button.dv-mi' + (e.danger ? '.danger' : ''), { ...pick(e), role: 'checked' in e ? 'menuitemradio' : 'menuitem',
+        'aria-checked': 'checked' in e ? String(e.checked) : null },
       'checked' in e ? h('span.dv-mark', { 'aria-hidden': 'true' }, e.checked ? '✓' : '') : null,
-      e.label, e.kbd ? h('span.dv-kbd', {}, e.kbd) : null)));
+      h('span.dv-ellipsis', {}, e.label), e.kbd ? h('span.dv-kbd', {}, e.kbd) : null)));
   document.body.append(m);
-  const r = anchor.getBoundingClientRect();
-  const top = r.bottom + 4 + m.offsetHeight > innerHeight ? r.top - 4 - m.offsetHeight : r.bottom + 4;
+  const r = (side || anchor).getBoundingClientRect();
+  const top = side ? r.bottom - m.offsetHeight : r.bottom + 4 + m.offsetHeight > innerHeight ? r.top - 4 - m.offsetHeight : r.bottom + 4;
   m.style.top = Math.max(8, top) + 'px';
-  m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8)) + 'px';
+  m.style.left = Math.max(8, Math.min(side ? r.right + 8 : r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8)) + 'px';
   anchor.setAttribute('aria-expanded', 'true');
   menuOpen = { m, anchor };
-  (m.querySelector('[aria-checked="true"]') || m.querySelector('button'))?.focus();
+  ((list && m.querySelector('[aria-checked="true"]')) || m.querySelector('button'))?.focus();
 }
 
 function closeMenu() {
@@ -151,11 +155,11 @@ function closeMenu() {
 }
 
 /** The prototype's select field; its list is the same menu as the ⋯ menus, not a native pop-up. */
-function dropdown(label, value, options, pick) {
+function dropdown(label, value, options, pick, shown) {
   return h('button.dv-select', { type: 'button', 'aria-label': label, 'aria-haspopup': 'menu', 'aria-expanded': 'false', disabled: !!S.busy,
-    onclick: (e) => menu(e.currentTarget, options.map((o) => ({ label: o.label, checked: o.value === value,
+    onclick: (e) => menu(e.currentTarget, options.map((o) => ({ label: o.label, kbd: o.kbd, checked: o.value === value,
       run: () => { if (o.value !== value) pick(o.value); } })), true) },
-  h('span', {}, (options.find((o) => o.value === value) || { label: value }).label), icon('chevron'));
+  h('span', {}, shown || (options.find((o) => o.value === value) || { label: value }).label), icon('chevron'));
 }
 
 const moreBtn = (label, entries) =>
@@ -245,9 +249,61 @@ const PAGES = {
   settings: { title: 'Settings', sub: () => 'Preferences for Devid on this Mac.', load: async () => ({}), render: settingsPage },
 };
 
-async function linkSite() {
-  const path = await invoke('choose_folder', { purpose: 'link' }).catch((e) => toast(String(e), true));
-  if (path) act('Linking…', () => daemon({ cmd: 'link', name: null, path }), 'Linked ' + path);
+/** The prototype's "Link a site": a folder, then what Devid detects there, before anything is saved. */
+function linkSite() {
+  const st = S.status;
+  const f = { path: '', p: null, port: '', php: st.default_php, error: '', busy: false };
+  const choose = async () => {
+    let path;
+    try { path = await invoke('choose_folder', { purpose: 'link' }); } catch (e) { f.error = String(e); }
+    if (path) {
+      try {
+        const p = await daemon({ cmd: 'link_preview', name: null, path });
+        Object.assign(f, { path, p, port: String(p.upstream), php: p.php, error: p.taken ? p.host + ' is already in use by ' + p.taken + '.' : '' });
+      } catch (e) { Object.assign(f, { path, p: null, error: String(e) }); }
+    }
+    draw();
+  };
+  const save = async () => {
+    const p = f.p;
+    if (!p) { f.error = 'Choose a folder first.'; return draw(); }
+    if (p.taken) return draw();
+    const port = Number(f.port);
+    if (p.mode === 'proxy' && !(Number.isInteger(port) && port > 0 && port < 65536)) { f.error = f.port + ' is not a port (1 to 65535)'; return draw(); }
+    Object.assign(f, { busy: true, error: '' });
+    draw();
+    const site = { site: p.site, cwd: '/' };
+    try {
+      await daemon({ cmd: 'link', name: null, path: f.path });
+      if (p.mode === 'proxy' && port !== p.upstream) await daemon({ cmd: 'app_set', ...site, upstream: port });
+      if (p.mode === 'php' && f.php !== st.default_php) await daemon({ cmd: 'isolate', version: f.php, ...site });
+      closeDialog();
+      toast(p.host + ' is linked', false, 'https://' + p.host + (p.mode === 'proxy' ? ' → localhost:' + port : p.mode === 'php' ? ' · PHP ' + f.php : ''));
+      refresh(true);
+    } catch (e) { Object.assign(f, { busy: false, error: String(e) }); draw(); }
+  };
+  const draw = () => showDialog(h('div.dv-dialog', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'lk-t' },
+    h('h2', { id: 'lk-t' }, 'Link a site'),
+    h('p.dv-sub', {}, 'Any folder can be served, also outside your parked folders. Its name becomes the domain.'),
+    h('div.lk-folder', {}, h('span.dv-avatar.folder', {}, icon('folder')),
+      h('span.dv-grow.dv-mono.dv-ellipsis', { title: f.path }, f.path || 'No folder chosen yet'),
+      h('button.dv-btn', { type: 'button', onclick: choose, disabled: f.busy, 'data-focus': !f.p }, 'Choose…')),
+    f.p && h('div.lk-grid', {},
+      h('span.dv-sub', {}, 'Domain'), h('span.dv-mono', {}, f.p.host),
+      h('span.dv-sub', {}, 'Type'), h('span', {}, h('span.dv-chip.muted', {}, f.p.preset_label), f.p.detected ? '' : h('span.dv-sub', {}, ' nothing detected; served as PHP')),
+      f.p.mode === 'proxy' && [h('label.dv-sub', { for: 'lk-port' }, 'Dev server port'),
+        h('span.dv-line', {}, h('input.dv-input.dv-mono.port', { id: 'lk-port', value: f.port, inputmode: 'numeric', autocomplete: 'off',
+          oninput: (e) => { f.port = e.target.value.trim(); }, onkeydown: (e) => { if (e.key === 'Enter') save(); } }),
+        h('span.dv-sub', {}, 'https://' + f.p.host + ' forwards to it'))],
+      f.p.mode === 'php' && [h('span.dv-sub', {}, 'PHP version'),
+        h('span', {}, h('div.dv-seg', { role: 'group', 'aria-label': 'PHP version' }, st.php.map((x) => x.version).map((v) =>
+          h('button', { type: 'button', 'aria-pressed': String(f.php === v), onclick: () => { f.php = v; draw(); } },
+            v + (v === st.default_php ? ' (default)' : '')))))]),
+    f.error ? h('p.dv-error', { role: 'alert' }, f.error) : null,
+    h('div.dv-dialog-btns', {}, h('button.dv-btn', { type: 'button', onclick: closeDialog }, 'Cancel'),
+      h('button.dv-btn.primary', { type: 'button', onclick: save, disabled: f.busy || !f.p || !!f.p.taken, 'data-focus': !!f.p }, f.busy ? 'Linking…' : 'Link site'))),
+  closeDialog);
+  draw();
 }
 
 async function parkFolder() {
@@ -258,7 +314,8 @@ async function parkFolder() {
 function sitesPage(d) {
   const st = S.status;
   const installed = st.php.map((p) => p.version);
-  const inside = (folder) => d.sites.filter((s) => !s.linked && s.path.startsWith(folder + '/')).length;
+  const ignored = d.ignored || [];
+  const inside = (list, folder) => list.filter((x) => !x.linked && x.path.startsWith(folder + '/')).length;
   const out = [];
   if (st.server_status === 'stopped')
     out.push(h('div.dv-banner.warn', { role: 'status' }, h('span.dv-dot.warn'),
@@ -269,9 +326,10 @@ function sitesPage(d) {
       h('div.dv-sub', {}, 'Every folder inside a parked folder is served automatically at ', h('b', {}, 'folder-name'), '.' + st.tld)),
     btn([icon('plus'), 'Add folder'], parkFolder)));
   out.push(d.parked.length ? card(d.parked.map((folder) => {
-    const n = inside(folder);
+    const n = inside(d.sites, folder);
+    const removed = inside(ignored, folder);
     return row(h('span.dv-avatar.folder', {}, icon('folder')),
-      text(h('span.dv-mono', {}, folder), n ? plural(n, 'site') + ' served from here' : 'No sites yet'),
+      text(h('span.dv-mono', {}, folder), (n ? plural(n, 'site') + ' served from here' : 'No sites yet') + (removed ? ' · ' + removed + ' removed' : '')),
       moreBtn('Actions for ' + folder, () => [
         { header: folder },
         { label: 'Show in Finder', run: () => openTarget({ what: 'finder', path: folder }) },
@@ -286,70 +344,108 @@ function sitesPage(d) {
   })) : card(h('div.dv-empty', {}, h('div.dv-strong', {}, 'No parked folders'),
     h('div.dv-sub', {}, 'Add a folder like ~/Projects and every project inside is served automatically.'))));
 
-  // Removed parked sites (D-029) sit behind a filter on the Sites line, not in a section of their own.
-  const ignored = d.ignored || [];
-  if (!ignored.length) S.siteFilter = 'served';
+  // Removed parked sites (D-029) sit behind the filter on the Sites line, in the same table.
   const removed = S.siteFilter === 'removed';
-  out.push(h('div.dv-head', {},
-    h('h2.dv-h2', {}, 'Sites ', h('span.dv-light', {}, '(' + (removed ? ignored.length : d.sites.length) + ')')),
-    ignored.length ? dropdown('Show sites', removed ? 'removed' : 'served',
-      [{ value: 'served', label: 'Served (' + d.sites.length + ')' }, { value: 'removed', label: 'Removed (' + ignored.length + ')' }],
-      (v) => { S.siteFilter = v; renderPage(); }) : null));
-  if (removed) {
-    out.push(card(ignored.map((i) => row(h('span.dv-avatar', {}, i.name.charAt(0).toUpperCase()),
-      text(i.name + '.' + st.tld, h('span.dv-mono', {}, i.path)),
-      btn('Restore', () => act('Restoring…', () => daemon({ cmd: 'unignore', site: i.name }), 'Serving ' + i.name + ' again'))))));
-    out.push(h('p.dv-sub.dv-note', {}, 'Removed sites are not served. Their folders are not touched.'));
-    return out;
-  }
-  out.push(card(d.sites.length ? d.sites.map((s) => siteRow(s, installed, d.parked)) :
-    h('div.dv-empty', {}, h('div.dv-strong', {}, 'No sites yet'), h('div.dv-sub', {}, 'Park a folder, or link one with the + button.'))));
-  out.push(h('p.dv-sub.dv-note', {}, 'Each site picks its PHP version; a change reloads only that site.'));
+  out.push(h('div.dv-head', {}, h('h2.dv-h2', {}, 'Sites'),
+    dropdown('Show sites', removed ? 'removed' : 'served',
+      [{ value: 'served', label: 'Served', kbd: String(d.sites.length) }, { value: 'removed', label: 'Removed', kbd: String(ignored.length) }],
+      (v) => { S.siteFilter = v; renderPage(); }, (removed ? 'Removed (' + ignored.length + ')' : 'Served (' + d.sites.length + ')'))));
+  const rows = removed ? ignored.map(removedRow) : d.sites.map((s) => siteRow(s, installed, d.parked));
+  out.push(h('div.st-grid.st-cols', { 'aria-hidden': 'true' }, h('span'), h('span', {}, 'Site'), h('span', {}, 'Serves'), h('span', {}, 'Processes'), h('span')));
+  out.push(h('div.dv-card', { role: 'list' }, rows.length ? rows : h('div.dv-empty', {},
+    h('div.dv-strong', {}, removed ? 'No removed sites' : 'No sites yet'),
+    h('div.dv-sub', {}, removed ? 'Sites you remove from a parked folder show up here, so you can serve them again.' : 'Park a folder, or link one with the + button.'))));
+  out.push(h('p.dv-sub.dv-note', {}, removed ? 'Removed sites are not served. Their folders are not touched.'
+    : 'PHP sites pick their version; a change reloads only that site. Node sites are proxied to the port their dev server listens on.'));
   return out;
 }
 
+/** One line of the Sites table: the site, how it is served, its processes, then its menu and details. */
 function siteRow(s, installed, parked) {
+  const st = S.status;
   const host = siteHost(s);
   const running = (s.commands || []).filter((c) => c.state === 'running').length;
+  const open = () => openTarget({ what: 'site', name: s.name });
   const versions = installed.includes(s.php) ? installed : [...installed, s.php];
-  const pick = dropdown('PHP version for ' + host, s.php, versions.map((v) => ({ value: v, label: v })), (version) =>
-    act('Switching ' + s.name + '…', () => daemon({ cmd: 'isolate', version, site: s.name, cwd: '/' }), s.name + ' now uses PHP ' + version));
-  return row(
-    h('span.dv-avatar', {}, s.name.charAt(0).toUpperCase()),
-    h('div.dv-grow', {},
+  // The default version means following the default again; another one isolates the site.
+  const usePhp = (version) => version === st.default_php
+    ? act('Switching ' + s.name + '…', () => daemon({ cmd: 'unisolate', site: s.name, cwd: '/' }), host + ' uses the default PHP again')
+    : act('Switching ' + s.name + '…', () => daemon({ cmd: 'isolate', version, site: s.name, cwd: '/' }), host + ' now uses PHP ' + version);
+  const php = h('button.dv-select', { type: 'button', 'aria-label': 'PHP version for ' + host + ': ' + s.php, 'aria-haspopup': 'menu', 'aria-expanded': 'false', disabled: !!S.busy,
+    onclick: (e) => menu(e.currentTarget, versions.map((v) => ({ label: 'PHP ' + v, kbd: v === st.default_php ? 'default' : '', checked: v === s.php,
+      run: () => { if (v !== s.php || (v === st.default_php && s.isolated)) usePhp(v); } })), true) },
+  h('span', {}, 'PHP ' + s.php), icon('chevron'));
+  return h('div.st-grid.st-row', { role: 'listitem' },
+    h('span.dv-avatar', { 'aria-hidden': 'true' }, s.name.charAt(0).toUpperCase()),
+    h('div.st-site', {},
       h('div.dv-line', {},
-        h('button.dv-host', { type: 'button', title: 'Details for ' + host, onclick: () => openSite(s.name) }, host),
+        h('button.dv-host', { type: 'button', title: 'Open ' + s.url, onclick: open }, host),
         h('span.dv-chip.muted', {}, s.preset_label),
         s.mode === 'php' && s.isolated ? h('span.dv-chip.accent', { title: 'This site uses its own PHP version' }, 'Isolated') : null,
-        s.mode !== 'php' || s.php_installed ? null : h('span.dv-chip.warn', {}, 'PHP ' + s.php + ' not installed')),
-      h('div.dv-sub.dv-ellipsis', {}, h('span.dv-mono', {}, s.path), ' · ' + (s.linked ? 'Linked' : 'Parked'))),
-    s.port ? h('span.dv-chip' + (s.port_busy ? '.warn' : '.muted'), { title: s.port_busy ? 'Port ' + s.port + ' is in use by ' + s.port_busy
-      : 'Also served on http://127.0.0.1:' + s.port }, ':' + s.port + (s.port_busy ? ' busy' : '')) : null,
-    running ? h('span.dv-chip.ok', {}, '● ' + running + ' running') : null,
-    s.share?.url ? h('span.dv-chip.accent', { title: 'Shared at ' + s.share.url }, 'Shared') : null,
-    s.mode === 'php' ? h('span.dv-label', {}, 'PHP', pick) : h('span.dv-sub.dv-nowrap', {}, s.mode === 'proxy' ? 'Proxy :' + s.upstream : 'Static'),
-    h('button.dv-btn.ghost.icon', { type: 'button', title: 'Open in browser', 'aria-label': 'Open ' + host + ' in browser',
-      onclick: () => openTarget({ what: 'site', name: s.name }) }, icon('open')),
-    moreBtn('More actions for ' + host, () => [
+        s.mode !== 'php' || s.php_installed ? null : h('span.dv-chip.warn', {}, 'PHP ' + s.php + ' not installed'),
+        s.share?.url ? h('span.dv-chip.accent', { title: 'Shared at ' + s.share.url }, 'Shared') : null),
+      h('div.dv-sub.st-path', { title: s.path }, h('span.dv-mono.dv-ellipsis', {}, s.path), s.linked ? h('span.dv-nowrap', {}, ' · Linked') : null)),
+    h('div.st-serve', {}, s.mode === 'php' ? php : h('span.st-label', {}, s.mode === 'proxy' ? ['Proxy ', h('span.dv-mono', {}, ':' + s.upstream)] : 'Static')),
+    h('div.st-proc', {},
+      running ? h('span.st-run', {}, h('i', { 'aria-hidden': 'true' }), running + ' running') : h('span.dv-sub', {}, 'Not running'),
+      s.port ? h('span.dv-sub.dv-mono' + (s.port_busy ? '.st-busy' : ''), { title: s.port_busy ? 'Port ' + s.port + ' is in use by ' + s.port_busy
+        : 'Also served on http://127.0.0.1:' + s.port }, 'on :' + s.port + (s.port_busy ? ' · busy' : '')) : null),
+    h('div.st-acts', {},
+      moreBtn('More actions for ' + host, () => [
+        { header: host },
+        { label: 'Open in browser', run: open },
+        { label: 'Copy URL', run: () => act('Copying…', () => invoke('copy_url', { name: s.name }), (m) => m) },
+        { label: 'Open folder in Terminal', run: () => openTarget({ what: 'terminal', path: s.path }) },
+        { label: 'Details', run: () => openSite(s.name) },
+        '-',
+        s.linked ? { label: 'Unlink…', danger: true, run: async () => {
+          if (await ask('Unlink ' + host + '?', 'The folder itself is not touched.', 'Unlink', true))
+            act('Unlinking…', () => daemon({ cmd: 'unlink', name: s.name }), 'Unlinked ' + s.name);
+        } } : { label: 'Remove site…', danger: true, run: async () => {
+          const folder = parked.find((f) => s.path.startsWith(f + '/')) || '';
+          if (await ask('Remove ' + host + '?', 'Devid stops serving it and ignores ' + s.path + ' inside ' + folder + '; the folder itself is not touched.', 'Remove', true))
+            act('Removing…', () => daemon({ cmd: 'ignore', site: s.name }), (r) => 'Removed ' + host + '; find it under Removed to serve it again');
+        } },
+      ]),
+      h('button.dv-btn.ghost.icon', { type: 'button', title: 'Details', 'aria-label': 'Details for ' + host, onclick: () => openSite(s.name) }, icon('next'))));
+}
+
+function removedRow(i) {
+  const host = i.name + '.' + S.status.tld;
+  return h('div.st-grid.st-row', { role: 'listitem' },
+    h('span.dv-avatar', { 'aria-hidden': 'true' }, i.name.charAt(0).toUpperCase()),
+    h('div.st-site', {}, h('div', {}, host), h('div.dv-sub.dv-ellipsis', { title: i.path }, h('span.dv-mono', {}, i.path))),
+    h('div.st-serve', {}, h('span.dv-sub', {}, 'Not served')), h('span'),
+    h('div.st-acts', {}, moreBtn('More actions for ' + host, () => [
       { header: host },
-      { label: 'Details', run: () => openSite(s.name) },
-      { label: 'Open in browser', run: () => openTarget({ what: 'site', name: s.name }) },
-      { label: 'Open folder in Terminal', run: () => openTarget({ what: 'terminal', path: s.path }) },
-      { label: 'Copy URL', run: () => act('Copying…', () => invoke('copy_url', { name: s.name }), (m) => m) },
-      s.isolated && '-',
-      s.isolated && { label: 'Use the default PHP again', kbd: S.status.default_php, run: () =>
-        act('Switching ' + s.name + '…', () => daemon({ cmd: 'unisolate', site: s.name, cwd: '/' }), s.name + ' uses the default PHP again') },
-      '-',
-      s.linked ? { label: 'Unlink…', danger: true, run: async () => {
-        if (await ask('Unlink ' + s.name + '?', 'The folder itself is not touched.', 'Unlink', true))
-          act('Unlinking…', () => daemon({ cmd: 'unlink', name: s.name }), 'Unlinked ' + s.name);
-      } } : { label: 'Remove site…', danger: true, run: async () => {
-        const folder = parked.find((f) => s.path.startsWith(f + '/')) || '';
-        if (await ask('Remove ' + host + '?', 'Devid stops serving it and ignores ' + s.path + ' inside ' + folder + '; the folder itself is not touched.', 'Remove', true))
-          act('Removing…', () => daemon({ cmd: 'ignore', site: s.name }), (r) => 'Ignored ' + s.name + '; the folder is still in ' + r.parked);
-      } },
-    ]),
-    h('button.dv-btn.ghost.icon', { type: 'button', title: 'Details', 'aria-label': 'Details for ' + host, onclick: () => openSite(s.name) }, icon('next')));
+      { label: 'Open folder in Terminal', run: () => openTarget({ what: 'terminal', path: i.path }) },
+      { label: 'Serve again', run: () => act('Restoring…', () => daemon({ cmd: 'unignore', site: i.name }), 'Serving ' + host + ' again') },
+    ])));
+}
+
+/** The status card's ⋯: the sites, Start/Stop, the default PHP, Settings and Quit, beside the card. */
+async function quickMenu(anchor) {
+  const st = S.status;
+  let sites = [];
+  try { sites = (await daemon({ cmd: 'sites' })).sites; } catch (e) { toast(String(e), true); }
+  const running = st.server_status === 'running';
+  menu(anchor, [
+    { header: running ? st.server + ' · PHP ' + st.default_php + ' · Running' : 'Devid is stopped', dot: running ? 'ok' : 'warn' },
+    sites.length && '-',
+    sites.length && { header: 'Sites' },
+    ...sites.map((s) => ({ label: siteHost(s), kbd: s.mode === 'php' ? 'PHP ' + s.php : s.mode === 'proxy' ? ':' + s.upstream : 'Static',
+      run: () => openTarget({ what: 'site', name: s.name }) })),
+    '-',
+    ...(running ? [{ label: 'Stop all', run: stopAll }, { label: 'Restart ' + st.server, run: () => restart(st.server) }] : [{ label: 'Start all', run: startAll }]),
+    '-',
+    { header: 'Default PHP' },
+    { row: st.php.map((p) => ({ label: p.version, checked: p.version === st.default_php,
+      run: () => { if (p.version !== st.default_php) act('Switching…', () => daemon({ cmd: 'php_use', version: p.version }), 'PHP ' + p.version + ' is now the default'); } })),
+    label: 'Default PHP' },
+    '-',
+    { label: 'Settings…', run: () => go('settings') },
+    { label: 'Quit Devid', run: () => invoke('quit') },
+  ], false, anchor.closest('.dv-statuscard'));
 }
 
 // ---------- site detail (Phase 8 A5: app type D-035, local port D-037, commands D-036) ----------
@@ -1144,6 +1240,7 @@ function renderChrome() {
     $('status-server').textContent = 'Devid';
     $('status-line').textContent = 'Not running';
     $('status-btns').replaceChildren();
+    $('status-more').replaceChildren();
     return;
   }
   const failed = st.php.filter((p) => p.status === 'failed').length + (st.server_status === 'failed' ? 1 : 0);
@@ -1151,6 +1248,8 @@ function renderChrome() {
   $('status-dot').className = 'dv-dot ' + (failed ? 'bad' : running ? 'ok' : 'warn');
   $('status-server').textContent = st.server;
   $('status-line').textContent = cardBusy || ((failed ? plural(failed, 'service') + ' failed' : capital(st.server_status)) + ' · PHP ' + st.default_php);
+  $('status-more').replaceChildren(h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Devid menu', 'aria-haspopup': 'menu',
+    'aria-expanded': 'false', onclick: (e) => quickMenu(e.currentTarget) }, icon('more')));
   $('status-btns').replaceChildren(...(running
     ? [btn('Restart', () => restart(st.server)), btn('Stop all', stopAll)]
     : [btn('Start all', startAll, 'primary')]));

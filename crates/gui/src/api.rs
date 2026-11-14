@@ -87,7 +87,7 @@ fn too_old(err: String, running: impl FnOnce() -> String) -> String {
 pub enum Open {
     /// A site's URL, in the default browser.
     Site { name: String },
-    /// A site or parked folder, in Terminal.
+    /// A site, a parked folder or a removed site's folder, in Terminal.
     Terminal { path: String },
     /// A site or parked folder, the data folder, a server config or a log file, selected in Finder.
     Finder { path: String },
@@ -270,6 +270,12 @@ pub fn relaunch(app: tauri::AppHandle, page: Option<String>) {
     });
 }
 
+/// Quit Devid from the window's menu, as the menu-bar menu does; the sites keep running.
+#[tauri::command]
+pub fn quit(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 /// `devid self-update --check`: its one line, as the CLI prints it.
 #[tauri::command]
 pub async fn devid_check() -> Result<String, String> {
@@ -323,12 +329,13 @@ fn log_paths(paths: &Paths) -> Result<Vec<String>, String> {
         .collect())
 }
 
-/// Only paths the daemon knows: sites and parked folders, plus (for Finder) the data folder, the
+/// Only paths the daemon knows: sites, parked folders and removed sites' folders, plus (for Finder) the data folder, the
 /// server configs and the logs.
 fn known(paths: &Paths, path: &str, finder: bool) -> Result<(), String> {
     let sites = request(paths, &Request::Sites)?;
     let mut ok: Vec<&str> = items(&sites["sites"]).filter_map(|s| s["path"].as_str()).collect();
     ok.extend(items(&sites["parked"]).filter_map(Value::as_str));
+    ok.extend(items(&sites["ignored"]).filter_map(|i| i["path"].as_str()));
     let home = paths.home.display().to_string();
     let servers = if finder { request(paths, &Request::ServerList)? } else { Value::Null };
     let logs = if finder { log_paths(paths)? } else { Vec::new() };

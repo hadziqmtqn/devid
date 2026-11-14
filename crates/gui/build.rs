@@ -13,6 +13,7 @@ fn main() {
         "login_item",
         "self_update",
         "relaunch",
+        "quit",
     ]));
     tauri_build::try_build(attributes).expect("tauri-build failed");
 }

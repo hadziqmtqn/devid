@@ -31,6 +31,7 @@ Implemented in M3:
 - Every site-changing command goes through `State::mutate`: apply the new config, and save `config.toml` only if nginx accepted it; otherwise roll back.
 - Running PHP masters = the default version plus every version a site uses, if installed.
 - CLI: `devid sites`, `link`, `unlink`, `park`, `unpark`, `isolate <ver>`, `unisolate` and `server install nginx --from <file>`. `isolate` and `unisolate` default to the site that contains the current folder.
+- `link_preview` (2026-11-14, for the app's Link a site dialog) answers what `link` would make of a folder without saving it: the name, type, mode, dev server port after D-042's spreading, the PHP version, and `taken`, the path of a site that already has that name.
 
 Implemented in M4:
 - `daemon::ca` (rcgen with the ring backend):

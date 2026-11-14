@@ -382,6 +382,18 @@ fn handle(stream: UnixStream, state: &State) -> io::Result<()> {
     Ok(())
 }
 
+/// A link's site name: the one given, or the folder's name made valid.
+fn link_name(name: Option<String>, path: &Path) -> Result<String, String> {
+    let folder = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    match name {
+        Some(n) if sites::valid_name(&n) => Ok(n),
+        Some(n) => Err(format!("{n:?} is not a valid site name (a-z, 0-9, -)")),
+        None => {
+            sites::name_from_folder(&folder).ok_or(format!("cannot derive a site name from {folder:?}; pass a name"))
+        }
+    }
+}
+
 fn existing_dir(path: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(path);
     if !path.is_absolute() {
@@ -692,17 +704,34 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         }
         Request::Link { name, path } => {
             let path = existing_dir(&path)?;
-            let folder = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let name = match name {
-                Some(n) if sites::valid_name(&n) => n,
-                Some(n) => return Err(format!("{n:?} is not a valid site name (a-z, 0-9, -)")),
-                None => sites::name_from_folder(&folder)
-                    .ok_or(format!("cannot derive a site name from {folder:?}; pass a name"))?,
-            };
+            let name = link_name(name, &path)?;
             state.mutate(|c, _| {
                 c.links.insert(name.clone(), path.display().to_string());
                 Ok(json!({"ok": true, "site": name}))
             })
+        }
+        Request::LinkPreview { name, path } => {
+            let path = existing_dir(&path)?;
+            let name = link_name(name, &path)?;
+            let current = state.config.lock().unwrap().clone();
+            let taken = sites::resolve(&current).into_iter().find(|s| s.name == name).map(|s| s.path);
+            let mut next = current.clone();
+            next.links.insert(name.clone(), path.display().to_string());
+            sites::spread_ports(&current, &mut next, ports::in_use);
+            let s =
+                sites::resolve(&next).into_iter().find(|s| s.name == name).ok_or(format!("{name} did not resolve"))?;
+            Ok(json!({
+                "ok": true,
+                "site": name,
+                "host": s.host,
+                "preset": s.preset,
+                "preset_label": sites::find_preset(s.preset).map_or(s.preset, |p| p.label),
+                "detected": s.detected,
+                "mode": s.mode,
+                "upstream": s.upstream,
+                "php": s.php,
+                "taken": taken,
+            }))
         }
         Request::Unlink { name } => state.mutate(|c, _| {
             c.links.remove(&name).ok_or(format!("{name} is not a linked site"))?;
