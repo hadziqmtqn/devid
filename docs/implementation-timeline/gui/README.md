@@ -12,3 +12,4 @@
 | 2026-11-08 | [Phase 8 A5 part 1: a site's detail view and running commands in the menu bar (v0.11.0)](2026-11-08-a5-app-ui.md) |
 | 2026-11-09 | [The app updates devid in the background and reopens as the new version (D-039, v0.12.1)](2026-11-09-update-in-background.md) |
 | 2026-11-14 | [The Logs page in two panes: sources by site, levels, search; log text without escape codes](2026-11-14-logs-sources.md) |
+| 2026-11-14 | [The Sites page as a table, a quick menu on the status card, and a Link a site dialog](2026-11-14-sites-table.md) |

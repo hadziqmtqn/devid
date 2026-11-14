@@ -15,6 +15,7 @@
     "allow-login-item",
     "allow-self-update",
     "allow-relaunch",
+    "allow-quit",
     "core:window:allow-start-dragging"
   ]
 }

@@ -310,6 +310,25 @@ fn a_new_project_gets_a_free_dev_server_port() {
 
     let out = devid(&home, &["cmd", "b-new"]);
     assert!(String::from_utf8_lossy(&out.stdout).starts_with("https://b-new.test"), "{}", stderr(&out));
+
+    // A preview of a link shows the port it would get and saves nothing; a name in use is reported.
+    let other = root.join("elsewhere/C_New");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("package.json"), r#"{"dependencies": {"next": "16"}}"#).unwrap();
+    let req =
+        |path: &Path| format!(r#"{{"cmd":"link_preview","name":null,"path":{}}}"#, Value::from(path.to_str().unwrap()));
+    let preview = request_json(&home, &req(&other));
+    assert_eq!(
+        (&preview["site"], &preview["preset"], &preview["mode"]),
+        (&"c-new".into(), &"next".into(), &"proxy".into()),
+        "{preview}"
+    );
+    let port = preview["upstream"].as_u64().unwrap();
+    assert!(port > 3000 && port != moved, "{preview}");
+    assert!(preview["taken"].is_null(), "{preview}");
+    assert!(site_missing(&json(&home, &["sites", "--json"]), "c-new"), "nothing saved");
+    let taken = request_json(&home, &req(&projects.join("a-old")));
+    assert_eq!(taken["taken"], projects.join("a-old").to_str().unwrap(), "{taken}");
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }

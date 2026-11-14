@@ -36,6 +36,7 @@ fn main() {
             api::login_item,
             api::self_update,
             api::relaunch,
+            api::quit,
         ])
         .setup(move |app| {
             // Menu bar only while no window is open; in the Dock and Cmd+Tab with one (D-030).
