@@ -51,6 +51,7 @@ pub fn list(paths: &Paths) -> Vec<Value> {
 
 /// Text from `offset` to the end (or the last TAIL_BYTES when `offset` is None), and the new end
 /// offset for the next call. A file that shrank (cleared or rotated) is read from the start.
+/// Terminal escape sequences are taken out; `\r` stays, for the reader to redraw a progress line.
 pub fn read(paths: &Paths, name: &str, offset: Option<u64>) -> io::Result<(String, u64)> {
     let mut file = fs::File::open(path_of(paths, name)?)?;
     let len = file.metadata()?.len();
@@ -62,12 +63,86 @@ pub fn read(paths: &Paths, name: &str, offset: Option<u64>) -> io::Result<(Strin
     file.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
     file.take(len - start).read_to_end(&mut bytes)?;
-    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    // What the writer was still in the middle of stays for the next read.
+    bytes.truncate(whole(&bytes));
+    let end = start + bytes.len() as u64;
+    let mut text = strip_escapes(&String::from_utf8_lossy(&bytes));
     if offset.is_none() && start > 0 {
         // Started mid-file: drop the partial first line.
         text = text.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default();
     }
-    Ok((text, len))
+    Ok((text, end))
+}
+
+/// Text without terminal escape sequences (colors, cursor moves, window titles): cargo, vite and
+/// npm write them even when their output goes to a file.
+fn strip_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            // CSI: parameters, then one final byte.
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            // OSC: up to BEL or ESC \.
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\x07' || (c == '\x1b' && chars.next() == Some('\\')) {
+                        break;
+                    }
+                }
+            }
+            // ESC ( B and the like.
+            Some(' '..='/') => {
+                chars.next();
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// How many bytes are whole: a UTF-8 character or an escape sequence cut off at the end is left
+/// out, so the next read gets it in one piece.
+fn whole(bytes: &[u8]) -> usize {
+    let mut end = bytes.len();
+    if let Some(esc) = bytes.iter().rposition(|&b| b == 0x1b) {
+        let seq = &bytes[esc..];
+        let done = match seq.get(1) {
+            None => false,
+            Some(b'[') => seq[2..].iter().any(|b| (0x40..=0x7E).contains(b)),
+            Some(b']') => seq.contains(&0x07) || seq.windows(2).skip(1).any(|w| w == b"\x1b\\"),
+            Some(b' '..=b'/') => seq.len() > 2,
+            Some(_) => true,
+        };
+        // A long run with no end is not a sequence being written; let it through.
+        if !done && seq.len() < 64 {
+            end = esc;
+        }
+    }
+    // The last character's lead byte, at most 3 bytes back.
+    if let Some(back) = (1..=end.min(4)).find(|&b| bytes[end - b] & 0xC0 != 0x80) {
+        let lead = bytes[end - back];
+        let need = match lead {
+            0xF0.. => 4,
+            0xE0.. => 3,
+            0xC0.. => 2,
+            _ => 1,
+        };
+        if need > back {
+            end -= back;
+        }
+    }
+    end
 }
 
 pub fn clear(paths: &Paths, name: &str) -> io::Result<()> {
@@ -96,6 +171,21 @@ mod tests {
 
         clear(&paths, "nginx-error.log").unwrap();
         assert_eq!(read(&paths, "nginx-error.log", Some(14)).unwrap(), (String::new(), 0), "shrunk: from the start");
+
+        // Colors and a progress line from cargo; an escape and a UTF-8 character cut at the end wait.
+        let cargo = "\x1b[1m\x1b[96m    Building\x1b[0m [=> ] 1/2\r\x1b[K\x1b[1m\x1b[92m    Finished\x1b[0m\n\x1b]0;title\x07ok \u{2026}\n";
+        fs::write(paths.log_dir().join("nginx-error.log"), [cargo.as_bytes(), b"half \xE2\x80", b"\x1b[1"].concat())
+            .unwrap();
+        let (text, end) = read(&paths, "nginx-error.log", Some(0)).unwrap();
+        assert_eq!(text, "    Building [=> ] 1/2\r    Finished\nok \u{2026}\nhalf ");
+        assert_eq!(end as usize, cargo.len() + 5, "stops before the cut character");
+        fs::write(
+            paths.log_dir().join("nginx-error.log"),
+            [cargo.as_bytes(), "half \u{2026}\x1b[1mbold\n".as_bytes()].concat(),
+        )
+        .unwrap();
+        assert_eq!(read(&paths, "nginx-error.log", Some(end)).unwrap().0, "\u{2026}bold\n", "then the rest");
+        assert_eq!(strip_escapes("a\x1b(Bb\x1b=c"), "abc");
 
         for bad in ["../config.toml", "/etc/passwd", "notes.txt", ".hidden.log", "a/b.log", "missing.log"] {
             assert!(read(&paths, bad, None).is_err(), "{bad} refused");

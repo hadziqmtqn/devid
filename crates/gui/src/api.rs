@@ -89,7 +89,7 @@ pub enum Open {
     Site { name: String },
     /// A site or parked folder, in Terminal.
     Terminal { path: String },
-    /// A site or parked folder, the data folder or a server config, selected in Finder.
+    /// A site or parked folder, the data folder, a server config or a log file, selected in Finder.
     Finder { path: String },
     /// A PHP version's php.ini, in the default text editor.
     PhpIni { version: String },
@@ -149,10 +149,25 @@ pub async fn copy_url(name: String, share: Option<bool>) -> Result<String, Strin
         }
         _ => site_url(&paths, &name)?,
     };
+    pbcopy(&url).map(|_| format!("Copied {url}"))
+}
+
+/// Copies the full path of a log the daemon lists.
+#[tauri::command]
+pub async fn copy_log_path(name: String) -> Result<String, String> {
+    let paths = Paths::from_env();
+    let path = log_paths(&paths)?
+        .into_iter()
+        .find(|p| p.ends_with(&format!("/{name}")))
+        .ok_or(format!("no log named {name}"))?;
+    pbcopy(&path).map(|_| format!("Copied {path}"))
+}
+
+fn pbcopy(text: &str) -> Result<(), String> {
     let mut child = Command::new("/usr/bin/pbcopy").stdin(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
-    child.stdin.take().expect("piped stdin").write_all(url.as_bytes()).map_err(|e| e.to_string())?;
+    child.stdin.take().expect("piped stdin").write_all(text.as_bytes()).map_err(|e| e.to_string())?;
     match child.wait() {
-        Ok(s) if s.success() => Ok(format!("Copied {url}")),
+        Ok(s) if s.success() => Ok(()),
         _ => Err("Could not copy to the clipboard".into()),
     }
 }
@@ -299,17 +314,28 @@ fn site_url(paths: &Paths, name: &str) -> Result<String, String> {
         .ok_or(format!("no site named {name}"))
 }
 
-/// Only paths the daemon knows: sites and parked folders, plus (for Finder) the data folder and
-/// the server configs.
+/// The full paths of the logs the daemon lists.
+fn log_paths(paths: &Paths) -> Result<Vec<String>, String> {
+    let logs = request(paths, &Request::Logs)?;
+    Ok(items(&logs["logs"])
+        .filter_map(|l| l["name"].as_str())
+        .map(|n| paths.log_dir().join(n).display().to_string())
+        .collect())
+}
+
+/// Only paths the daemon knows: sites and parked folders, plus (for Finder) the data folder, the
+/// server configs and the logs.
 fn known(paths: &Paths, path: &str, finder: bool) -> Result<(), String> {
     let sites = request(paths, &Request::Sites)?;
     let mut ok: Vec<&str> = items(&sites["sites"]).filter_map(|s| s["path"].as_str()).collect();
     ok.extend(items(&sites["parked"]).filter_map(Value::as_str));
     let home = paths.home.display().to_string();
     let servers = if finder { request(paths, &Request::ServerList)? } else { Value::Null };
+    let logs = if finder { log_paths(paths)? } else { Vec::new() };
     if finder {
         ok.push(&home);
         ok.extend(items(&servers["servers"]).filter_map(|s| s["config"].as_str()));
+        ok.extend(logs.iter().map(String::as_str));
     }
     if ok.contains(&path) { Ok(()) } else { Err(format!("{path} is not a Devid site, folder or file")) }
 }

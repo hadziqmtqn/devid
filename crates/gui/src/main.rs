@@ -27,6 +27,7 @@ fn main() {
             api::daemon,
             api::open,
             api::copy_url,
+            api::copy_log_path,
             api::server_config,
             api::choose_folder,
             api::doctor,

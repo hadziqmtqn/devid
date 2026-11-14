@@ -4,6 +4,7 @@ fn main() {
         "daemon",
         "open",
         "copy_url",
+        "copy_log_path",
         "server_config",
         "choose_folder",
         "doctor",

@@ -277,7 +277,9 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::new().borders(Borders::TOP);
     let inner = block.inner(text);
     frame.render_widget(block, text);
-    let lines: Vec<&str> = app.log_text.lines().collect();
+    // A progress bar (cargo, npm) redraws its line after each \r; show what a terminal would.
+    let lines: Vec<&str> =
+        app.log_text.lines().map(|l| l.trim_end_matches('\r').rsplit('\r').next().unwrap_or_default()).collect();
     let visible = &lines[lines.len().saturating_sub(inner.height as usize)..];
     let body = if lines.is_empty() {
         vec![Line::styled("(empty)", Style::default().add_modifier(Modifier::DIM))]

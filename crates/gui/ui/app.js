@@ -42,6 +42,7 @@ const ICONS = {
   next: '<svg viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg>',
   play: '<svg viewBox="0 0 16 16"><path class="f" d="M5 3.2v9.6L12.8 8z"/></svg>',
   stop: '<svg viewBox="0 0 16 16"><rect class="f" x="4" y="4" width="8" height="8" rx="1.2"/></svg>',
+  search: '<svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>',
 };
 
 const S = {
@@ -51,7 +52,10 @@ const S = {
   data: {},
   keys: {},
   busy: '',
-  log: { name: null, offset: null, lines: [], follow: true },
+  // The open log; `tail` is its last line while it has no newline yet. `seen` and `errors` feed the
+  // sources' badges: new error lines in the logs not on screen, since the Logs page first saw them.
+  log: { name: null, offset: null, lines: [], tail: '', follow: true, newBelow: 0, tags: {},
+    level: 'all', query: '', srcQuery: '', open: {}, seen: {}, errors: {} },
   updates: null, // {text, changes}
   devid: null, // {text, available}
   doctor: null, // {checks} or {error} or {busy}
@@ -237,9 +241,7 @@ const PAGES = {
   php: { title: 'PHP', sub: () => 'PHP 8.3, 8.4 and 8.5 side by side; pick one per site.',
     load: () => daemon({ cmd: 'php_list' }), render: phpPage },
   server: { title: 'Web Server', sub: () => 'Status, engine choice and configuration.', load: () => daemon({ cmd: 'server_list' }), render: serverPage },
-  // Names only: sizes change all the time and would redraw the page on every poll.
-  logs: { title: 'Logs', sub: () => 'Log files in ' + (S.status?.home || '~/.devid') + '/log.',
-    load: async () => ({ logs: (await daemon({ cmd: 'logs' })).logs.map((l) => ({ name: l.name })) }), render: logsPage },
+  logs: { title: 'Logs', sub: () => 'Log files in ' + (S.status?.home || '~/.devid') + '/log.', load: loadLogs, render: logsPage },
   settings: { title: 'Settings', sub: () => 'Preferences for Devid on this Mac.', load: async () => ({}), render: settingsPage },
 };
 
@@ -639,34 +641,170 @@ async function viewConfig(server) {
       h('button.dv-btn.primary', { type: 'button', 'data-focus': true, onclick: closeDialog }, 'Close'))), closeDialog);
 }
 
+// ---------- Logs: sources on the left, the open log on the right ----------
+
+/** Log names, the sites' commands and what is running. Sizes only feed the badges: in the page's
+ * key they would redraw it on every poll. */
+async function loadLogs() {
+  const [list, sites] = await Promise.all([daemon({ cmd: 'logs' }), daemon({ cmd: 'sites' })]);
+  await countErrors(list.logs);
+  const st = S.status;
+  return {
+    logs: list.logs.map((l) => l.name),
+    sites: sites.sites.map((s) => ({ name: s.name, share: s.share?.state || null,
+      commands: (s.commands || []).map((c) => ({ name: c.name, log: c.log, on: c.state === 'running' })) })),
+    running: [st.server, st.server_status, st.php.map((p) => p.version + ' ' + p.status)],
+    errors: { ...S.log.errors },
+  };
+}
+
+/** Reads what the other logs gained since the last poll and counts its error lines. */
+async function countErrors(list) {
+  const L = S.log;
+  for (const { name, size } of list) {
+    const seen = L.seen[name];
+    if (seen === undefined || name === L.name) { L.seen[name] = size; delete L.errors[name]; continue; }
+    if (size === seen) continue;
+    let r;
+    try { r = await daemon({ cmd: 'log_read', name, offset: size < seen ? 0 : seen }); } catch { continue; }
+    const n = r.text.split('\n').filter((t) => lineLevel(t) === 'error').length;
+    if (n) L.errors[name] = (L.errors[name] || 0) + n;
+    L.seen[name] = r.offset;
+  }
+}
+
+const lineLevel = (t) => /error|crit|fatal|emerg|alert/i.test(t) || /\bFAIL\b/.test(t) ? 'error' : /warn/i.test(t) ? 'warning' : '';
+/** A line as a terminal leaves it: a progress bar (cargo, npm) redraws it after each \r. A final
+ * \r stays, since the \n of a \r\n may come with the next read. */
+const redraw = (t) => t.slice(t.lastIndexOf('\r', t.length - 2) + 1);
+
+/** Every log as a source: Devid, the web server, PHP, each site's commands and share, then the rest. */
+function logSources(d) {
+  const st = S.status;
+  const left = new Set(d.logs);
+  const take = (name) => left.delete(name);
+  const groups = [{ label: 'Devid', items: [] }, { label: 'Web server', items: [] }, { label: 'PHP', items: [] }];
+  if (take('daemon.log')) groups[0].items.push({ name: 'daemon.log', label: 'Daemon', on: true });
+  for (const name of d.logs) {
+    const web = /^(nginx|caddy|apache)-(\w+)\.log$/.exec(name);
+    if (web && take(name)) groups[1].items.push({ name, label: (SERVERS[web[1]]?.label || web[1]) + ' · ' + (web[2] === 'error' ? 'errors' : web[2]),
+      on: st.server === web[1] && st.server_status === 'running' });
+    const php = /^php(\d)(\d+)-fpm\.log$/.exec(name);
+    if (php && take(name)) {
+      const version = php[1] + '.' + php[2];
+      groups[2].items.unshift({ name, label: 'PHP ' + version + ' · php-fpm', on: st.php.some((p) => p.version === version && p.status === 'running') });
+    }
+  }
+  const sites = d.sites.map((s) => {
+    const items = s.commands.filter((c) => take(c.log)).map((c) => ({ name: c.log, label: c.name, on: c.on, site: s.name }));
+    return { name: s.name, items, share: 'share-' + s.name + '.log' };
+  });
+  // Logs of removed commands: the longest site name wins, since names may contain "-".
+  for (const name of [...left].filter((n) => n.startsWith('app-'))) {
+    const s = sites.filter((x) => name.startsWith('app-' + x.name + '-')).sort((a, b) => b.name.length - a.name.length)[0];
+    if (s && take(name)) s.items.push({ name, label: name.slice(5 + s.name.length, -4), on: false, site: s.name });
+  }
+  for (const s of sites) {
+    const share = d.sites.find((x) => x.name === s.name).share;
+    if (take(s.share)) s.items.push({ name: s.share, label: 'share', on: share === 'running' || share === 'starting', site: s.name });
+  }
+  groups.push({ label: 'Other', items: [...left].map((name) => ({ name, label: name })) });
+  return { groups: groups.filter((g) => g.items.length), sites: sites.filter((s) => s.items.length) };
+}
+
 function logsPage(d) {
   const L = S.log;
-  if (!d.logs.some((l) => l.name === L.name)) {
+  if (!d.logs.includes(L.name)) {
     const php = 'php' + (S.status.default_php || '').replace('.', '') + '-fpm.log';
-    pickLog(d.logs.some((l) => l.name === php) ? php : d.logs[0]?.name || null, false);
+    pickLog(d.logs.includes(php) ? php : d.logs[0] || null, false);
   }
   if (!L.name) return [card(h('div.dv-empty.dv-sub', {}, 'No log files yet.'))];
-  const box = h('div.dv-log', { id: 'logbox', role: 'log', tabindex: '0', 'aria-label': L.name });
+  const src = logSources(d);
+  const cur = [...src.groups, ...src.sites].flatMap((g) => g.items).find((x) => x.name === L.name) || { name: L.name, label: L.name };
+  const title = cur.site ? cur.site + ' · ' + cur.label : cur.label;
+  const path = (S.status.home || '~/.devid') + '/log/' + L.name;
+  const box = h('div.dv-log.lg-log', { id: 'logbox', role: 'log', tabindex: '0', 'aria-label': title, onscroll: (e) => {
+    const el = e.currentTarget;
+    if (!el.isConnected) return; // a redraw replaced it; all its sizes read 0
+    const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    if (atEnd !== L.follow) { L.follow = atEnd; if (atEnd) L.newBelow = 0; syncFollow(); }
+  } });
   fillLog(box);
-  return [
-    h('div.dv-logbar', {},
-      h('div.dv-seg.dv-mono', { role: 'group', 'aria-label': 'Log file' }, d.logs.map((l) =>
-        h('button', { type: 'button', 'aria-pressed': String(l.name === L.name), onclick: () => { pickLog(l.name, true); } }, l.name))),
-      h('span.dv-grow'),
-      h('label.dv-label', {}, 'Follow', h('input.dv-switch', { type: 'checkbox', role: 'switch', checked: L.follow,
-        onchange: (e) => { L.follow = e.target.checked; if (L.follow) readLog(); } })),
-      btn('Clear', async () => {
-        const name = L.name;
-        if (await ask('Clear ' + name + '?', 'Its contents are deleted.', 'Clear', true))
-          act('Clearing…', () => daemon({ cmd: 'log_clear', name }), () => { pickLog(name, false); return 'Cleared ' + name; });
-      })),
-    h('div.dv-sub.dv-mono.dv-note', {}, (S.status.home || '~/.devid') + '/log/' + L.name),
-    box,
-  ];
+  return h('div.lg-body', {},
+    h('div.lg-src', {},
+      h('label.dv-search.lg-src-search', {}, icon('search'), h('input.dv-input', { type: 'search', placeholder: 'Filter sources', 'aria-label': 'Filter log sources',
+        value: L.srcQuery, spellcheck: 'false', autocomplete: 'off', oninput: (e) => { L.srcQuery = e.target.value; $('lg-list').replaceChildren(...sourceList(src)); } })),
+      h('nav.lg-list', { id: 'lg-list', 'aria-label': 'Log sources' }, sourceList(src))),
+    h('div.lg-view', {},
+      h('div.lg-bar', {},
+        h('div.dv-grow', {}, h('div.dv-strong.dv-ellipsis', {}, title),
+          h('div.dv-sub.dv-mono.dv-ellipsis', { title: path }, path + ('on' in cur ? ' · ' + (cur.on ? 'running' : 'stopped') : ''))),
+        moreBtn('More actions for this log', () => [
+          { label: 'Show in Finder', run: () => openTarget({ what: 'finder', path }) },
+          { label: 'Copy path', run: () => act('Copying…', () => invoke('copy_log_path', { name: L.name }), (m) => m) },
+          '-',
+          { label: 'Clear log…', danger: true, run: async () => {
+            const name = L.name;
+            if (await ask('Clear ' + name + '?', 'Its contents are deleted.', 'Clear', true))
+              act('Clearing…', () => daemon({ cmd: 'log_clear', name }), () => { pickLog(name, false); return 'Cleared ' + name; });
+          } },
+        ])),
+      h('div.lg-tools', {},
+        h('div.dv-seg', { role: 'group', 'aria-label': 'Level' }, [['all', 'All'], ['warn', 'Warnings'], ['error', 'Errors']].map(([k, name]) =>
+          h('button', { type: 'button', 'aria-pressed': String(L.level === k), onclick: () => { L.level = k; renderPage(); } }, name))),
+        h('label.dv-search.dv-grow', {}, icon('search'), h('input.dv-input', { type: 'search', placeholder: 'Search in this log', 'aria-label': 'Search in this log',
+          value: L.query, spellcheck: 'false', autocomplete: 'off', oninput: (e) => { L.query = e.target.value; fillLog($('logbox')); } }),
+        h('span.dv-sub.dv-nowrap', { id: 'lg-count', 'aria-live': 'polite' })),
+        h('label.dv-label', {}, 'Follow', h('input.dv-switch', { id: 'lg-follow', type: 'checkbox', role: 'switch', checked: L.follow,
+          onchange: (e) => { L.follow = e.target.checked; L.newBelow = 0; syncFollow(); } }))),
+      box,
+      h('button.lg-jump', { type: 'button', id: 'lg-jump', hidden: L.follow, onclick: () => { L.follow = true; L.newBelow = 0; syncFollow(); } }, jumpText())));
+}
+
+function sourceList(src) {
+  const L = S.log;
+  const q = L.srcQuery.trim().toLowerCase();
+  const match = (x) => !q || (x.label + ' ' + (x.site || '') + ' ' + x.name).toLowerCase().includes(q);
+  const badge = (n) => n ? h('span.lg-badge', { 'aria-label': plural(n, 'new error') }, String(n)) : null;
+  const item = (x, inSite) => h('button.lg-item' + (inSite ? '.in-site' : '') + (x.name === L.name ? '.is-active' : ''), { type: 'button', title: x.name,
+    'aria-current': x.name === L.name ? 'true' : null, onclick: () => pickLog(x.name, true) },
+  h('span.lg-sdot' + (x.on ? '.on' : ''), { 'aria-hidden': 'true' }), h('span.dv-grow.dv-ellipsis', {}, x.label), badge(L.errors[x.name]));
+  const out = [];
+  for (const g of src.groups) {
+    const items = g.items.filter(match);
+    if (items.length) out.push(h('div.lg-group', {}, g.label), items.map((x) => item(x, false)));
+  }
+  const sites = src.sites.map((s) => ({ ...s, shown: s.items.filter((x) => match({ ...x, site: s.name })) })).filter((s) => s.shown.length);
+  if (sites.length) out.push(h('div.lg-group', {}, 'Sites'));
+  for (const s of sites) {
+    const open = q ? true : L.open[s.name] ?? s.items.some((x) => x.name === L.name);
+    const running = s.items.filter((x) => x.on).length;
+    const caret = icon('next');
+    caret.classList.add('lg-caret');
+    if (open) caret.classList.add('is-open');
+    out.push(h('button.lg-site', { type: 'button', 'aria-expanded': String(open), onclick: () => { L.open[s.name] = !open; $('lg-list').replaceChildren(...sourceList(src)); } },
+      caret, h('span.dv-grow.dv-ellipsis', {}, s.name), open ? null : h('span.dv-sub', {}, running ? running + ' running' : 'stopped'),
+      open ? null : badge(s.items.reduce((n, x) => n + (L.errors[x.name] || 0), 0))));
+    if (open) out.push(s.shown.map((x) => item(x, true)));
+  }
+  if (!out.length) out.push(h('div.lg-none.dv-sub', {}, 'No sources match “' + L.srcQuery.trim() + '”.'));
+  return out.flat();
+}
+
+const jumpText = () => '↓ Jump to latest' + (S.log.newBelow ? ' · ' + S.log.newBelow + ' new' : '');
+
+/** Follow on: the log stays at its end. Off (by the switch or by scrolling up): new lines are counted. */
+function syncFollow() {
+  const L = S.log;
+  if ($('lg-follow')) $('lg-follow').checked = L.follow;
+  if ($('lg-jump')) { $('lg-jump').hidden = L.follow; $('lg-jump').textContent = jumpText(); }
+  const box = $('logbox');
+  if (box && L.follow) box.scrollTop = box.scrollHeight;
 }
 
 function pickLog(name, render) {
-  Object.assign(S.log, { name, offset: null, lines: [] });
+  Object.assign(S.log, { name, offset: null, lines: [], tail: '', follow: true, newBelow: 0, tags: {}, query: '' });
+  if (name) delete S.log.errors[name];
   if (render) renderPage();
   if (name) readLog();
 }
@@ -677,22 +815,35 @@ async function readLog() {
   let r;
   try { r = await daemon({ cmd: 'log_read', name, offset: L.offset }); } catch { return; }
   if (name !== L.name) return;
-  if (L.offset !== null && r.offset < L.offset) L.lines = []; // the file was cleared or rotated
+  if (L.offset !== null && r.offset < L.offset) { L.lines = []; L.tail = ''; } // the file was cleared or rotated
   L.offset = r.offset;
   if (!r.text) return;
-  const fresh = r.text.split('\n');
-  if (fresh[fresh.length - 1] === '') fresh.pop();
+  const parts = (L.tail + r.text).split('\n');
+  L.tail = redraw(parts.pop());
+  const fresh = parts.map((t) => redraw(t).replace(/\r$/, ''));
+  if (!L.follow) L.newBelow += fresh.length;
   L.lines = L.lines.concat(fresh).slice(-2000);
   const box = $('logbox');
   if (box) fillLog(box);
+  syncFollow();
 }
 
 function fillLog(box) {
-  const lines = S.log.lines;
-  box.replaceChildren(...(lines.length ? lines.map((t) =>
-    h('div.dv-ln' + (/error|crit|fatal|emerg|alert/i.test(t) ? '.error' : /warn/i.test(t) ? '.warning' : ''), {}, t)) :
-    [h('div.dv-sub.dv-empty', {}, S.log.name + ' is empty.')]));
-  if (S.log.follow || S.logPanel) box.scrollTop = box.scrollHeight;
+  const L = S.log;
+  const all = L.tail ? L.lines.concat(L.tail.replace(/\r$/, '')) : L.lines;
+  // The level and the search belong to the Logs page; a site's log panel shows every line.
+  const page = S.page === 'logs';
+  const q = page ? L.query.trim().toLowerCase() : '';
+  const level = page ? L.level : 'all';
+  const shown = all.filter((t) => (level === 'all' || (level === 'warn' ? lineLevel(t) : lineLevel(t) === 'error')) && (!q || t.toLowerCase().includes(q)));
+  box.replaceChildren(...(shown.length ? shown.map((t) => {
+    // concurrently's [name] prefixes, one color each, in the order they first appear.
+    const tag = /^\[[A-Za-z][\w:.-]{0,23}\] /.exec(t)?.[0];
+    if (tag && !(tag in L.tags)) L.tags[tag] = Object.keys(L.tags).length % 2 ? 'b' : 'a';
+    return h('div.dv-ln' + (lineLevel(t) ? '.' + lineLevel(t) : ''), {}, tag ? [h('span.lg-tag.' + L.tags[tag], {}, tag), t.slice(tag.length)] : t);
+  }) : [h('div.dv-sub.dv-empty', {}, all.length ? 'No lines match this filter.' : L.name + ' is empty.')]));
+  if ($('lg-count')) $('lg-count').textContent = q ? shown.length + (shown.length === 1 ? ' match' : ' matches') : '';
+  if (L.follow || S.logPanel) box.scrollTop = box.scrollHeight;
 }
 
 /** What the daemon's automatic check found (D-028): a newer devid and the binary changes. */
@@ -1011,6 +1162,7 @@ function renderPage() {
   if (document.activeElement?.matches('#page input.dv-input')) { S.dirty = true; return; }
   S.dirty = false;
   const page = $('page');
+  page.parentElement.classList.toggle('is-panes', S.page === 'logs' && !!S.status);
   if (!S.status) {
     page.replaceChildren(h('div.dv-banner', { role: 'status' }, h('span.dv-dot.bad'),
       text(h('span.dv-strong', {}, 'Devid is not running'), S.error || '')));
@@ -1019,8 +1171,12 @@ function renderPage() {
   const data = S.data[S.page];
   if (!data) return;
   const scroll = page.parentElement.scrollTop;
+  const kept = ['lg-list', 'logbox'].map((id) => [id, $(id)?.scrollTop]);
   page.replaceChildren(...[versionBanner(), PAGES[S.page].render(data)].flat().filter(Boolean));
   page.parentElement.scrollTop = scroll;
+  for (const [id, top] of kept) if (top != null && $(id)) $(id).scrollTop = top;
+  const box = $('logbox');
+  if (box && (S.log.follow || S.logPanel)) box.scrollTop = box.scrollHeight;
 }
 
 /** G4: the app and the daemon come from the same release; say what to do when they differ. */
@@ -1082,7 +1238,7 @@ function poll() {
   if (document.hidden) return;
   timer = setInterval(() => {
     ticks++;
-    if (S.log.name && ((S.page === 'logs' && S.log.follow) || (S.page === 'sites' && S.logPanel))) readLog();
+    if (S.log.name && (S.page === 'logs' || (S.page === 'sites' && S.logPanel))) readLog();
     if (ticks % 2 === 0 && !S.busy) refresh();
   }, 1000);
   refresh(true);

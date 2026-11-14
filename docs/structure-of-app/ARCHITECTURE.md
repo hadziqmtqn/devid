@@ -156,6 +156,7 @@ Implemented in T4:
 - **Logs (`daemon::logs`):**
   - lists `~/.devid/log/*.log`;
   - reads the tail (last 64 KB, first partial line dropped) or what is new since an offset (a shrunk file is read from the start);
+  - takes terminal escape sequences (colors, cursor moves) out of what it returns, and leaves an escape sequence or a UTF-8 character cut off at the end for the next read; `\r` stays, and the TUI and the app show the last draw of a progress line (2026-11-14);
   - clears a log by truncating it in place, so writers keep their file;
   - accepts only plain `*.log` names, never paths.
 - **`server_list`** adds each server's version, config path and `paused`.

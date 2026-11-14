@@ -344,9 +344,10 @@ mod tests {
         assert!(text.contains("80/443"), "standard ports via the pf redirect are explained");
         a.page = Page::Logs;
         a.logs = vec![json!({"name": "php85-fpm.log", "size": 42})];
-        a.log_text = "line one\nNOTICE: ready to handle connections\n".into();
+        a.log_text = "line one\nNOTICE: ready to handle connections\nBuilding 1/2\rBuilding 2/2\rFinished\r\n".into();
         let text = render(&a).0;
         assert!(text.contains("php85-fpm.log") && text.contains("ready to handle connections"), "{text}");
+        assert!(text.contains("Finished") && !text.contains("Building"), "a progress line shows its last draw: {text}");
         a.page = Page::Settings;
         let text = render(&a).0;
         assert!(text.contains("*.test") && text.contains("Press d to run the health check"));
