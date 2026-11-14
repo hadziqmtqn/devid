@@ -100,6 +100,11 @@ fn install_and_update_from_a_release() {
     let o = devid(&home, &["update"]);
     assert!(o.status.success(), "{}", stderr(&o));
     assert!(out(&o).contains("updated: php 8.5 8.5.12 -> 8.5.13"), "{}", out(&o));
+    // The app follows an update through update_progress; it stays as the update ended.
+    let p = &request_json(&home, r#"{"cmd":"update_progress"}"#)["progress"];
+    assert_eq!((&p["state"], &p["percent"], &p["index"]), (&json!("done"), &json!(100), &json!(1)), "{p}");
+    let whats: Vec<&str> = p["items"].as_array().unwrap().iter().filter_map(|i| i["what"].as_str()).collect();
+    assert_eq!(whats, ["php 8.5", "nginx"], "PHP first, then the web server");
     assert_eq!(json(&home, &["status", "--json"])["updates"]["changes"], serde_json::json!([]), "applied");
     assert!(out(&devid(&home, &["update", "--check"])).contains("everything is up to date (release r2)"));
     wait_for("8.5 running after update", || proc_of(&json(&home, &["status", "--json"]), "8.5").0 == "running");
@@ -112,6 +117,15 @@ fn install_and_update_from_a_release() {
     assert!(!o.status.success());
     assert!(stderr(&o).contains("checksum mismatch"), "{}", stderr(&o));
     assert!(out(&devid(&home, &["update", "--check"])).contains("8.5.13 -> 8.5.14"), "8.5.13 still installed");
+    let o = devid(&home, &["update"]);
+    assert!(!o.status.success(), "{}", out(&o));
+    let p = &request_json(&home, r#"{"cmd":"update_progress"}"#)["progress"];
+    assert_eq!(
+        (&p["state"], &p["index"], &p["items"][0]["what"]),
+        (&json!("failed"), &json!(0), &json!("php 8.5")),
+        "{p}"
+    );
+    assert!(p["error"].as_str().unwrap().contains("checksum mismatch"), "{p}");
 
     // An asset outside the manifest's own folder is refused before any download.
     let mut manifest: Value = serde_json::from_str(&fs::read_to_string(rel.join("manifest.json")).unwrap()).unwrap();

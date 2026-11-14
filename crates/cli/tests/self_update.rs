@@ -10,7 +10,7 @@ use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 const ASSET: &str = if cfg!(target_arch = "aarch64") { "devid-darwin-arm64" } else { "devid-darwin-x86_64" };
 
 /// Publish a fake devid `version` as `<base>/latest` and `<base>/devid-latest`; its `setup`
-/// writes a marker file.
+/// writes a marker file and keeps the self-update step it was started in.
 fn publish(base: &Path, version: &str, tamper: bool) {
     for release in ["latest", "devid-latest"] {
         publish_to(&base.join(release), version, tamper);
@@ -23,7 +23,7 @@ fn publish_to(rel: &Path, version: &str, tamper: bool) {
     fs::write(
         &bin,
         format!(
-            "#!/bin/sh\ncase \"$1\" in\n  --version) echo \"devid {version}\" ;;\n  setup) [ \"$2\" = --no-sudo ] && [ -n \"$FAKE_NEEDS_SUDO\" ] && exit 3\n    echo \"setup by {version} $2\" > \"$DEVID_HOME/setup-marker\" ;;\nesac\n"
+            "#!/bin/sh\ncase \"$1\" in\n  --version) echo \"devid {version}\" ;;\n  setup) [ \"$2\" = --no-sudo ] && [ -n \"$FAKE_NEEDS_SUDO\" ] && exit 3\n    echo \"setup by {version} $2\" > \"$DEVID_HOME/setup-marker\"\n    cp \"$DEVID_HOME/run/self-update.json\" \"$DEVID_HOME/step-seen\" ;;\nesac\n"
         ),
     )
     .unwrap();
@@ -66,6 +66,11 @@ fn self_update_checks_verifies_and_hands_over() {
         "setup by 9.9.9",
         "the new binary ran setup"
     );
+    // The app follows the steps; the new binary's setup ran in the `install` one, and the files
+    // are gone when self-update ends.
+    let seen = fs::read_to_string(home.join("step-seen")).unwrap();
+    assert!(seen.contains(r#""step":"install""#) && seen.contains(r#""to":"9.9.9""#), "{seen}");
+    assert!(!home.join("run/self-update.json").exists() && !home.join("run/self-update.headers").exists());
 
     // From the desktop app: no password prompt. The new setup gets --no-sudo, and a sudo step it
     // had to skip (exit 3) is reported as such.

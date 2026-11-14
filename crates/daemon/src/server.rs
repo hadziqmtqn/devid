@@ -47,6 +47,8 @@ struct State {
     update_lock: Mutex<()>,
     /// The running catalog install, for `PhpExtProgress`; one at a time.
     ext_job: Mutex<Option<ExtJob>>,
+    /// The last `update` that installed, for `UpdateProgress`: running, or how it ended.
+    update_job: Mutex<Option<UpdateJob>>,
     /// Local ports (D-037) in the web server's last applied config: while a Devid web server runs,
     /// those are its own, not taken by another program.
     own_ports: Mutex<BTreeSet<u16>>,
@@ -70,21 +72,63 @@ struct ExtJob {
     finished: usize,
 }
 
+/// The bytes of the archive being downloaded: its size on disk while it arrives, all of it after.
+fn arrived(current: &Option<(std::path::PathBuf, u64)>, downloading: bool) -> u64 {
+    match current {
+        Some((path, size)) if downloading => std::fs::metadata(path).map_or(0, |m| m.len()).min(*size),
+        Some((_, size)) => *size,
+        None => 0,
+    }
+}
+
+/// Downloads count for 0–90 % by bytes, then the finished steps share the last 10 %, out of
+/// `steps + 1`, so the end is never shown before the reply.
+fn job_percent(done_bytes: u64, current: u64, total_bytes: u64, finished: usize, steps: usize) -> u64 {
+    let bytes = (90 * (done_bytes + current)).checked_div(total_bytes).unwrap_or(0);
+    (bytes + 10 * finished as u64 / (steps as u64 + 1)).min(99)
+}
+
 impl ExtJob {
     fn percent(&self) -> u64 {
-        let current = match (&self.current, self.phase) {
-            (Some((path, size)), "downloading") => std::fs::metadata(path).map_or(0, |m| m.len()).min(*size),
-            (Some((_, size)), _) => *size,
-            (None, _) => 0,
-        };
-        let bytes = (90 * (self.done_bytes + current)).checked_div(self.total_bytes).unwrap_or(0);
-        let steps = 10 * self.finished as u64 / (self.total as u64 + 1);
-        (bytes + steps).min(99)
+        let current = arrived(&self.current, self.phase == "downloading");
+        job_percent(self.done_bytes, current, self.total_bytes, self.finished, self.total)
     }
 
     fn json(&self) -> Value {
         json!({"version": self.version, "index": self.index, "total": self.total, "name": self.name,
                "phase": self.phase, "percent": self.percent()})
+    }
+}
+
+/// Progress of an `update` that installs: what it found, in the order it installs them (`items`,
+/// each with its download `size`), the one it is on and its phase, counted like `ExtJob`. It stays
+/// after the update ends, as `done` or `failed` with the error, until the next one starts.
+struct UpdateJob {
+    items: Vec<Value>,
+    index: usize,
+    phase: &'static str,
+    current: Option<(std::path::PathBuf, u64)>,
+    done_bytes: u64,
+    total_bytes: u64,
+    finished: usize,
+    state: &'static str,
+    error: Option<String>,
+}
+
+impl UpdateJob {
+    fn json(&self) -> Value {
+        let downloading = self.phase == "downloading" && self.state == "running";
+        let got = arrived(&self.current, downloading);
+        let size = self.current.as_ref().map_or(0, |c| c.1);
+        // A complete archive is being checked (sha256) and unpacked.
+        let phase = if downloading && size > 0 && got >= size { "checking" } else { self.phase };
+        let percent = match self.state {
+            "done" => 100,
+            _ => job_percent(self.done_bytes, got, self.total_bytes, self.finished, self.items.len()),
+        };
+        json!({"state": self.state, "error": self.error, "items": self.items, "index": self.index, "phase": phase,
+               "got": got, "size": size, "done_bytes": self.done_bytes, "total_bytes": self.total_bytes,
+               "percent": percent})
     }
 }
 
@@ -288,6 +332,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         stopping: AtomicBool::new(false),
         paused: Mutex::new(BTreeSet::new()),
         ext_job: Mutex::new(None),
+        update_job: Mutex::new(None),
         updates: Mutex::new(Value::Null),
         update_lock: Mutex::new(()),
         own_ports: Mutex::new(BTreeSet::new()),
@@ -484,7 +529,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         }
         Request::PhpList => Ok(json!({"ok": true, "php": php_list(state)})),
         Request::PhpInstall { version, from } => {
-            let installed = install_php(state, &version, from, None)?;
+            let installed = install_php(state, &version, from, None, &|| {})?;
             Ok(json!({"ok": true, "installed": version, "version": installed}))
         }
         Request::PhpExt { version, ext, enabled } => {
@@ -598,14 +643,22 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         }
         Request::ServerInstall { server, from } => {
             webserver::check(&server)?;
-            install_server(state, &server, from, None)?;
+            install_server(state, &server, from, None, &|| {})?;
             Ok(json!({"ok": true, "installed": server}))
         }
         Request::Update { check } => {
             let _one = state.update_lock.lock().unwrap();
+            if !check {
+                // The last update's end is not this one's: it starts with no progress.
+                *state.update_job.lock().unwrap() = None;
+            }
             let reply = find_updates(state, check)?;
             remember_updates(state, &reply, None);
             Ok(reply)
+        }
+        Request::UpdateProgress => {
+            let job = state.update_job.lock().unwrap();
+            Ok(json!({"ok": true, "progress": job.as_ref().map(UpdateJob::json)}))
         }
         Request::Autostart { enabled } => state.mutate(|c, _| {
             c.autostart = enabled;
@@ -1175,7 +1228,14 @@ fn standard_ports(config: &Config, paths: &Paths) -> bool {
 
 /// Install PHP `version` from `from` (a build folder) or else from the release manifest
 /// (downloaded, SHA-256-verified, unpacked). Restarts that version if it runs. Returns the full version.
-fn install_php(state: &State, version: &str, from: Option<String>, manifest: Option<&Value>) -> Result<String, String> {
+/// `on_downloaded` runs once the release's archive is checked and unpacked.
+fn install_php(
+    state: &State,
+    version: &str,
+    from: Option<String>,
+    manifest: Option<&Value>,
+    on_downloaded: &dyn Fn(),
+) -> Result<String, String> {
     php::check_supported(version).map_err(|e| e.to_string())?;
     let downloaded = from.is_none();
     let dir = match from {
@@ -1191,7 +1251,9 @@ fn install_php(state: &State, version: &str, from: Option<String>, manifest: Opt
             };
             let artifact = releases::artifact(manifest, "php", Some(version))
                 .ok_or(format!("the release has no PHP {version} for this Mac"))?;
-            releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?
+            let dir = releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?;
+            on_downloaded();
+            dir
         }
     };
     let result = php::install(&state.paths, version, &dir).map_err(|e| e.to_string());
@@ -1273,47 +1335,15 @@ fn install_extensions(state: &State, version: &str, names: &[String]) -> Result<
     Ok(json!({"ok": true, "version": version, "results": results, "restarted": restarted}))
 }
 
-/// Catalog extensions of PHP `version` whose archive in the release differs from the installed one
-/// (a new version, or a rebuild for a new PHP or OpenSSL). Reinstalled unless `check`. One the release
-/// no longer offers stays as it is, unless PHP itself was updated: then it is removed, since it was
-/// built for the old PHP.
-fn update_extensions(
-    state: &State,
-    version: &str,
-    manifest: &Value,
-    php_updated: bool,
-    check: bool,
-) -> Result<Vec<Value>, String> {
-    let catalog = phpext::catalog(manifest, version);
-    let mut changes = Vec::new();
-    for ext in phpext::installed(&state.paths, version) {
-        let what = format!("{} for php {version}", ext.name);
-        match catalog.iter().find(|e| e.name == ext.name) {
-            Some(e) if e.artifact.sha256 != ext.sha256 => {
-                let to =
-                    if e.version == ext.version { format!("{} (new build)", e.version) } else { e.version.clone() };
-                changes.push(json!({"what": what, "from": ext.version, "to": to}));
-                if !check {
-                    phpext::install(&state.paths, version, &ext.name, manifest, &|| {}).map_err(|e| e.to_string())?;
-                }
-            }
-            None if php_updated => {
-                changes.push(json!({"what": what, "from": ext.version, "to": "removed (not in this release)"}));
-                if !check {
-                    phpext::remove(&state.paths, version, &ext.name).map_err(|e| e.to_string())?;
-                }
-            }
-            _ => {}
-        }
-    }
-    if !check && !changes.is_empty() {
-        state.supervisor.restart(&php_service(version));
-    }
-    Ok(changes)
-}
-
 /// Install a web server from `from` or else from the release manifest (Apache: the system httpd).
-fn install_server(state: &State, server: &str, from: Option<String>, manifest: Option<&Value>) -> Result<(), String> {
+/// `on_downloaded` runs once the release's archive is checked and unpacked.
+fn install_server(
+    state: &State,
+    server: &str,
+    from: Option<String>,
+    manifest: Option<&Value>,
+    on_downloaded: &dyn Fn(),
+) -> Result<(), String> {
     let downloaded = from.is_none() && server != "apache";
     let bin = match (from, server) {
         (Some(from), _) => Some(std::path::PathBuf::from(from)),
@@ -1329,7 +1359,9 @@ fn install_server(state: &State, server: &str, from: Option<String>, manifest: O
             };
             let artifact = releases::artifact(manifest, server, None)
                 .ok_or(format!("the release has no {server} for this Mac"))?;
-            Some(releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?.join(server))
+            let dir = releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?;
+            on_downloaded();
+            Some(dir.join(server))
         }
     };
     let result = webserver::install(&state.paths, server, bin.as_deref()).map_err(|e| e.to_string());
@@ -1347,42 +1379,158 @@ fn install_server(state: &State, server: &str, from: Option<String>, manifest: O
 /// `check`. The periodic check (D-028) runs it with `check` on.
 fn find_updates(state: &State, check: bool) -> Result<Value, String> {
     let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
-    let mut changes = Vec::new();
-    // Installed but the version could not be read (e.g. the probe timed out): never treat that
-    // as "older", which would offer and run a needless reinstall.
-    let mut unknown = Vec::new();
+    let (plan, unknown) = plan_updates(state, &manifest);
+    let changes: Vec<Value> = plan.iter().map(|p| p.change.clone()).collect();
+    if !check && !plan.is_empty() {
+        apply_updates(state, &manifest, plan)?;
+    }
+    Ok(json!({"ok": true, "changes": changes, "unknown": unknown, "applied": !check, "release": manifest["tag"]}))
+}
+
+/// One change `update` makes: its line for the reply (with the download `size`), the archive it
+/// downloads (path and size, for progress) and the install.
+struct Planned {
+    change: Value,
+    download: Option<(std::path::PathBuf, u64)>,
+    install: Install,
+}
+
+enum Install {
+    Php(String),
+    /// A catalog extension of a PHP version, reinstalled from the release.
+    Ext(String, String),
+    /// A catalog extension the release no longer has, after its PHP was updated.
+    RemoveExt(String, String),
+    Server(&'static str),
+}
+
+/// What is newer in the release, in the order `update` installs it: each PHP version, then its
+/// catalog extensions whose archive changed (a new version, or a rebuild for a new PHP or OpenSSL);
+/// one the release no longer offers stays, unless its PHP was updated: it was built for the old
+/// PHP, so it is removed. Then nginx and Caddy. `unknown`: installed, version unreadable (e.g. the
+/// probe timed out), never treated as older, which would offer and run a needless reinstall.
+fn plan_updates(state: &State, manifest: &Value) -> (Vec<Planned>, Vec<String>) {
+    let (mut plan, mut unknown) = (Vec::new(), Vec::new());
+    let archive = |a: &releases::Artifact| Some((releases::archive_path(&state.paths, a), a.size));
     for version in php::installed(&state.paths) {
-        let Some(a) = releases::artifact(&manifest, "php", Some(&version)) else { continue };
+        let Some(a) = releases::artifact(manifest, "php", Some(&version)) else { continue };
         let Some(current) = php::full_version(&state.paths, &version) else {
             unknown.push(format!("php {version}"));
             continue;
         };
         let php_updated = releases::newer(&a.version, &current);
         if php_updated {
-            changes.push(json!({"what": format!("php {version}"), "from": current, "to": a.version}));
-            if !check {
-                install_php(state, &version, None, Some(&manifest))?;
+            plan.push(Planned {
+                change: json!({"what": format!("php {version}"), "from": current, "to": a.version, "size": a.size}),
+                download: archive(&a),
+                install: Install::Php(version.clone()),
+            });
+        }
+        let catalog = phpext::catalog(manifest, &version);
+        for ext in phpext::installed(&state.paths, &version) {
+            let what = format!("{} for php {version}", ext.name);
+            match catalog.iter().find(|e| e.name == ext.name) {
+                Some(e) if e.artifact.sha256 != ext.sha256 => {
+                    let to =
+                        if e.version == ext.version { format!("{} (new build)", e.version) } else { e.version.clone() };
+                    plan.push(Planned {
+                        change: json!({"what": what, "from": ext.version, "to": to, "size": e.size}),
+                        download: Some((releases::archive_path(&state.paths, &e.artifact), e.size)),
+                        install: Install::Ext(version.clone(), ext.name),
+                    });
+                }
+                None if php_updated => plan.push(Planned {
+                    change: json!({"what": what, "from": ext.version, "to": "removed (not in this release)", "size": 0}),
+                    download: None,
+                    install: Install::RemoveExt(version.clone(), ext.name),
+                }),
+                _ => {}
             }
         }
-        changes.extend(update_extensions(state, &version, &manifest, php_updated, check)?);
     }
     for server in ["nginx", "caddy"] {
         if !webserver::installed(&state.paths, server) {
             continue;
         }
-        let Some(a) = releases::artifact(&manifest, server, None) else { continue };
+        let Some(a) = releases::artifact(manifest, server, None) else { continue };
         let Some(current) = webserver::installed_version(&state.paths, server) else {
             unknown.push(server.to_string());
             continue;
         };
         if releases::newer(&a.version, &current) {
-            changes.push(json!({"what": server, "from": current, "to": a.version}));
-            if !check {
-                install_server(state, server, None, Some(&manifest))?;
-            }
+            plan.push(Planned {
+                change: json!({"what": server, "from": current, "to": a.version, "size": a.size}),
+                download: archive(&a),
+                install: Install::Server(server),
+            });
         }
     }
-    Ok(json!({"ok": true, "changes": changes, "unknown": unknown, "applied": !check, "release": manifest["tag"]}))
+    (plan, unknown)
+}
+
+/// Installs `plan` in order, one at a time, with its progress in `update_job`. php-fpm restarts
+/// after a version's extensions change. The first failure stops it; what was installed stays.
+fn apply_updates(state: &State, manifest: &Value, plan: Vec<Planned>) -> Result<(), String> {
+    *state.update_job.lock().unwrap() = Some(UpdateJob {
+        items: plan.iter().map(|p| p.change.clone()).collect(),
+        index: 0,
+        phase: "starting",
+        current: None,
+        done_bytes: 0,
+        total_bytes: plan.iter().filter_map(|p| p.download.as_ref()).map(|d| d.1).sum(),
+        finished: 0,
+        state: "running",
+        error: None,
+    });
+    let update = |f: &dyn Fn(&mut UpdateJob)| {
+        if let Some(job) = state.update_job.lock().unwrap().as_mut() {
+            f(job);
+        }
+    };
+    let installing = || update(&|j| j.phase = "installing");
+    let ext_version = |p: Option<&Planned>| match p.map(|p| &p.install) {
+        Some(Install::Ext(v, _) | Install::RemoveExt(v, _)) => Some(v.clone()),
+        _ => None,
+    };
+    let mut result = Ok(());
+    for (i, p) in plan.iter().enumerate() {
+        if let Some((path, _)) = &p.download {
+            // A leftover archive from an earlier try would count as already downloaded.
+            let _ = std::fs::remove_file(path);
+        }
+        update(&|j| {
+            j.index = i;
+            j.phase = if p.download.is_some() { "downloading" } else { "installing" };
+            j.current = p.download.clone();
+        });
+        result = match &p.install {
+            Install::Php(version) => install_php(state, version, None, Some(manifest), &installing).map(|_| ()),
+            Install::Ext(version, name) => phpext::install(&state.paths, version, name, manifest, &installing)
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Install::RemoveExt(version, name) => phpext::remove(&state.paths, version, name).map_err(|e| e.to_string()),
+            Install::Server(server) => install_server(state, server, None, Some(manifest), &installing),
+        };
+        if result.is_ok()
+            && let Some(version) = ext_version(Some(p)).filter(|v| ext_version(plan.get(i + 1)).as_ref() != Some(v))
+        {
+            update(&|j| j.phase = "restarting");
+            state.supervisor.restart(&php_service(&version));
+        }
+        if result.is_err() {
+            break;
+        }
+        update(&|j| {
+            j.done_bytes += j.current.take().map_or(0, |(_, size)| size);
+            j.finished += 1;
+        });
+    }
+    let error = result.as_ref().err().cloned();
+    update(&|j| {
+        j.state = if error.is_some() { "failed" } else { "done" };
+        j.error = error.clone();
+    });
+    result
 }
 
 /// Keeps what an update check found, for `status` (D-028). After an update the changes are gone;
@@ -1427,6 +1575,34 @@ mod tests {
         assert_eq!(super::share_origin(Some(8000), true, 8088), 8000, "the site's own local port first");
         assert_eq!(super::share_origin(None, true, 8088), 80, "then :80 when pf forwards it");
         assert_eq!(super::share_origin(None, false, 8088), 8088, "the web server's port without pf");
+    }
+
+    #[test]
+    fn update_progress_shows_the_check_and_ends_at_100() {
+        let dir = std::env::temp_dir().join(format!("devid-updatejob-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("php.tar.gz");
+        std::fs::write(&file, vec![0u8; 50]).unwrap();
+        let mut job = super::UpdateJob {
+            items: vec![serde_json::json!({"what": "php 8.4"}), serde_json::json!({"what": "nginx"})],
+            index: 0,
+            phase: "downloading",
+            current: Some((file.clone(), 100)),
+            done_bytes: 0,
+            total_bytes: 200,
+            finished: 0,
+            state: "running",
+            error: None,
+        };
+        assert_eq!(
+            (job.json()["phase"].clone(), job.json()["got"].clone(), job.json()["percent"].clone()),
+            ("downloading".into(), 50.into(), 22.into())
+        );
+        std::fs::write(&file, vec![0u8; 100]).unwrap();
+        assert_eq!(job.json()["phase"], "checking", "a complete archive is being checked");
+        job.state = "done";
+        assert_eq!(job.json()["percent"], 100);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -239,7 +239,27 @@ fn doctor_checks(text: &str) -> Vec<Value> {
 /// Terminal for it.
 #[tauri::command]
 pub async fn self_update() -> Result<Value, String> {
+    // A step left by an update that was cut off must not show as this one's.
+    let (step, headers) = devid_daemon::releases::self_update_files(&Paths::from_env());
+    let _ = std::fs::remove_file(step);
+    let _ = std::fs::remove_file(headers);
     update_reply(output(Command::new(devid_bin()).args(["self-update", "--no-sudo"]), Duration::from_secs(600))?)
+}
+
+/// How far a running `devid self-update` is: its step and target version, and the bytes of the
+/// download in progress (`got`) out of its announced `size`. Null when none runs.
+#[tauri::command]
+pub fn self_update_progress() -> Value {
+    let paths = Paths::from_env();
+    let Some(mut step) = std::fs::read_to_string(devid_daemon::releases::self_update_files(&paths).0)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    else {
+        return Value::Null;
+    };
+    step["got"] = step["file"].as_str().and_then(|f| std::fs::metadata(f).ok()).map(|m| m.len()).into();
+    step["size"] = devid_daemon::releases::self_update_size(&paths).into();
+    step
 }
 
 /// What the page needs from `devid self-update`'s output: the version it installed (none when

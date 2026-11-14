@@ -175,6 +175,9 @@ fn install_app(paths: &Paths) -> Result<std::path::PathBuf, String> {
     let get = |name: &str| releases::fetch_devid(paths, &release, name).map_err(|e| e.to_string());
     let sums = std::fs::read_to_string(get("checksums.txt")?).map_err(|e| e.to_string())?;
     let expected = checksum_for(&sums, APP_ASSET)?;
+    let dest = paths.home.join("downloads").join(format!("self-update-{APP_ASSET}"));
+    let step = serde_json::json!({"to": devid_daemon::VERSION, "step": "app", "file": dest});
+    releases::self_update_step(paths, &step, false);
     let zip = get(APP_ASSET)?;
     let placed = place_app(&zip, &expected, &install::app_bundle());
     let _ = std::fs::remove_file(&zip);
@@ -402,6 +405,18 @@ pub fn self_update(paths: &Paths, check: bool, no_sudo: bool) -> Result<(), Stri
     println!("downloading devid {latest} (sha256-checked)…");
     let sums = std::fs::read_to_string(get("checksums.txt")?).map_err(|e| e.to_string())?;
     let expected = checksum_for(&sums, asset)?;
+    // The app follows these steps (`self_update_progress`); the files go when this returns.
+    struct Steps(std::path::PathBuf, std::path::PathBuf);
+    impl Drop for Steps {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+            let _ = std::fs::remove_file(&self.1);
+        }
+    }
+    let (file, headers) = releases::self_update_files(paths);
+    let _steps = Steps(file, headers);
+    let dest = paths.home.join("downloads").join(format!("self-update-{asset}"));
+    releases::self_update_step(paths, &serde_json::json!({"to": latest, "step": "devid", "file": dest}), true);
     let bin = get(asset)?;
     let actual = releases::sha256_hex(&bin).map_err(|e| e.to_string())?;
     if actual != expected {
@@ -410,6 +425,7 @@ pub fn self_update(paths: &Paths, check: bool, no_sudo: bool) -> Result<(), Stri
     }
     std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).map_err(|e| e.to_string())?;
     // The new binary installs itself (copy to ~/.devid/bin, LaunchAgent reload); same steps as setup.
+    releases::self_update_step(paths, &serde_json::json!({"to": latest, "step": "install"}), false);
     let mut setup = std::process::Command::new(&bin);
     setup.arg("setup");
     if no_sudo {

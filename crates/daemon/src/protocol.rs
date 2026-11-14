@@ -81,6 +81,8 @@ pub enum Request {
     Update {
         check: bool,
     },
+    /// How the running (or the last) `update` that installs is going.
+    UpdateProgress,
     Sites,
     /// Serve `path` as `<name>.<tld>`; the name defaults to the folder name.
     Link {

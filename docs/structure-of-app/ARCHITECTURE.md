@@ -87,6 +87,17 @@ Implemented in Phase 5 R3:
 - **`daemon::releases`** reads `manifest.json` from `https://github.com/hadziqmtqn/devid-binaries/releases/download/runtime-latest/` (D-016; `releases/latest/download/` before D-038). It refuses any artifact URL outside that repository's release downloads, downloads with `curl --proto =https`, verifies SHA-256 (with `ring`, already in the tree) before unpacking, and removes the archive and the unpacked folder after installing. `DEVID_MANIFEST_URL` overrides the location for tests (`file://`).
 - `devid php install <ver>` and `devid server install <nginx|caddy>` download from the manifest when `--from` is omitted. `--from` still installs a local build.
 - `devid update [--check]` compares the installed PHP versions (`PHP_VERSION`), nginx and Caddy with the manifest and installs the newer ones through the same path, restarting the affected service.
+- **Update progress (2026-11-14):**
+  - `update` first plans every change, then installs them one at a time. The order is each PHP version, then its changed catalog extensions, then nginx and Caddy. Each change in the reply carries its download `size` from the manifest.
+  - While it installs, `update_progress` answers:
+    - the items;
+    - the one being installed and its phase (`downloading`, `checking` once the archive is complete, `installing`, `restarting`);
+    - the bytes of its archive on disk, out of the manifest size;
+    - a percentage counted like an extension install's: downloads 0–90 % by bytes, finished items share the rest.
+  - The job stays as `done`, or as `failed` with the error, until the next update starts.
+  - `devid self-update` writes its step to `run/self-update.json`: `devid` (the binary downloads), `install` (its setup runs and the daemon restarts) or `app` (that setup downloads Devid.app).
+  - While that file exists, downloads from a devid release keep their response headers in `run/self-update.headers`. The Content-Length of the last response is the download's size. Both files go when self-update returns.
+  - The app reads them through `self_update_progress`.
 
 `helper` is created in M5. The table below is the target layout.
 
