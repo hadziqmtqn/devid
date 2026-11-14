@@ -24,7 +24,7 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 
 ## External sources
 
-- User guide (public, D-033): [`GUIDE.md` in devid-binaries](https://github.com/hadziqmtqn/devid-binaries/blob/main/GUIDE.md). User-facing changes update it there; this repository's README links to it.
+- User guide (public, D-034): [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs), from the public `devid-site` repository (Next.js + Fumadocs on Vercel), with the landing page at `/`. User-facing changes update it there; this repository's README links to it.
 - UI prototype (approved, D-026): the Claude Design board "Devid — macOS style", source copied to `/Users/meowpush/Projects/devid-prototype/redesign/`. The logo canvas is copied to `/Users/meowpush/Projects/devid-prototype/logo/`. Both live outside this repo. The first prototype, `index.html` there, is history.
 - Original working notes: `/Users/meowpush/Projects/devid-prototype/CLAUDE.md`. These docs supersede it once they diverge.
 

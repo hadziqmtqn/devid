@@ -166,6 +166,25 @@ Dev commands started the way the daemon will, plus a throwaway nginx in front of
 
 **2026-11-09: devid 0.12.1 installed** (Phase 8 done). erdbpro-saas is also served on `127.0.0.1:8000` (`[apps.erdbpro-saas] port = 8000`), which the owner's static Cloudflare tunnel now targets in place of `php artisan serve`. erd-builder-pro is served again (proxy to its dev server on 3000), with its two commands saved (`dev:pg:local`, `tauri`). Share works through the site's local port or `:80`. New direct connections to `127.0.0.1:8088`/`8443` hang on this Mac (cause open; see ARCHITECTURE Unknowns).
 
+**2026-11-07: resource use and a load test of the installed stack** (devid 0.7.0, nginx 1.30.6, PHP 8.4.27 and 8.5.12 with `pm = ondemand` and `pm.max_children = 4`, Devid.app running as an icon). Nothing was changed for the test.
+
+- **Idle:** about 35 MB footprint in total (43 MB RSS), CPU 0%, 0 php-fpm workers. php-fpm 8.5 master 12 MB, php-fpm 8.4 master 9.6 MB, nginx master + worker 4.6 MB, daemon 2.9 MB, `devid-gui` 5.5 MB. Without the app, about 29 MB.
+- **Load test setup:** ApacheBench 2.3 from macOS, HTTPS with keep-alive, run on the same Mac. All requests to a site reuse one session cookie, so erdbpro-saas's database session table does not grow. RAM is the RSS of php-fpm plus nginx, sampled every 0.3 s. No request failed.
+
+  | Target | Requests / concurrency | Throughput | Latency p50 / p95 / max | Peak RAM |
+  |---|---|---|---|---|
+  | `erdbpro-saas.test/robots.txt` (static, nginx only) | 3000 / 10 | 2607 req/s | 2 / 27 / 145 ms | 27.8 MB, 0 workers |
+  | `phpmyadmin.test/` (PHP 8.4) | 200 / 4 | 8.8 req/s | 450 / 597 / 780 ms | 90 MB, 4 workers (about 15 MB each) |
+  | `erdbpro-saas.test/` (Laravel, PHP 8.5) | 100 / 4 | 4.9 req/s | 784 / 1094 / 1497 ms | 178 MB, 4 workers (about 37 MB each) |
+
+- **Findings:**
+  - nginx adds a few milliseconds per request; it is not the bottleneck.
+  - PHP is CPU-bound on the 2 cores. One warm request takes about 450 ms on erdbpro-saas `/` and about 180 ms on phpMyAdmin; with 4 at once, each takes about twice as long. `pm.max_children = 4` fits this machine.
+  - erdbpro-saas `/` is slow because of the app, not Devid. Opcache is on, and a fresh Laravel app on the same static PHP answered in about 0.03 s warm (spike results above). erdbpro-saas keeps sessions and cache in PostgreSQL and runs with `APP_DEBUG=true`. Unmeasured: how much changing those would gain.
+  - `pm = ondemand` works as designed: workers exit about 11 s after the last request, and php-fpm plus nginx return to 28.4 MB.
+  - The first request to erdbpro-saas `/` after idle took 6.1 s, the next ones 0.43–0.75 s. Cause not investigated.
+- **Not tested:** concurrency above 4, HTTP/2 (ab speaks HTTP/1.0), Caddy and Apache. ab shared the 2 cores with the server, so throughput is somewhat understated.
+
 **2026-11-06: devid 0.7.0 and Devid.app installed** (owner ran `devid self-update`, then `devid setup --gui`). `~/Applications/Devid.app` runs as a menu-bar icon after its window closes. At login, sites are served and the app does not open (the app's login item is off).
 
 **2026-11-04: PHP 8.4 and 8.5 reinstalled with the D-022 build** (owner ran `devid php install 8.5` and `devid php install 8.4`, release `2026.11.03-4`). Both now include mysqli, readline and soap in the CLI and php-fpm; `php.ini` was kept; php-fpm 8.5 restarted on the new binary; `erdbpro-saas.test/login` 200 (0.1 s warm) and `:8000` unaffected.
