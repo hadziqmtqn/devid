@@ -79,6 +79,7 @@ pub fn catalog(manifest: &Value, version: &str) -> Vec<Entry> {
                     version: s(&e["version"])?,
                     url: s(&a["url"])?,
                     sha256: s(&a["sha256"])?.to_lowercase(),
+                    size: a["size"].as_u64().unwrap_or(0),
                 },
             })
         })

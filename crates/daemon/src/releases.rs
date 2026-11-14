@@ -44,6 +44,8 @@ pub struct Artifact {
     pub version: String,
     pub url: String,
     pub sha256: String,
+    /// Download size in bytes, from the manifest (0 if missing); for progress only.
+    pub size: u64,
 }
 
 /// Where `devid self-update` and install.sh find the devid binary; `DEVID_RELEASE_BASE` overrides it
@@ -64,9 +66,47 @@ fn devid_url(base: &str, release: &str, name: &str) -> String {
 /// Download `url` to `dest` with curl, HTTPS only (file:// only when a test points Devid at a local
 /// release through DEVID_MANIFEST_URL or DEVID_RELEASE_BASE).
 pub fn fetch(url: &str, dest: &Path) -> io::Result<()> {
+    fetch_with(url, dest, &[])
+}
+
+fn fetch_with(url: &str, dest: &Path, more: &[&str]) -> io::Result<()> {
     let local_release = manifest_url().starts_with("file://") || release_base().starts_with("file://");
     let proto = if url.starts_with("file://") && local_release { "=file" } else { "=https" };
-    curl(url, dest, &["--proto", proto])
+    curl(url, dest, &[&["--proto", proto], more].concat())
+}
+
+/// `devid self-update`'s progress for the app, while it runs: `run/self-update.json` holds
+/// `{"to", "step", "file"}`, and `run/self-update.headers` the response headers of the download in
+/// progress, for its size. `step` is `devid` (the binary downloads), `install` (its setup runs and
+/// the daemon restarts) or `app` (that setup downloads Devid.app); `file` is the download.
+pub fn self_update_files(paths: &crate::paths::Paths) -> (PathBuf, PathBuf) {
+    (paths.run_dir().join("self-update.json"), paths.run_dir().join("self-update.headers"))
+}
+
+/// Records a self-update step, only while `devid self-update` runs (it creates the file first).
+pub fn self_update_step(paths: &crate::paths::Paths, step: &Value, first: bool) {
+    let (file, headers) = self_update_files(paths);
+    if first {
+        let _ = fs::create_dir_all(paths.run_dir());
+    }
+    if first || file.exists() {
+        let _ = fs::remove_file(headers);
+        let _ = fs::write(file, step.to_string());
+    }
+}
+
+/// The size the download in progress announced: the Content-Length of its last response (curl
+/// writes the redirects' headers first). None until that response arrives.
+pub fn self_update_size(paths: &crate::paths::Paths) -> Option<u64> {
+    announced_size(&fs::read_to_string(self_update_files(paths).1).ok()?)
+}
+
+fn announced_size(headers: &str) -> Option<u64> {
+    let last = headers.rsplit_once("HTTP/").map_or(headers, |(_, r)| r);
+    last.lines()
+        .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("content-length")))
+        .and_then(|(_, v)| v.trim().parse().ok())
+        .filter(|n| *n > 0)
 }
 
 fn curl(url: &str, dest: &Path, extra: &[&str]) -> io::Result<()> {
@@ -112,6 +152,7 @@ pub fn artifact(manifest: &Value, tool: &str, minor: Option<&str>) -> Option<Art
         version: slot["version"].as_str()?.into(),
         url: entry["url"].as_str()?.into(),
         sha256: entry["sha256"].as_str()?.to_lowercase(),
+        size: entry["size"].as_u64().unwrap_or(0),
     })
 }
 
@@ -180,7 +221,11 @@ pub fn fetch_devid(paths: &crate::paths::Paths, release: &str, name: &str) -> io
     fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("self-update-{name}"));
     let base = release_base();
-    if let Err(e) = fetch(&devid_url(&base, release, name), &dest) {
+    // During a self-update the headers tell the app the download's size.
+    let (progress, headers) = self_update_files(paths);
+    let headers = headers.to_string_lossy();
+    let more: &[&str] = if progress.exists() { &["-D", &headers] } else { &[] };
+    if let Err(e) = fetch_with(&devid_url(&base, release, name), &dest, more) {
         if base != RELEASE_BASE {
             return Err(e);
         }
@@ -239,6 +284,15 @@ pub fn newer(candidate: &str, installed: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_download_size_is_its_last_responses_content_length() {
+        let github =
+            "HTTP/2 302 \r\ncontent-length: 0\r\n\r\nHTTP/2 200 \r\ncontent-type: x\r\ncontent-length: 2739360\r\n\r\n";
+        assert_eq!(announced_size(github), Some(2739360));
+        assert_eq!(announced_size("HTTP/2 302 \r\ncontent-length: 0\r\n\r\n"), None, "only a redirect so far");
+        assert_eq!(announced_size("Content-Length: 12345\r\nAccept-ranges: bytes\r\n"), Some(12345), "file://");
+    }
 
     #[test]
     fn versions_compare_numerically() {

@@ -58,6 +58,7 @@ const S = {
     level: 'all', query: '', srcQuery: '', open: {}, seen: {}, errors: {} },
   updates: null, // {text, changes}
   devid: null, // {text, available}
+  upd: { dv: null, rt: null }, // an update of Devid or of PHP and the web server: running, or how it ended
   doctor: null, // {checks} or {error} or {busy}
   ext: null, // the open Extensions dialog
   site: null, // the site whose detail view is open (Phase 8 A5)
@@ -946,7 +947,7 @@ function fillLog(box) {
 function autoUpdates(st) {
   const u = st?.updates;
   if (!u?.checked_at) return null;
-  const changes = (u.changes || []).map((c) => c.what + ' ' + c.from + '→' + c.to);
+  const changes = u.changes || [];
   return { devid: u.devid || null, changes, count: changes.length + (u.devid ? 1 : 0), checkedAt: u.checked_at };
 }
 
@@ -961,8 +962,6 @@ function settingsPage() {
   const ports = portsText(st);
   const doc = S.doctor;
   const auto = autoUpdates(st);
-  const binaries = S.updates || (auto?.changes.length ? { text: 'Available: ' + auto.changes.join(', '), changes: auto.changes } : null);
-  const devidText = S.devid?.text || (auto?.devid ? 'devid ' + auto.devid + ' is available (installed: ' + st.version + ')' : '');
   const minutes = st.update_check_minutes;
   return [
     // D-031: two settings, because the sites and the app start separately.
@@ -980,18 +979,7 @@ function settingsPage() {
     h('h2.dv-h2', {}, 'Storage'),
     card(row(text('Data folder', h('span.dv-mono', {}, st.home)), btn('Show in Finder', () => openTarget({ what: 'finder', path: st.home })))),
     h('h2.dv-h2', {}, 'Updates'),
-    card(
-      row(text('Devid ' + st.version, devidText || 'Updates the Devid app itself'),
-        S.devid?.available || (!S.devid && auto?.devid) ? busyBtn('devid-update', 'Update Devid…', updateDevid, 'primary') : null,
-        busyBtn('devid-check', 'Check for updates', () => act('Checking…', async () => {
-          const line = await invoke('devid_check');
-          S.devid = { text: line, available: / is available /.test(line) };
-        }, null, 'devid-check'))),
-      row(text('PHP, web server and extensions', binaries?.text || 'Newer builds from Devid\'s release'),
-        binaries?.changes.length ? busyBtn('updates-apply', 'Update', updateBinaries, 'primary') : null,
-        busyBtn('updates-check', 'Check for updates', () => act('Checking…', async () => {
-          S.updates = updateSummary(await daemon({ cmd: 'update', check: true }), true);
-        }, null, 'updates-check')))),
+    card(devidItem(st, auto), runtimeItem(auto)),
     h('p.dv-sub.dv-note', {}, minutes
       ? 'Devid checks every ' + plural(minutes, 'minute') + (auto ? ', last ' + Math.max(0, Math.round((Date.now() / 1000 - auto.checkedAt) / 60)) + ' min ago' : '') +
         '. The menu-bar icon shows a dot when something is new.'
@@ -1018,46 +1006,272 @@ function settingsPage() {
   ];
 }
 
+// ---------- Settings: updates with their progress (the v0.12.x "Settings · Update progress" board) ----------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const isPhp = (c) => c.what.startsWith('php ');
+/** A change as its step is named: "PHP 8.4.27 → 8.4.28", "nginx 1.30.6 → 1.30.7". */
+const changeName = (c) => (isPhp(c) ? 'PHP' : c.what) + ' ' + c.from + ' → ' + c.to;
+/** "PHP 8.4.28", "nginx 1.30.7". */
+const changeShort = (c) => (isPhp(c) ? 'PHP ' + c.to : c.what + ' ' + c.to);
+const sizeOf = (list) => list.reduce((n, c) => n + (c.size || 0), 0);
+const are = (list) => list.join(', ') + (list.length > 1 ? ' are' : ' is');
+const were = (list) => list.join(', ') + (list.length > 1 ? ' were' : ' was');
+
+/** Keeps the bytes of the last few seconds, for the speed. */
+function sample(u, bytes) {
+  const now = Date.now();
+  u.samples = (u.samples || []).filter((x) => now - x.t < 4000).concat({ t: now, bytes });
+}
+
+/** " · 3.1 MB/s · about 12 s left" from the samples, once a second of them shows a speed. */
+function pace(u, left) {
+  const [a, b] = [u.samples?.[0], u.samples?.[u.samples.length - 1]];
+  const rate = a && b.t - a.t > 900 ? (b.bytes - a.bytes) * 1000 / (b.t - a.t) : 0;
+  if (rate <= 0) return '';
+  const s = left / rate;
+  return ' · ' + humanSize(rate) + '/s · about ' + (s < 60 ? Math.max(1, Math.ceil(s)) + ' s' : Math.ceil(s / 60) + ' min') + ' left';
+}
+
 /**
- * Updates devid, its daemon and this app in the background (sha256-checked), then opens the new
- * version's window on Settings. Sites are down for a few seconds while the daemon restarts. Only a
- * system setup step that needs the password goes to Terminal.
+ * Runs `job` while `progress` is read into `u` every 400 ms. The rest of the app waits, as with
+ * act(). Resolves to [reply, error].
  */
-async function updateDevid() {
-  if (!await ask('Update Devid?', 'Devid downloads the new version, checks it and installs it. The daemon restarts, so your sites are down for a few seconds, then this window opens again in the new version.', 'Update'))
+async function follow(u, key, job, progress) {
+  S.busy = 'Updating…';
+  S.busyAt = key;
+  renderChrome();
+  renderPage();
+  let done = false;
+  const settled = job.then((r) => [r, ''], (e) => [null, String(e)]).finally(() => { done = true; });
+  while (!done) {
+    await sleep(400);
+    const p = await progress().catch(() => null);
+    if (p && !done) { Object.assign(u, p); renderChrome(); renderPage(); }
+  }
+  const result = await settled;
+  S.busy = '';
+  S.busyAt = '';
+  await refresh(true);
+  return result;
+}
+
+/** One update item: icon, title, chip, what it says, its percent and buttons; while it runs or after
+ * it failed, the bar, a line under it, the steps and the error; then "Updated just now" for a while. */
+function updateItem(o) {
+  const running = o.state === 'running', failed = o.state === 'failed';
+  return h('div.up-item' + (running ? '.is-running' : failed ? '.is-failed' : ''), {},
+    h('div.up-head', {}, o.icon,
+      h('div.dv-grow', {}, h('div.up-title', {}, o.title, o.chip ? h('span.dv-chip.' + o.chipCls, {}, o.chip) : null),
+        h('div.dv-sub', { 'aria-live': 'polite' }, o.sub)),
+      running || failed ? h('span.up-pct' + (failed ? '.bad' : ''), { 'aria-hidden': 'true' }, o.pct + '%') : null,
+      running ? null : h('div.up-actions', {}, o.actions)),
+    running || failed ? h('div.up-body', {},
+      h('progress.up-bar' + (failed ? '.bad' : ''), { max: '100', value: o.pct, 'aria-label': o.title + ' update, ' + o.pct + '%' }),
+      h('div.up-meta', {}, h('span', {}, o.metaLeft), h('span', {}, o.metaRight)),
+      h('ol.up-steps', { 'aria-label': 'Steps' }, o.steps.map((x) => h('li.up-step.is-' + x.cls, {},
+        h('span.up-sico', { 'aria-hidden': 'true' }, { done: '✓', bad: '✕' }[x.cls] || ''), h('span.up-sname', {}, x.name), h('span.up-sstate', {}, x.state)))),
+      failed ? h('div.up-err', { role: 'alert' }, h('div', {}, h('b', {}, o.errTitle), ' ' + o.error), h('div.up-errmsg', {}, o.errMsg)) : null) : null,
+    o.done ? h('div.up-done' + (o.done === 'fading' ? '.is-fading' : ''), { role: 'status' }, h('span.up-sico', { 'aria-hidden': 'true' }, '✓'), 'Updated just now') : null,
+    o.wait ? h('div.dv-sub.up-wait', {}, o.wait) : null);
+}
+
+const LOGO = '<svg viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#16151F"/><path d="M37 46 V37 A13 13 0 0 1 63 37 V46" fill="none" stroke="#34C77B" stroke-width="10" stroke-linecap="round"/><rect x="24" y="44" width="52" height="38" rx="9" fill="#F4F4FA"/><path d="M37 56 L45 63 L37 70" fill="none" stroke="#16151F" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="M52 70 H62" fill="none" stroke="#16151F" stroke-width="7" stroke-linecap="round"/></svg>';
+function logo() {
+  const t = document.createElement('template');
+  t.innerHTML = LOGO; // constant markup, never data
+  const svg = t.content.firstElementChild;
+  svg.setAttribute('class', 'up-icon');
+  svg.setAttribute('aria-hidden', 'true');
+  return svg;
+}
+
+/** The newer devid, from a check in this window or the daemon's own (D-028); null if none or unknown. */
+const devidTarget = (auto) => S.devid ? (S.devid.available ? (/devid (\S+) is available/.exec(S.devid.text) || [])[1] || null : null) : auto?.devid || null;
+
+/** Devid's steps take fixed parts of the bar; within a download its part follows the bytes. */
+function devidPercent(u) {
+  const part = (from, to) => from + Math.floor((to - from) * (u.size ? Math.min(1, (u.got || 0) / u.size) : 0));
+  return { devid: part(0, 45), install: 50, app: part(55, 90), open: 100 }[u.step] ?? 0;
+}
+
+function devidItem(st, auto) {
+  const u = S.upd.dv;
+  const to = u?.to || devidTarget(auto);
+  const state = u?.state || (S.busyAt === 'devid-check' ? 'checking' : '');
+  const running = state === 'running', failed = state === 'failed';
+  // Only this window's own check says "newest": the daemon's leaves devid empty also when its check failed.
+  const latest = !to && S.devid && !S.devid.available;
+  const step = failed ? u.failedStep : u?.step;
+  const line = step === 'app' || step === 'open' ? 1 : 0; // devid and install are the first line
+  const complete = u?.size && u.got >= u.size;
+  const bytes = () => humanSize(u.got || 0) + (u.size ? ' of ' + humanSize(u.size) : '');
+  const steps = !(running || failed) ? [] : [['devid ' + to, { devid: complete ? 'Checking sha256…' : bytes(), install: 'Installing · the daemon restarts' }],
+    ['Devid.app ' + to, { app: complete ? 'Replacing Devid.app' : bytes(), open: 'Installed' }]].map(([name, now], i) =>
+    i < line || step === 'open' ? { name, cls: 'done', state: 'Installed' }
+      : i > line ? { name, cls: failed ? 'skip' : 'pending', state: failed ? 'Not updated' : 'Waiting' }
+      : failed ? { name, cls: 'bad', state: 'Failed' } : { name, cls: 'now', state: now[step] || 'Starting…' });
+  if (running && (step === 'devid' || step === 'app') && !complete) sample(u, u.got || 0);
+  return updateItem({
+    state, icon: logo(), title: 'Devid',
+    chip: running || failed || to ? st.version + ' → ' + to : latest ? 'Up to date' : st.version,
+    chipCls: failed ? 'bad' : latest ? 'ok' : to ? 'accent' : 'muted',
+    sub: state === 'checking' ? 'Checking for updates…'
+      : running ? 'Updating Devid. This window reopens in the new version when it is done.'
+      : failed ? 'The update stopped.'
+      : to ? 'devid and Devid.app ' + to : latest ? 'You have the newest version.' : 'Updates devid and this app',
+    pct: u ? devidPercent(u) : 0,
+    metaLeft: step === 'open' ? 'Opening Devid ' + to + '…' : (failed ? 'Stopped at step ' : 'Step ') + (line + 1) + ' of 2',
+    metaRight: !running || step === 'open' ? '' : step === 'install' ? 'Sites pause for a few seconds'
+      : complete ? 'Verifying the download' : bytes() + (u.size ? pace(u, u.size - (u.got || 0)) : ''),
+    steps,
+    errTitle: (step === 'app' ? 'Devid.app ' : 'devid ') + to + ' failed:',
+    error: u?.error || '',
+    errMsg: step === 'devid' ? 'Devid ' + st.version + ' is still installed and running.'
+      : step === 'app' ? 'devid ' + to + ' is installed; Devid.app was not updated. Try again.'
+      : 'Try again, or run devid setup in Terminal to see each step.',
+    actions: failed ? [busyBtn('devid-update', 'Try again', () => updateDevid(true), 'primary')] : [
+      busyBtn('devid-check', 'Check for updates', () => act('Checking…', async () => {
+        const text = await invoke('devid_check');
+        S.devid = { text, available: / is available /.test(text) };
+      }, null, 'devid-check')),
+      to ? busyBtn('devid-update', 'Update Devid…', () => updateDevid(), 'primary') : null],
+    wait: S.upd.rt?.state === 'running' && (to || failed) ? 'Available after PHP and the web server finish updating.' : '',
+  });
+}
+
+function runtimeItem(auto) {
+  const u = S.upd.rt;
+  const known = S.updates || (auto ? { text: '', changes: auto.changes } : null);
+  const changes = known?.changes || [];
+  const state = u?.state === 'done' ? '' : u?.state || (S.busyAt === 'updates-check' ? 'checking' : '');
+  const running = state === 'running', failed = state === 'failed';
+  const items = running || failed ? u.items : changes;
+  const shorts = items.map(changeShort);
+  const restarts = (c) => isPhp(c) ? 'php-fpm ' + c.what.slice(4) : ['nginx', 'caddy'].includes(c.what) ? c.what : '';
+  const now = (c) => ({
+    downloading: u.size ? humanSize(u.got || 0) + ' of ' + humanSize(u.size) : humanSize(u.got || 0),
+    checking: 'Checking sha256…',
+    installing: 'Installing' + (restarts(c) ? ' · ' + restarts(c) + ' restarts' : '…'),
+    restarting: 'Restarting php-fpm ' + c.what.split(' ').pop(),
+  })[u.phase] || 'Starting…';
+  const steps = !(running || failed) ? [] : items.map((c, i) => {
+    const name = changeName(c);
+    if (i < u.index) return { name, cls: 'done', state: c.to.startsWith('removed') ? 'Removed' : 'Installed' };
+    if (failed) return i === u.index && u.index >= 0 ? { name, cls: 'bad', state: 'Failed' } : { name, cls: 'skip', state: 'Not updated' };
+    if (i === u.index) return { name, cls: 'now', state: now(c) };
+    return { name, cls: 'pending', state: 'Waiting' + (c.size ? ' · ' + humanSize(c.size) : '') };
+  });
+  const bytes = running ? (u.done_bytes || 0) + (u.got || 0) : 0;
+  if (running && u.phase === 'downloading') sample(u, bytes);
+  const installed = failed ? items.slice(0, Math.max(0, u.index)).map(changeShort) : [];
+  const skipped = failed ? items.slice(Math.max(0, u.index) + 1).map(changeShort) : [];
+  const recent = u?.state === 'done' ? Date.now() - u.doneAt : Infinity;
+  return updateItem({
+    state, icon: h('span.up-icon.rt', { 'aria-hidden': 'true' }, icon('php')), title: 'PHP, web server and extensions',
+    chip: running ? Math.max(0, u.index) + ' of ' + items.length + ' installed' : failed ? 'Failed'
+      : changes.length ? plural(changes.length, 'update') : known ? 'Up to date' : '',
+    chipCls: running || changes.length ? 'accent' : failed ? 'bad' : 'ok',
+    sub: state === 'checking' ? 'Checking for updates…'
+      : running ? 'Updating one at a time. Each restart pauses the sites that use it for a second or two.'
+      : failed ? 'The update stopped. Nothing that was already installed is undone.'
+      : u?.state === 'done' ? 'Last updated today at ' + new Date(u.doneAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + ' · ' + u.items.map(changeShort).join(', ')
+      : changes.length ? shorts.join(', ') + (sizeOf(changes) ? ' · ' + humanSize(sizeOf(changes)) + ' download' : '') + (known.unknown?.length ? ' · version unknown, skipped: ' + known.unknown.join(', ') : '')
+      : known?.text || 'Newer builds from Devid\'s release',
+    pct: u?.percent || 0,
+    metaLeft: (failed ? 'Stopped at step ' : 'Step ') + (Math.max(0, u?.index ?? 0) + 1) + ' of ' + items.length,
+    metaRight: !running ? '' : u.phase === 'downloading' && u.total_bytes ? humanSize(bytes) + ' of ' + humanSize(u.total_bytes) + pace(u, u.total_bytes - bytes)
+      : u.phase === 'checking' ? 'Verifying the download' : '',
+    steps,
+    errTitle: items[u?.index] ? changeShort(items[u.index]) + ' failed:' : 'The update failed:',
+    error: u?.error || '',
+    errMsg: u?.index < 0 ? 'Nothing was installed.'
+      : (installed.length ? are(installed) + ' installed. ' : '') + (skipped.length ? were(skipped) + ' not updated. ' : '') + 'Try again picks up from ' + changeShort(items[u?.index] || items[0] || { what: '', to: '' }) + '.',
+    actions: failed ? [busyBtn('updates-apply', 'Try again', () => updateBinaries(true), 'primary')] : [
+      busyBtn('updates-check', 'Check for updates', () => act('Checking…', async () => {
+        S.updates = updateSummary(await daemon({ cmd: 'update', check: true }), true);
+        S.upd.rt = null;
+      }, null, 'updates-check')),
+      changes.length ? busyBtn('updates-apply', 'Update…', () => updateBinaries(), 'primary') : null],
+    done: recent < 4600 ? 'shown' : recent < 5000 ? 'fading' : '',
+    wait: S.upd.dv?.state === 'running' && (changes.length || failed) ? 'Available after the Devid update finishes.' : '',
+  });
+}
+
+/**
+ * Updates devid, its daemon and this app in the background (sha256-checked), with each step and its
+ * download shown, then opens the new version's window on Settings. Sites are down for a few seconds
+ * while the daemon restarts. Only a system setup step that needs the password goes to Terminal.
+ */
+async function updateDevid(again = false) {
+  const to = devidTarget(autoUpdates(S.status));
+  if (!again && !await ask('Update Devid' + (to ? ' to ' + to : '') + '?', 'Downloads devid and Devid.app (sha256-checked) and restarts the daemon, ' +
+    'so your sites pause for a few seconds; this window then reopens in the new version.', 'Update'))
     return;
-  let reply = null;
-  let error = '';
-  await act('Updating Devid…', async () => {
-    try { reply = await invoke('self_update'); } catch (e) { error = String(e); }
-  }, null, 'devid-update');
+  const u = S.upd.dv = { state: 'running', to, step: 'devid', got: 0, size: 0 };
+  const [reply, error] = await follow(u, 'devid-update', invoke('self_update'), async () => {
+    const p = await invoke('self_update_progress');
+    if (p && p.step !== u.step) u.samples = [];
+    return p && { ...p, got: p.got || 0, size: p.size || 0 };
+  });
   if (reply?.installed) {
+    Object.assign(u, { step: 'open', to: reply.installed });
+    S.busy = 'Opening…'; // until this window is replaced by the new version's
+    renderChrome();
+    renderPage();
     toast('Devid ' + reply.installed + ' is installed; opening it…');
     setTimeout(() => invoke('relaunch', { page: 'settings' }), 600);
   } else if (reply) {
+    S.upd.dv = null;
+    S.devid = { text: reply.text, available: false };
     toast(reply.text);
   } else if (/needs your password/.test(error)) {
+    S.upd.dv = null;
     if (await ask('Finish in Terminal?', error.replace(/`/g, '') + '.', 'Open Terminal'))
       act('Opening Terminal…', () => invoke('in_terminal', { action: 'setup' }), (m) => m);
   } else {
+    Object.assign(u, { state: 'failed', failedStep: u.step, error });
     toast(error, true);
   }
+  renderChrome();
+  renderPage();
 }
 
-async function updateBinaries() {
-  const list = (S.updates || autoUpdates(S.status)).changes.join(', ');
-  if (await ask('Install the updates?', 'Downloads and installs ' + list + ' from Devid\'s release (sha256-checked).', 'Update'))
-    act('Updating…', async () => { S.updates = updateSummary(await daemon({ cmd: 'update', check: false }), false); return S.updates.text; }, (t) => t, 'updates-apply');
+/** Installs what is newer in the release, one at a time, following the daemon's progress. */
+async function updateBinaries(again = false) {
+  const failed = S.upd.rt?.state === 'failed' ? S.upd.rt : null;
+  const changes = (failed ? failed.items.slice(Math.max(0, failed.index)) : (S.updates || autoUpdates(S.status))?.changes) || [];
+  const kinds = [...new Set(changes.map((c) => isPhp(c) ? 'PHP' : c.what.includes(' for php ') ? 'extensions' : c.what))];
+  if (!again && !await ask('Update ' + andList(kinds) + '?', 'Downloads ' + changes.map(changeShort).join(', ') +
+    (sizeOf(changes) ? ' (' + humanSize(sizeOf(changes)) + ', sha256-checked)' : ' (sha256-checked)') + ' and installs them one at a time.', 'Update'))
+    return;
+  const u = S.upd.rt = { state: 'running', items: changes, index: 0, phase: 'starting', percent: 0, got: 0, size: 0, done_bytes: 0, total_bytes: sizeOf(changes) };
+  // Only this update's progress: the last one's end stays in the daemon until this one starts.
+  const progress = async () => { const p = (await daemon({ cmd: 'update_progress' })).progress; return p?.state === 'running' ? p : null; };
+  const [reply, error] = await follow(u, 'updates-apply', daemon({ cmd: 'update', check: false }), progress);
+  const end = (await daemon({ cmd: 'update_progress' }).catch(() => null))?.progress;
+  if (reply) {
+    S.updates = updateSummary(reply, false);
+    Object.assign(u, { state: 'done', percent: 100, doneAt: Date.now(), items: reply.changes || u.items });
+    toast(S.updates.text);
+    setTimeout(renderPage, 4700);
+    setTimeout(renderPage, 5100);
+  } else {
+    Object.assign(u, end?.state === 'failed' ? end : { index: -1 }, { state: 'failed', error });
+    toast(error, true);
+  }
+  renderChrome();
+  renderPage();
 }
 
-/** The TUI's summary of an `update` reply (crates/cli/src/tui/mod.rs). */
+/** The TUI's summary of an `update` reply (crates/cli/src/tui/mod.rs), with its changes. */
 function updateSummary(v, check) {
-  const changes = (v.changes || []).map((c) => c.what + ' ' + c.from + '→' + c.to);
+  const changes = v.changes || [];
   const unknown = v.unknown || [];
   let text = !changes.length ? (unknown.length ? 'No updates found' : 'Everything is up to date (release ' + v.release + ')')
-    : (check ? 'Available: ' : 'Updated: ') + changes.join(', ');
+    : (check ? 'Available: ' : 'Updated: ') + changes.map((c) => c.what + ' ' + c.from + '→' + c.to).join(', ');
   if (unknown.length) text += ' · version unknown, skipped: ' + unknown.join(', ') + ' (try again)';
-  return { text, changes: check ? changes : [] };
+  return { text, changes: check ? changes : [], unknown };
 }
 
 // ---------- Extensions dialog (Phase 6 catalog) ----------
@@ -1220,7 +1434,9 @@ function renderChrome() {
   // Redraw only on a change, so keyboard focus in the sidebar survives the polling.
   const cardBusy = S.busyAt === 'card' ? S.busy : '';
   const heading = PAGES[S.page].heading?.() || PAGES[S.page].title;
-  const key = JSON.stringify([S.page, S.site, heading, PAGES[S.page].sub(), !!S.busy, cardBusy, autoUpdates(st)?.count,
+  const upd = [S.upd.dv, S.upd.rt].find((u) => u?.state === 'running');
+  const pct = upd && (upd === S.upd.dv ? devidPercent(upd) : upd.percent || 0);
+  const key = JSON.stringify([S.page, S.site, heading, PAGES[S.page].sub(), !!S.busy, cardBusy, autoUpdates(st)?.count, pct,
     st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status)]]);
   if (key === chromeKey) return;
   chromeKey = key;
@@ -1228,6 +1444,7 @@ function renderChrome() {
     h('button.dv-nav' + (key === S.page ? '.is-active' : ''), { type: 'button', 'aria-current': key === S.page ? 'page' : null,
       onclick: () => go(key) }, icon(key), h('span.dv-grow', {}, p.title),
     key === 'sites' && st ? h('span.dv-chip', {}, String(st.sites)) : key === 'php' && st ? h('span.dv-chip', {}, st.default_php) :
+      key === 'settings' && upd ? h('span.dv-navpct', { 'aria-label': 'Updating, ' + pct + '%' }, pct + '%') :
       key === 'settings' && autoUpdates(st)?.count ? h('span.dv-navdot', { title: 'Updates available', 'aria-label': 'Updates available' }) : null)));
   $('title').textContent = heading;
   $('lead').replaceChildren(...(S.page === 'sites' && S.site ? [h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Back to Sites',

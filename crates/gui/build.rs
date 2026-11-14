@@ -12,6 +12,7 @@ fn main() {
         "in_terminal",
         "login_item",
         "self_update",
+        "self_update_progress",
         "relaunch",
         "quit",
     ]));

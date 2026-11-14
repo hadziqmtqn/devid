@@ -35,6 +35,7 @@ fn main() {
             api::in_terminal,
             api::login_item,
             api::self_update,
+            api::self_update_progress,
             api::relaunch,
             api::quit,
         ])
