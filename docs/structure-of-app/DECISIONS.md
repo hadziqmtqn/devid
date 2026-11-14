@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-046 | 2026-11-14 | accepted (completes D-044, amends D-010) | Apple silicon: every build is native on its own GitHub runner, and a release is smoke-tested with the real PHP and nginx on both arches before it is published |
 | D-045 | 2026-11-14 | accepted (amends D-043) | Issues move from `devid-binaries` to `devid`, next to the code; `devid` gains a contributor guide and a security policy |
 | D-044 | 2026-11-14 | accepted (amends D-019) | Platforms come one at a time: Apple silicon, then Debian-based Linux, then Windows |
 | D-043 | 2026-11-13 | accepted (supersedes part of D-032) | The `devid` source is public under the GNU AGPL v3; binaries and releases stay in `devid-binaries` |
@@ -708,4 +709,19 @@ See ARCHITECTURE, "PHP runtime".
   - **Contributions:** licensed as `AGPL-3.0-only`, the same as the project (inbound = outbound), with no separate agreement.
 - **Not now:** a code of conduct; one line in `CONTRIBUTING.md` asks for kindness.
 - **Where it shows:** the `devid` README, the `devid-binaries` README, and the guide's troubleshooting and extensions pages and the landing page footer in `devid-site`.
+- **Accepted:** by the owner on 2026-11-14.
+
+## D-046: Apple silicon builds and their test plan (accepted 2026-11-14, completes D-044, amends D-010)
+
+- **Context:**
+  - D-044 made Apple silicon the next platform and left its test plan open (D-010, D-043). The owner has an Intel Mac only, so nobody runs the arm64 builds by hand.
+  - The code was mostly ready: the manifest has an `arch` slot per asset, and the daemon, `self-update` and `install.sh` already pick `arm64` on Apple silicon. The builds and the release workflows were x86_64 only, and `devid setup --gui` always fetched the Intel app.
+- **Decision:**
+  - **Native builds:** every asset is built on a runner of its own arch, `macos-15-intel` for x86_64 and `macos-15` for arm64, with no cross-compiling. The build checks then run each binary natively: `php -m`, Xdebug, every extension in `php` and `php-fpm` with its smoke test, `nginx -V`.
+  - **devid-binaries:** `release.yml` and `catalog.yml` build each PHP version, its extensions and nginx for both arches; the Caddy mirror takes both official builds of one version. One dated release and one manifest hold both arches.
+  - **devid:** `release.yml` builds and tests `devid` and Devid.app on both runners. Before anything is published, `scripts/smoke.sh` runs on each: a daemon in a throwaway `DEVID_HOME` on spare ports installs PHP 8.5 and nginx from `runtime-latest`, serves a linked site, and checks that PHP answers with the runner's own arch (`php_uname("m")`, which Rosetta would report as x86_64). A failure on either arch publishes nothing. `workflow_dispatch` with `dry_run` runs all of it without publishing.
+  - **Assets:** `devid-darwin-arm64` and `Devid-darwin-arm64.zip` next to the x86_64 ones, in the same release and the same `checksums.txt`.
+  - **Order:** the runtime release with arm64 comes first, since the smoke test needs it; then a devid release.
+  - **Honesty:** the release notes, the README and the landing page say Apple silicon is tested on GitHub's runners only, until someone confirms it on a real Mac.
+- **Not now:** a universal binary (it doubles every download), and an arm64 job in CI on every pull request (the release builds and smoke-tests both arches).
 - **Accepted:** by the owner on 2026-11-14.
