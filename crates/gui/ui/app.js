@@ -681,7 +681,7 @@ function phpPage(d) {
           (m) => { toast(m, false, 'Restart php-fpm ' + v + ' after you save it.'); })),
         btn('Restart', () => restart(service)));
     })),
-    h('p.dv-sub.dv-note', {}, 'Static builds for Intel Macs (x86_64). Updates are in Settings.'),
+    h('p.dv-sub.dv-note', {}, 'Static builds for Intel and Apple silicon Macs. Updates are in Settings.'),
   ];
 }
 

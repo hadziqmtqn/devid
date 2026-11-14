@@ -44,6 +44,7 @@ PLIST
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
-rm -f "$OUT/Devid-darwin-x86_64.zip"
-(cd "$OUT" && ditto -c -k --keepParent Devid.app Devid-darwin-x86_64.zip)
-echo "built $APP ($VERSION) and $OUT/Devid-darwin-x86_64.zip"
+ZIP="Devid-darwin-$(uname -m).zip"   # built natively: x86_64 or arm64
+rm -f "$OUT/$ZIP"
+(cd "$OUT" && ditto -c -k --keepParent Devid.app "$ZIP")
+echo "built $APP ($VERSION) and $OUT/$ZIP"

@@ -164,8 +164,9 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
     Ok(())
 }
 
-/// The release asset with Devid.app (scripts/bundle-app.sh).
-const APP_ASSET: &str = "Devid-darwin-x86_64.zip";
+/// The release asset with Devid.app for this Mac's arch (scripts/bundle-app.sh).
+const APP_ASSET: &str =
+    if cfg!(target_arch = "aarch64") { "Devid-darwin-arm64.zip" } else { "Devid-darwin-x86_64.zip" };
 
 /// Installs or updates ~/Applications/Devid.app from this devid's own release (`devid-v<version>`),
 /// so the app and the daemon have the same version.
