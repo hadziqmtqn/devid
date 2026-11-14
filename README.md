@@ -4,7 +4,7 @@ Devid is a local development environment for Laravel, PHP and Node.js on Intel M
 
 **Website and guide:** [devid.bekenweb.com](https://devid.bekenweb.com), with the user guide at [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs).
 
-> **Status:** v0.12, used daily on one Mac. It runs on Intel Macs only for now. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). The builds, the releases and the issue tracker are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
+> **Status:** v0.13, used daily on one Mac. It runs on Intel Macs only for now. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). The builds, the releases and the issue tracker are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
 
 ```sh
 devid park ~/Projects                  # every subfolder becomes <folder>.test
