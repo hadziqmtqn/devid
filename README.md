@@ -81,13 +81,13 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 
 **Next**
 
+- Apple silicon: Devid, PHP, the extensions and the web servers built for arm64, and tested on GitHub's Apple silicon runners (D-044).
 - macOS 15 up to the latest macOS, on Intel, tested as far as GitHub's macOS runners allow.
 - A shorter install command, on Devid's own domain.
 
 **Later**
 
-- Linux (Debian-based) and Windows. Windows is the largest effort: it needs its own PHP builds and has no php-fpm.
-- Apple silicon. The build pipeline can already produce arm64.
+- Linux (Debian-based), then Windows, one platform at a time (D-044). Windows is the largest effort: it needs its own PHP builds and has no php-fpm.
 - Developer tools: a mail catcher and a dump viewer.
 
 **Out of scope:** databases (use a tool such as DBngin), and Docker- or VM-based setups.
