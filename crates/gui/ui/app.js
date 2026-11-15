@@ -102,7 +102,7 @@ const row = (...kids) => h('div.dv-row', {}, kids);
 const text = (title, sub) => h('div.dv-grow', {}, h('div', {}, title), sub ? h('div.dv-sub', {}, sub) : null);
 
 const portsText = (st) => st.standard_ports
-  ? 'HTTP 80 → ' + st.http_port + ' · HTTPS 443 → ' + st.https_port
+  ? 'HTTP 80 → ' + st.http_port + ' · HTTPS 443 → ' + st.https_port + (st.standard_ports_ok === false ? ' · not working' : '')
   : 'HTTP ' + st.http_port + ' · HTTPS ' + st.https_port;
 
 /** `human_size` in crates/cli/src/tui/app.rs. */
@@ -1488,7 +1488,7 @@ function renderPage() {
   if (!data) return;
   const scroll = page.parentElement.scrollTop;
   const kept = ['lg-list', 'logbox'].map((id) => [id, $(id)?.scrollTop]);
-  page.replaceChildren(...[versionBanner(), PAGES[S.page].render(data)].flat().filter(Boolean));
+  page.replaceChildren(...[versionBanner(), portsBanner(), PAGES[S.page].render(data)].flat().filter(Boolean));
   page.parentElement.scrollTop = scroll;
   for (const [id, top] of kept) if (top != null && $(id)) $(id).scrollTop = top;
   const box = $('logbox');
@@ -1505,6 +1505,14 @@ function versionBanner() {
     ? ['Devid ' + daemon + ' is installed', 'This window is still ' + app + '. Close it, and the menu-bar icon restarts as the new version.']
     : ['The Devid daemon is ' + daemon, 'This app is ' + app + '. Update the daemon with devid self-update in Terminal.'];
   return h('div.dv-banner.warn', { role: 'status' }, h('span.dv-dot.warn'), text(h('span.dv-strong', {}, title), sub));
+}
+
+/** D-047: another app switched pf off on loopback, so no site answers on 80/443. */
+function portsBanner() {
+  if (S.status?.standard_ports_ok !== false) return null;
+  return h('div.dv-banner.warn', { role: 'status' }, h('span.dv-dot.warn'),
+    text(h('span.dv-strong', {}, 'Sites do not answer on ports 80 and 443'),
+      'Another app switched off Devid\'s port redirect, often OrbStack, Docker, UTM or Internet Sharing. Run devid helper install in Terminal to restore it.'));
 }
 
 function go(key) {

@@ -342,6 +342,15 @@ mod tests {
         let text = render(&a).0;
         assert!(text.contains("* nginx") && text.contains("1.30.6"), "{text}");
         assert!(text.contains("80/443"), "standard ports via the pf redirect are explained");
+        assert!(!text.contains("not redirected"), "no warning while the redirect works");
+        // D-047: another app switched pf off on loopback; the header and the Server page say so.
+        let mut st = status();
+        st["standard_ports_ok"] = json!(false);
+        a.status = Ok(st);
+        let text = render(&a).0;
+        assert!(text.contains("✗ 80/443 not redirected"), "{text}");
+        assert!(text.contains("✗ 80/443 do not reach it"), "{text}");
+        a.status = Ok(status());
         a.page = Page::Logs;
         a.logs = vec![json!({"name": "php85-fpm.log", "size": 42})];
         a.log_text = "line one\nNOTICE: ready to handle connections\nBuilding 1/2\rBuilding 2/2\rFinished\r\n".into();

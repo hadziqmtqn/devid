@@ -51,6 +51,16 @@ pub const NEEDS_PASSWORD_EXIT: u8 = 3;
 pub const NEEDS_PASSWORD: &str =
     "system setup (.test DNS, ports 80/443, CA trust) needs your password: run `devid setup` in Terminal";
 
+/// Why ports 80/443 can stop reaching the web server, and the fix (D-047).
+pub const REDIRECT_FIX: &str = "another app switched pf off on loopback (often OrbStack, Docker, UTM or Internet \
+     Sharing); run `devid helper install`";
+
+/// Ports 80/443 are set up and the web server runs, yet port 80 does not reach it (D-047).
+fn redirect_down(paths: &Paths) -> bool {
+    request(paths, &Request::Status).is_ok_and(|s| s["standard_ports"] == true && s["server_status"] == "running")
+        && !webserver::answers_on(80)
+}
+
 /// PHP versions to install and the version to make the default. Without `--php`, the configured
 /// default is installed only when no PHP is installed at all, so a re-run changes nothing.
 fn php_plan(requested: &[String], default: &str, installed: &[String]) -> (Vec<String>, Option<String>) {
@@ -68,6 +78,9 @@ fn php_plan(requested: &[String], default: &str, installed: &[String]) -> (Vec<S
 
 pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
     println!("devid setup{}:", if dry_run { " (dry run, nothing changes)" } else { "" });
+    // Before the daemon restarts below, while its web server still runs: the files of the system
+    // setup can all be in place while pf ignores them (D-047), and only the sudo step repairs that.
+    let ports_down = !dry_run && redirect_down(paths);
     let bin = install::installed_bin(paths);
     step(dry_run, &format!("install {} and php/composer shims", bin.display()), || {
         install::install_binary(paths).map(|_| String::new()).map_err(|e| e.to_string())
@@ -101,7 +114,10 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
 
     let plan = helper_plan(paths)?;
     let mut needs_password = false;
-    if !dry_run && h::status(&plan).iter().all(|(_, ok)| *ok) {
+    if ports_down {
+        println!("  !!  ports 80/443 do not reach the web server: {REDIRECT_FIX}");
+    }
+    if !dry_run && !ports_down && h::status(&plan).iter().all(|(_, ok)| *ok) {
         println!("  ok  system setup (.test DNS, ports 80/443, CA trust) already in place");
     } else if pick.no_sudo && !dry_run {
         // Everything else still installs; the caller finishes this step in Terminal.
@@ -296,6 +312,9 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
                 &format!("{server} {}", s["server_status"].as_str().unwrap_or("?")),
                 &format!("`devid server install {server}`; logs in ~/.devid/log/"),
             );
+            if s["standard_ports"] == true && s["server_status"] == "running" {
+                check(webserver::answers_on(80), &format!("ports 80/443 reach {server}"), REDIRECT_FIX);
+            }
             let default = s["default_php"].as_str().unwrap_or("?");
             let running =
                 s["php"].as_array().is_some_and(|l| l.iter().any(|p| p["default"] == true && p["status"] == "running"));

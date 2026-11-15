@@ -53,9 +53,13 @@ pub fn view(status: Result<&Value, &str>) -> View {
     let failed = s["php"].as_array().into_iter().flatten().filter(|p| p["status"] == "failed").count()
         + usize::from(s["server_status"] == "failed");
     let running = s["server_status"] == "running";
+    // D-047: another app switched pf off on loopback; the server runs, but no site answers.
+    let ports_off = s["standard_ports_ok"] == false;
     let server = s["server"].as_str().unwrap_or("?").to_string();
     let header = if failed > 0 {
         format!("{failed} service{} failed", if failed == 1 { "" } else { "s" })
+    } else if ports_off {
+        "Sites do not answer on ports 80 and 443".into()
     } else if running {
         format!("{server} · Running · PHP {}", s["default_php"].as_str().unwrap_or("?"))
     } else {
@@ -72,7 +76,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
     let shares =
         s["shares"].as_array().into_iter().flatten().filter_map(|x| x["site"].as_str().map(String::from)).collect();
     View {
-        icon: if failed > 0 {
+        icon: if failed > 0 || ports_off {
             "bad"
         } else if running {
             "running"
@@ -286,6 +290,11 @@ mod tests {
             (v.icon, v.header.as_str(), v.running, v.updates),
             ("running", "nginx · Running · PHP 8.5", Some(true), 0)
         );
+
+        let ports_off = json!({"server": "nginx", "server_status": "running", "default_php": "8.5",
+            "php": [{"status": "running"}], "updates": null, "standard_ports_ok": false});
+        let v = view(Ok(&ports_off));
+        assert_eq!((v.icon, v.header.as_str()), ("bad", "Sites do not answer on ports 80 and 443"), "D-047");
 
         let stopped = json!({"server": "nginx", "server_status": "stopped", "php": [],
             "updates": {"devid": "0.6.0", "changes": [{"what": "php 8.5"}, {"what": "nginx"}]}});

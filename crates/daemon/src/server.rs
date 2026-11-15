@@ -56,6 +56,8 @@ struct State {
     busy_ports: Mutex<BTreeMap<String, String>>,
     /// The owner's commands (D-036) started from Devid.
     commands: Commands,
+    /// The last check that port 80 reaches the web server (D-047): when, and the answer.
+    redirect_check: Mutex<Option<(Instant, bool)>>,
 }
 
 /// Progress of a `PhpExtInstall`. Downloads count for 0–90 % by bytes (the archive's size on disk
@@ -338,6 +340,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         own_ports: Mutex::new(BTreeSet::new()),
         busy_ports: Mutex::new(BTreeMap::new()),
         commands,
+        redirect_check: Mutex::new(None),
     });
     // D-036: commands a crashed daemon left running are stopped. Found before any request can
     // start a new one; stopped in the background, as that may take 10 s.
@@ -501,6 +504,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "dns": state.dns,
                 "tld": config.tld,
                 "standard_ports": standard_ports(&config, &state.paths),
+                "standard_ports_ok": standard_ports_ok(state, &config),
                 "ca": ca::ca_cert(&state.paths).display().to_string(),
                 "sites": sites::resolve(&config).len(),
                 "default_php": config.default_php,
@@ -1224,6 +1228,28 @@ fn standard_ports(config: &Config, paths: &Paths) -> bool {
         ca_cert: ca::ca_cert(paths),
     };
     fs::read_to_string(helper::PF_FILE).is_ok_and(|c| c == helper::pf_rules(&plan))
+}
+
+/// Whether ports 80/443 really reach the running web server through pf (D-047). Another app can
+/// switch pf off on loopback (`skip on lo0`, set by macOS Internet Sharing when OrbStack, Docker or
+/// UTM adds a VM network), and then every site stops answering. None when there is no redirect or
+/// the server is not running. Cached for 15 s, since the app and the TUI poll status.
+fn standard_ports_ok(state: &State, config: &Config) -> Option<bool> {
+    let running = matches!(state.supervisor.state().get(&config.server), Some(ProcState::Running(_)));
+    if !running || !standard_ports(config, &state.paths) {
+        return None;
+    }
+    let mut last = state.redirect_check.lock().unwrap();
+    if let Some((_, ok)) = last.filter(|(at, _)| at.elapsed() < std::time::Duration::from_secs(15)) {
+        return Some(ok);
+    }
+    // A server that has just (re)started may not accept yet; look twice before saying no.
+    let ok = webserver::answers_on(80) || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        webserver::answers_on(80)
+    };
+    *last = Some((Instant::now(), ok));
+    Some(ok)
 }
 
 /// Install PHP `version` from `from` (a build folder) or else from the release manifest

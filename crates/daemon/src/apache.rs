@@ -10,6 +10,7 @@ use crate::{
     php,
     sites::{Mode, Site},
     supervisor::Spec,
+    webserver::NO_SITE,
 };
 use std::{
     fmt::Write as _,
@@ -124,6 +125,7 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
          # First vhost per port is the fallback for unknown hosts.\n\
          <VirtualHost 127.0.0.1:{http}>\n\
          \x20   ServerName unknown.invalid\n\
+         \x20   ErrorDocument 404 \"{NO_SITE}\"\n\
          \x20   RewriteEngine on\n\
          \x20   RewriteRule ^ - [R=404,L]\n\
          </VirtualHost>\n"

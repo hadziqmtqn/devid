@@ -109,6 +109,13 @@ fn pf_load_command() -> String {
     format!("/sbin/pfctl -E >/dev/null 2>&1; /sbin/pfctl -a {PF_ANCHOR} -f {PF_FILE}")
 }
 
+/// Another pf client can set `skip on lo0` (macOS Internet Sharing does when OrbStack, Docker or UTM
+/// adds a VM network); the `rdr … on lo0` rules then stop matching and 80/443 refuse connections.
+/// Reloading Devid's anchor does not undo it, reloading pf's options from /etc/pf.conf does (D-047).
+/// Only when it is set, so a working setup is left as it is.
+const PF_UNSKIP_LO0: &str = "/sbin/pfctl -s Interfaces -v 2>/dev/null | /usr/bin/grep -q '^lo0 (skip)' \
+    && /sbin/pfctl -O -f /etc/pf.conf >/dev/null 2>&1; exit 0";
+
 fn pf_plist() -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -143,6 +150,7 @@ pub fn install_actions(plan: &Plan) -> Vec<Action> {
         Action::Write { path: PF_FILE.into(), content: pf_rules(plan), backup: false },
         Action::Write { path: PF_PLIST.into(), content: pf_plist(), backup: false },
         run("/bin/sh", &["-c", &pf_load_command()], false),
+        run("/bin/sh", &["-c", PF_UNSKIP_LO0], true),
         // Replace any earlier Devid CA in the System keychain, then trust the current one for SSL.
         run("/usr/bin/security", &["delete-certificate", "-c", CA_NAME, SYSTEM_KEYCHAIN], true),
         run(
@@ -267,6 +275,12 @@ mod tests {
         assert!(rules.contains("to 127.0.0.1 port 443 -> 127.0.0.1 port 8443"));
         assert!(rules.contains("on lo0"), "local traffic only");
         assert!(pf_plist().contains("<string>dev.devid.pf</string>"));
+        // D-047: install also undoes another pf client's `skip on lo0`, which an anchor reload cannot.
+        let unskip = install_actions(&p).into_iter().any(|a| {
+            matches!(a, Action::Run { ref args, ok_to_fail: true, .. }
+                if args.iter().any(|x| x.contains("lo0 (skip)") && x.contains("pfctl -O -f /etc/pf.conf")))
+        });
+        assert!(unskip, "install clears skip on lo0");
         // Uninstall reverses every file install writes.
         let written: Vec<PathBuf> = install_actions(&p)
             .into_iter()
