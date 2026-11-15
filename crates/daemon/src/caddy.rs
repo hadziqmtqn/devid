@@ -9,6 +9,7 @@ use crate::{
     php,
     sites::{Mode, Site},
     supervisor::Spec,
+    webserver::NO_SITE,
 };
 use std::{
     fmt::Write as _,
@@ -78,7 +79,7 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
          \n\
          http://:{http} {{\n\
          \tbind 127.0.0.1\n\
-         \trespond \"No Devid site for this host.\" 404\n\
+         \trespond \"{NO_SITE}\" 404\n\
          }}\n",
         data = q(&dir(paths).join("data")),
         log = q(&paths.log_dir().join("caddy-error.log")),

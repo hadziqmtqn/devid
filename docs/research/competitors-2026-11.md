@@ -31,7 +31,9 @@ Yerd, like Devid, redirects ports 80/443 with pf, and has two open bugs:
 - the pf port redirect breaks when OrbStack is installed: https://github.com/forjedio/yerd/issues/253
 - iCloud Private Relay becomes unavailable: https://github.com/forjedio/yerd/issues/247
 
-Devid's pf anchor should be checked for both (unknown).
+On 2026-11-15:
+- The first is confirmed for Devid and handled by D-047: a live check, plus a repair in `devid helper install`.
+- The second is still unchecked.
 
 ## Proposed opportunities for Devid
 

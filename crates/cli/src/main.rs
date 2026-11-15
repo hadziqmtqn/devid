@@ -794,6 +794,9 @@ fn print_status(v: &serde_json::Value, json: bool) {
         v["http_port"],
         v["https_port"]
     );
+    if v["standard_ports_ok"] == false {
+        println!("  ports:       80/443 do not reach it: {}", setup::REDIRECT_FIX);
+    }
     println!("  CA:          {}", v["ca"].as_str().unwrap_or("?"));
     println!("  sites:       {}", v["sites"]);
     println!("  default PHP: {}", v["default_php"].as_str().unwrap_or("?"));

@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-08 (Phase 8 A3: local ports)
+> Verified against: 2026-11-15 (D-047: live check of ports 80/443)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -53,9 +53,11 @@ Implemented in M5:
 - `devid helper install` (and `uninstall`, `status`, `--dry-run`) does the following, and uninstall reverses it:
   - `/etc/resolver/<tld>` → `nameserver 127.0.0.1` / `port <dns_port>`. A foreign file (Valet's) is backed up once to `<file>.devid-backup` and restored on uninstall.
   - The pf anchor `com.apple/devid` (`/etc/pf.anchors/dev.devid`) holds `rdr pass on lo0` 127.0.0.1:80 → `http_port` and :443 → `https_port`. pf is enabled with `pfctl -E`. The LaunchDaemon `dev.devid.pf` reloads the rules at boot.
+  - Another app can switch pf off on loopback (`skip on lo0`), and the rules then stop matching. An anchor reload does not undo that, so `helper install` also runs `pfctl -O -f /etc/pf.conf`, but only when `lo0` is skipped (D-047).
   - The Devid CA is trusted for SSL only in the System keychain; it is name-constrained to `.<tld>`.
   - The DNS cache is flushed.
 - Once the pf rules are in place, `devid sites` shows URLs without a port (`standard_ports` in status).
+- `standard_ports_ok` in status (D-047) says whether port 80 really reaches the running web server. The check asks for an unknown host and expects "No Devid site for this host.", the catch-all reply of all three web servers. `doctor`, `devid status`, the TUI and the app show a failed check with its fix, and `setup` runs its sudo step for it.
 
 Implemented in M6:
 - **Signals.** The daemon blocks SIGTERM/SIGINT/SIGHUP before starting any thread. A `sigwait` thread turns them into the same clean stop as `devid daemon stop`. The supervisor clears the inherited mask in children (`pre_exec`), so nginx still gets SIGHUP for reloads.
@@ -146,6 +148,10 @@ All behaviour lives in `daemon` and is reached through its socket API. `cli` and
   - Ruled out: pf state (the table is empty) and nginx (a restart does not help).
   - Candidates: the application firewall (on, with Devid's nginx not listed) and a leftover Cloudflare WARP daemon.
   - Share avoids the path since 0.12.1. Tests and checks on that Mac should use `:80`/`:443` or a local port.
+  - 2026-11-15:
+    - Direct connections connected after a fresh boot, and while `lo0` was skipped.
+    - They hung again right after `pfctl -O -f /etc/pf.conf` and a reload of Devid's anchor.
+    - This points at pf's handling of `lo0` rather than the firewall.
 
 ## TUI (Phase 4)
 

@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-14
+> Verified against: 2026-11-15
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-047 | 2026-11-15 | accepted (amends D-014) | Ports 80/443 are checked live, since another app can switch pf off on loopback; `devid helper install` undoes that |
 | D-046 | 2026-11-14 | accepted (completes D-044, amends D-010) | Apple silicon: every build is native on its own GitHub runner, and a release is smoke-tested with the real PHP and nginx on both arches before it is published |
 | D-045 | 2026-11-14 | accepted (amends D-043) | Issues move from `devid-binaries` to `devid`, next to the code; `devid` gains a contributor guide and a security policy |
 | D-044 | 2026-11-14 | accepted (amends D-019) | Platforms come one at a time: Apple silicon, then Debian-based Linux, then Windows |
@@ -725,3 +726,35 @@ See ARCHITECTURE, "PHP runtime".
   - **Honesty:** the release notes, the README and the landing page say Apple silicon is tested on GitHub's runners only, until someone confirms it on a real Mac.
 - **Not now:** a universal binary (it doubles every download), and an arm64 job in CI on every pull request (the release builds and smoke-tests both arches).
 - **Accepted:** by the owner on 2026-11-14.
+
+## D-047: ports 80/443 are checked live; `helper install` undoes another app's `skip on lo0` (accepted 2026-11-15, amends D-014)
+
+- **Context:**
+  - Devid sends 127.0.0.1:80/443 to the web server's high ports with `rdr pass on lo0` rules in the pf anchor `com.apple/devid`. The LaunchDaemon `dev.devid.pf` loads them once, at boot.
+  - Yerd works the same way and reported that its redirect dies whenever another pf client sets `skip on lo0`. macOS Internet Sharing does that when OrbStack, Docker or UTM adds a VM network; on one machine it happened 16 times in 45 minutes (https://github.com/forjedio/yerd/issues/253). It came up in the competitor research (`docs/research/competitors-2026-11.md`).
+  - Confirmed on the owner's Mac on 2026-11-15 (macOS 14.8.9), changing only pf options:
+    - with `skip on lo0`, 127.0.0.1:80 and :443 refuse connections at once, while nginx on 8088/8443 runs;
+    - reloading Devid's anchor, which `devid setup` and the LaunchDaemon do, does not help;
+    - `pfctl -O -f /etc/pf.conf` (options only) clears the skip, and 80/443 answer again.
+  - Nothing noticed it:
+    - `doctor`, `setup` and `standard_ports` only compared the files with what Devid writes;
+    - `setup` skipped its sudo step when the files matched;
+    - Share, which goes through :80 since 0.12.1, failed the same way.
+- **Decision:**
+  - **Live check:** `webserver::answers_on(80)` asks 127.0.0.1:80 for an unknown host and expects the catch-all reply of Devid's web servers, "No Devid site for this host." Apache now sends that text too. Another server on port 80 does not pass.
+  - **Where it shows:**
+    - The status reply gains `standard_ports_ok`. It is null without the redirect or a running web server, and is cached for 15 s.
+    - `devid status`, the TUI header and Server page, and a banner on every page of the app name the problem and the fix.
+    - The menu-bar icon turns red, and its menu starts with the problem.
+    - `devid doctor` runs the check every time.
+  - **Repair:**
+    - `devid helper install`, the fix shown everywhere, also runs `pfctl -O -f /etc/pf.conf`, but only when `lo0` is skipped.
+    - `devid setup` checks before it restarts the daemon, and runs its sudo step when port 80 does not answer.
+- **Not now:**
+  - **Repairing on its own:** a root job woken by macOS's network-change notification could clear the skip at no idle cost. Whether that notification comes every time needs a spike on a Mac with OrbStack or Docker.
+  - **Dropping pf:**
+    - nginx could listen on `*:80`, which a user process may bind on macOS 14 (unlike `127.0.0.1:80`; checked with port 81), but it would then also face the LAN and the firewall prompt;
+    - handing sockets over from a root helper is a larger change.
+
+    Either would also end the iCloud Private Relay conflict that Yerd reports for any pf `rdr` rule (https://github.com/forjedio/yerd/issues/247), which is not yet checked for Devid.
+- **Accepted:** by the owner on 2026-11-15.

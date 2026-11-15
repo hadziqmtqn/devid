@@ -27,3 +27,4 @@
 | 2026-11-09 | [Commands run again after Devid restarts for an update (D-040, v0.12.3)](2026-11-09-resume-after-update.md) |
 | 2026-11-12 | [A proxy site's commands get PORT from "Forward to" (D-041, v0.12.4)](2026-11-12-command-port-env.md) |
 | 2026-11-12 | [A new proxy site gets a free dev server port; `devid cmd <site>` lists (D-042, v0.12.5)](2026-11-12-auto-port.md) |
+| 2026-11-15 | [Fix: ports 80/443 are checked live, and `helper install` undoes `skip on lo0` (D-047)](2026-11-15-pf-lo0-skip.md) |

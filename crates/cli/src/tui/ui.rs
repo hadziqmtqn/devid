@@ -75,6 +75,10 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
             spans.push(state(app, "running"));
             spans.push(Span::raw(format!("  ·  {} ", s(&st["server"]))));
             spans.push(state(app, s(&st["server_status"])));
+            // D-047: right after the server, so a narrow terminal does not cut it off.
+            if st["standard_ports_ok"] == false {
+                spans.push(Span::styled(" ✗ 80/443 not redirected", bad(app)));
+            }
             spans.push(Span::raw(format!(
                 "  ·  PHP {} default  ·  {} sites  ·  v{}",
                 s(&st["default_php"]),
@@ -249,7 +253,13 @@ fn draw_server(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
             "Listening on 127.0.0.1:{} (http) and :{} (https){}",
             status["http_port"],
             status["https_port"],
-            if status["standard_ports"] == true { "; reached on 80/443 through the pf redirect" } else { "" }
+            if status["standard_ports_ok"] == false {
+                format!("; ✗ 80/443 do not reach it: {}", crate::setup::REDIRECT_FIX)
+            } else if status["standard_ports"] == true {
+                "; reached on 80/443 through the pf redirect".to_string()
+            } else {
+                String::new()
+            }
         )),
         Line::raw(format!("DNS: {}", s(&status["dns"]))),
     ];

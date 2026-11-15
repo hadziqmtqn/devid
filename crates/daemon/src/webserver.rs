@@ -123,3 +123,56 @@ pub fn installed_version(paths: &Paths, name: &str) -> Option<String> {
     };
     Some(raw.split_whitespace().next()?.to_string())
 }
+
+/// The catch-all reply of every Devid web server to a host that is not one of its sites.
+pub const NO_SITE: &str = "No Devid site for this host.";
+
+/// Whether Devid's web server answers on 127.0.0.1:`port`: its catch-all reply (NO_SITE) to an
+/// unknown host, so another server on that port does not count. Port 80 reaches the web server only
+/// through pf's redirect, which another app can switch off (D-047).
+pub fn answers_on(port: u16) -> bool {
+    use std::io::{Read, Write};
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)) else {
+        return false;
+    };
+    let timeout = Some(std::time::Duration::from_secs(1));
+    let _ = stream.set_read_timeout(timeout);
+    let _ = stream.set_write_timeout(timeout);
+    if stream.write_all(b"GET / HTTP/1.0\r\nHost: devid-probe.invalid\r\nConnection: close\r\n\r\n").is_err() {
+        return false;
+    }
+    let mut reply = Vec::new();
+    let _ = stream.take(4096).read_to_end(&mut reply);
+    String::from_utf8_lossy(&reply).contains(NO_SITE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+    };
+
+    /// A one-request HTTP server on a free port that replies 404 with `body`.
+    fn serve(body: &'static str) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut s, _)) = listener.accept() {
+                let _ = s.read(&mut [0; 1024]);
+                let _ = write!(s, "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn answers_on_needs_devids_own_reply() {
+        assert!(answers_on(serve("No Devid site for this host.\n")));
+        assert!(!answers_on(serve("404 page not found\n")), "another server on the port does not count");
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        assert!(!answers_on(closed), "nothing listening");
+    }
+}

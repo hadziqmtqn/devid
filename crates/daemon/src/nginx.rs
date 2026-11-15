@@ -7,6 +7,7 @@ use crate::{
     php,
     sites::{Mode, Site},
     supervisor::Spec,
+    webserver::NO_SITE,
 };
 use std::{
     fmt::Write as _,
@@ -102,7 +103,7 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
          \x20   server {{\n\
          \x20       listen 127.0.0.1:{port} default_server;\n\
          \x20       default_type text/plain;\n\
-         \x20       return 404 \"No Devid site for this host.\\n\";\n\
+         \x20       return 404 \"{NO_SITE}\\n\";\n\
          \x20   }}\n\
          \x20   # Unknown hosts on HTTPS: refuse the handshake instead of serving a wrong certificate.\n\
          \x20   server {{\n\

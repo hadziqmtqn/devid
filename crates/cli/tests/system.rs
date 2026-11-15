@@ -37,6 +37,7 @@ fn dns_and_helper_without_root() {
     let status = json(&home, &["status", "--json"]);
     assert_eq!(status["dns"], format!("listening on 127.0.0.1:{port}"));
     assert_eq!(status["standard_ports"], false);
+    assert!(status["standard_ports_ok"].is_null(), "nothing to check without the pf redirect (D-047)");
 
     let reply = query(port, "erdbpro-saas.test");
     assert_eq!(&reply[0..2], &[0x12, 0x34]);
