@@ -45,9 +45,9 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
-| D-051 | 2026-11-16 | proposed (amends D-049) | The app's inbox shows an email's HTML through its own `mailview:` scheme: its own CSP without scripts, a sandboxed frame, and links that open in the browser |
+| D-051 | 2026-11-16 | accepted 2026-11-17 (amends D-049) | The app's inbox shows an email's HTML through its own `mailview:` scheme: its own CSP without scripts, a sandboxed frame, and links that open in the browser |
 | D-050 | 2026-11-16 | accepted (amends D-049) | New-mail notifications use the legacy NSUserNotification API, since UserNotifications refuses an ad-hoc signed app; they show the sender and the subject |
-| D-049 | 2026-11-16 | accepted (Phase 9; schedules D-011's deferred mail catcher) | Mail: Devid ships the official Mailpit build and runs it when Mail is on (off by default); 0.15.0 opens Mailpit's inbox in the browser, a later 0.15.x shows the inbox in the app |
+| D-049 | 2026-11-16 | accepted (Phase 9; schedules D-011's deferred mail catcher) | Mail: Devid ships the official Mailpit build and runs it when Mail is on (off by default); 0.15.0 opens Mailpit's inbox in the browser, a later 0.15.x shows the inbox in the app (both ship in 0.15.0: D-051) |
 | D-048 | 2026-11-16 | accepted (amends D-027, D-039) | The desktop app restarts through LaunchServices (`open -n`), not by replacing itself with `exec` |
 | D-047 | 2026-11-15 | accepted (amends D-014) | Ports 80/443 are checked live, since another app can switch pf off on loopback; `devid helper install` undoes that |
 | D-046 | 2026-11-14 | accepted (completes D-044, amends D-010) | Apple silicon: every build is native on its own GitHub runner, and a release is smoke-tested with the real PHP and nginx on both arches before it is published |
@@ -805,6 +805,7 @@ See ARCHITECTURE, "PHP runtime".
   - The owner's own Mailpit can keep its ports. Removing it is the owner's choice once Devid's Mail is in use.
 - **Not now:** a dump viewer (the rest of D-011's deferral), an inbox per site (Mailpit stores each message's SMTP user name, so a site that sets `MAIL_USERNAME` could be told apart), and relaying mail to a real server.
 - **Accepted:** by the owner on 2026-11-16, with the two stages and the canvas prototype.
+- **Amended 2026-11-17 (D-051):** stage 2 was done before 0.15.0 could ship, since 0.15.0 waits for a runtime release with Mailpit. Both stages ship in 0.15.0.
 
 ## D-050: notifications for new mail use NSUserNotification (accepted 2026-11-16, amends D-049)
 
@@ -826,7 +827,7 @@ See ARCHITECTURE, "PHP runtime".
 - **Not chosen:** `osascript` with `display notification`, which shows as Script Editor and needs its own permission, and no notifications at all.
 - **Accepted:** by the owner on 2026-11-16, after the test notifications and with the two-line layout.
 
-## D-051: the app's inbox shows email HTML through its own `mailview:` scheme (proposed 2026-11-16, amends D-049)
+## D-051: the app's inbox shows email HTML through its own `mailview:` scheme (proposed 2026-11-16, accepted 2026-11-17, amends D-049)
 
 - **Context:**
   - Stage 2 of D-049 puts the inbox inside Devid.app, as on the boards "Mail · Inbox" and "Mail · Inbox, empty".
@@ -850,3 +851,4 @@ See ARCHITECTURE, "PHP runtime".
   - A link with an explicit `target="_self"` to an http:// URL does nothing. Laravel's buttons use `target="_blank"`, and its plain links get the `<base>`.
   - Saving an attachment writes to ~/Downloads from the daemon. macOS may ask the first time whether `devid` may use the Downloads folder, and again after an update, since the signature is ad hoc (D-010). Not seen yet: the test daemon ran where Downloads is not reachable.
 - **Not chosen:** a `srcdoc` frame (the window's CSP strips the email's styles) and Mailpit's `/view/<id>.html` in a frame (its scripts run).
+- **Accepted:** by the owner, who merged #98 on 2026-11-16 after testing a debug build, and chose on 2026-11-17 to ship the inbox in 0.15.0 with stage 1.

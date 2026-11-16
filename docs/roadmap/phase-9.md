@@ -9,7 +9,7 @@ Apps on the owner's Mac send their mail to a Mailpit the owner set up by hand: `
 Phase 9 lets Devid download, run and show a mail catcher from the CLI, the TUI and the desktop app, in two stages:
 
 - **Stage 1, 0.15.0:** Mail in the daemon, `devid mail`, the TUI and the app: on/off, status, settings, the `.env` lines, and a Mail section in the quick menu. "Open inbox" opens Mailpit's own page in the browser.
-- **Stage 2, a later 0.15.x:** the inbox inside the app, over Mailpit's API.
+- **Stage 2, a later 0.15.x:** the inbox inside the app, over Mailpit's API. Done first, it ships in 0.15.0 as well (the owner, 2026-11-17).
 
 The design is on the canvas page "0.15.x" (`https://claude.ai/artifact/TS8URDyBeQ4D5PaozQsDUa`), approved by the owner on 2026-11-16:
 
@@ -121,7 +121,7 @@ As planned when stage 2 started (2026-11-16); it replaces the first sketch, a Ta
 | M3 | **Daemon and CLI:** the Mail service, its config, status, `devid mail`, PHP's `mail()`, doctor, updates | on the owner's Mac, `devid mail on` downloads and starts Mailpit on 2525, a password reset mail from erdbpro-saas lands in it, and `devid mail off` stops it |
 | M4 | **App and TUI, stage 1:** the Mail page, the quick menu, notifications | the owner turns Mail on in Devid.app and opens the inbox from the quick menu |
 | M5 | **Docs and release 0.15.0:** the docs on `devid-site`, README, the timeline record | released and installed on the owner's Mac (the release waits for the owner's go-ahead) |
-| M6 | **Stage 2: the inbox in the app** | the "Mail · Inbox" boards work in Devid.app on the owner's Mac; released as a 0.15.x |
+| M6 | **Stage 2: the inbox in the app** | the "Mail · Inbox" boards work in Devid.app on the owner's Mac; released in 0.15.0 (done: #97, #98) |
 
 Each milestone is one worktree and one PR. M2 goes first: M3's end-to-end check needs Mailpit in a runtime release.
 
