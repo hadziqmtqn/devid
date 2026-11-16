@@ -290,9 +290,16 @@ fn shown(m: &Value) -> Value {
         .flatten()
         .map(|a| json!({"part": a["PartID"], "name": a["FileName"], "type": a["ContentType"], "size": a["Size"]}))
         .collect();
+    // Images the HTML shows by `cid:` reference; the app's inbox loads them from Mailpit.
+    let inline: Vec<Value> = m["Inline"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|a| json!({"part": a["PartID"], "cid": a["ContentID"]}))
+        .collect();
     json!({"id": m["ID"], "from": {"name": m["From"]["Name"], "address": m["From"]["Address"]},
            "to": people(&m["To"]), "cc": people(&m["Cc"]), "subject": m["Subject"], "date": m["Date"],
-           "size": m["Size"], "text": m["Text"], "html": m["HTML"], "attachments": attachments})
+           "size": m["Size"], "text": m["Text"], "html": m["HTML"], "attachments": attachments, "inline": inline})
 }
 
 /// A message's headers: name -> values.
@@ -566,7 +573,8 @@ mod tests {
         );
         let full = json!({"ID": "a1", "From": {"Name": "ERD Builder Pro", "Address": "hello@example.com"}, "To": [{"Name": "", "Address": "budi@example.com"}],
             "Cc": null, "Subject": "Invoice", "Date": "2026-11-16T14:00:05+07:00", "Size": 739, "Text": "hi", "HTML": "<p>hi</p>",
-            "Attachments": [{"PartID": "2", "FileName": "invoice.pdf", "ContentType": "application/pdf", "Size": 15}]});
+            "Attachments": [{"PartID": "2", "FileName": "invoice.pdf", "ContentType": "application/pdf", "Size": 15}],
+            "Inline": [{"PartID": "1.2", "FileName": "logo.png", "ContentType": "image/png", "ContentID": "logo@app", "Size": 9}]});
         let m = shown(&full);
         assert_eq!(
             (m["from"]["name"].as_str(), m["to"][0]["address"].as_str(), m["html"].as_str()),
@@ -577,6 +585,7 @@ mod tests {
             json!({"part": "2", "name": "invoice.pdf", "type": "application/pdf", "size": 15})
         );
         assert_eq!(m["cc"], json!([]), "no Cc: an empty list");
+        assert_eq!(m["inline"], json!([{"part": "1.2", "cid": "logo@app"}]));
     }
 
     #[test]

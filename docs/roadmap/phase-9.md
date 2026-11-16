@@ -99,11 +99,17 @@ As planned when stage 2 started (2026-11-16); it replaces the first sketch, a Ta
   - CLI: `devid mail list [query] [--unread]`, `devid mail show <id>`, `devid mail delete <id>…`, `devid mail save <id> <part>`.
 - **M6b, the app:**
   - The inbox as on the boards "Mail · Inbox" and "Mail · Inbox, empty". New mail appears with the window's 2 s refresh, which is cheaper than a WebSocket for a page that is only open now and then.
-  - **Isolation:** Mailpit's `/view/<id>.html` is the email's own HTML, `<script>` included. The app shows it through its own `mailview:` URL scheme:
+  - **Isolation:** Mailpit's `/view/<id>.html` is the email's own HTML, `<script>` included. The app shows it through its own `mailview:` URL scheme (D-051):
     - the scheme's reply carries its own CSP: no scripts; styles, fonts and images allowed;
     - it is shown in a sandboxed iframe;
-    - links go to the browser through Tauri's `on_new_window`.
+    - links go to the browser through the window's navigation handler.
     - The window's CSP only gains `frame-src mailview:`.
+  - **Built (2026-11-16):** a debug build with a test daemon and the real Mailpit, driven through the test app's accessibility elements (no keystrokes) on the owner's Mac:
+    - A hostile test email showed its styles, its `cid:` image and a remote image. Its `<script>`, which would have replaced the page and called a logger on 127.0.0.1, did not run, and its `<meta http-equiv="refresh">` did not fire.
+    - Laravel's button (`target="_blank"`) opened in the browser. A plain link did nothing at first: WebKit blocks a frame's own navigation to http:// as mixed content before the app is asked. Appending `<base target="_blank">` makes every such link a new window, which opens in the browser.
+    - Mark as unread, then Preview again, left the message unread: the frame reuses the HTML the page fetched.
+    - A bug found and fixed: while the search field had focus, a redraw waited, and the Delete button of the old view acted on the newly picked message. The view's buttons now act on the message they show, and picking leaves the search field.
+    - At the window's smallest size (760×520) the tab row wraps; a fixed-width email scrolls in its frame.
 
 ## Milestones
 

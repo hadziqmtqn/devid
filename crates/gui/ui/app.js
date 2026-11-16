@@ -45,6 +45,10 @@ const ICONS = {
   stop: '<svg viewBox="0 0 16 16"><rect class="f" x="4" y="4" width="8" height="8" rx="1.2"/></svg>',
   search: '<svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>',
   check: '<svg viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg>',
+  trash: '<svg viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg>',
+  clip: '<svg viewBox="0 0 16 16"><path d="M10.5 5.5 6 10a1.4 1.4 0 0 0 2 2l5-5a2.8 2.8 0 0 0-4-4L4 8a4.2 4.2 0 0 0 6 6l3.5-3.5"/></svg>',
+  file: '<svg viewBox="0 0 16 16"><path d="M4 1.8h5.2L12.5 5v9.2H4z"/><path d="M9 1.8V5h3.5"/></svg>',
+  download: '<svg viewBox="0 0 16 16"><path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13.5h10"/></svg>',
 };
 
 const S = {
@@ -67,6 +71,10 @@ const S = {
   logPanel: null, // the command whose log shows under its site's commands
   mailDl: null, // the first `mail on`'s download: {got, size}
   mailPort: null, // the SMTP port being typed, until it is applied
+  mailSettings: false, // Mail's settings instead of its inbox (D-051)
+  // The inbox: the open message (`msg` once it arrived), its tab, and the search. `stay` keeps the
+  // message opened in the Unread view listed after it is read; `extra` is the Headers or Raw tab.
+  inbox: { cur: null, msg: null, tab: 'preview', q: '', filter: 'all', stay: null, extra: null },
 };
 const $ = (id) => document.getElementById(id);
 
@@ -130,7 +138,7 @@ let menuOpen = null;
 /** `side`: an element to open beside, bottoms aligned (the status card), instead of below the anchor. */
 function menu(anchor, entries, list = false, side = null) {
   closeMenu();
-  const pick = (e) => ({ type: 'button', disabled: !!S.busy, onclick: () => { closeMenu(); e.run(); } });
+  const pick = (e) => ({ type: 'button', disabled: !!S.busy || !!e.disabled, onclick: () => { closeMenu(); e.run(); } });
   const m = h('div.dv-menu' + (list ? '.is-list' : ''), { role: 'menu' },
     entries.filter(Boolean).map((e) =>
       e === '-' ? h('hr.dv-sep') :
@@ -250,9 +258,8 @@ const PAGES = {
   php: { title: 'PHP', sub: () => 'PHP 8.3, 8.4 and 8.5 side by side; pick one per site.',
     load: () => daemon({ cmd: 'php_list' }), render: phpPage },
   server: { title: 'Web Server', sub: () => 'Status, engine choice and configuration.', load: () => daemon({ cmd: 'server_list' }), render: serverPage },
-  // Mail's state is in `status`; returning it redraws the page when the counts change.
-  mail: { title: 'Mail', sub: () => 'Catches the email your apps send. Nothing leaves this Mac.', load: async () => S.status?.mail || {},
-    render: mailPage, tools: mailTools },
+  mail: { title: 'Mail', heading: () => (S.mailSettings && S.status?.mail?.state === 'running' ? 'Mail settings' : 'Mail'), sub: mailSub,
+    load: loadMail, render: mailRender, patch: mailPatch, tools: mailTools },
   logs: { title: 'Logs', sub: () => 'Log files in ' + (S.status?.home || '~/.devid') + '/log.', load: loadLogs, render: logsPage },
   settings: { title: 'Settings', sub: () => 'Preferences for Devid on this Mac.', load: async () => ({}), render: settingsPage },
 };
@@ -457,14 +464,60 @@ async function quickMenu(anchor) {
   ], false, anchor.closest('.dv-statuscard'));
 }
 
-// ---------- Mail (Phase 9, D-049): Devid runs Mailpit; its inbox opens in the browser ----------
+// ---------- Mail (Phase 9, D-049, D-051): Devid runs Mailpit; this page is its inbox ----------
 
 const MAIL_STATES = { running: ['Running', 'ok'], starting: ['Starting', 'muted'], paused: ['Stopped', 'warn'],
   stopped: ['Stopped', 'warn'], failed: ['Failed', 'bad'] };
 const mailSet = (label, fields, done) => act(label, () => daemon({ cmd: 'mail_set', ...fields }), done);
-const openInbox = () => openTarget({ what: 'inbox' });
+const openInbox = () => go('mail');
+/** Mailpit's own page in the browser, or one message there. */
+const openMailpit = (id) => openTarget({ what: 'inbox', id: id || null });
 const sendTestMail = () => act('Sending…', () => daemon({ cmd: 'mail_test' }), 'Test email sent to test@example.com', 'mail-test');
 const copyMailEnv = () => invoke('copy_mail_env').then((m) => toast(m), (e) => toast(String(e), true));
+/** A quick inbox request: no busy state, a toast if it fails, then the list again. */
+const mailDo = (req, done) => daemon(req).then(() => { if (done) toast(done); return refresh(true); }, (e) => toast(String(e), true));
+/** The inbox shows while Mail runs, unless its settings are open. */
+const inboxShown = () => S.status?.mail?.state === 'running' && !S.mailSettings;
+
+function mailSub() {
+  const m = S.status?.mail;
+  if (!inboxShown()) return 'Catches the email your apps send. Nothing leaves this Mac.';
+  return 'SMTP 127.0.0.1:' + m.port + ' · ' + (m.total ? plural(m.total, 'message') : 'no mail yet');
+}
+
+/** Mail's state is in `status`; while the inbox shows, the list too (newest first, at most 200). */
+async function loadMail() {
+  const m = S.status.mail;
+  if (!m || !inboxShown()) return { m };
+  const I = S.inbox;
+  const q = I.q.trim();
+  const unread = I.filter === 'unread';
+  let list;
+  try { list = await daemon({ cmd: 'mail_list', query: q, unread, limit: 200 }); } catch { return { m }; } // starting, or not answering: the next poll asks again
+  if (q !== I.q.trim() || unread !== (I.filter === 'unread')) return S.data.mail; // a newer search is on its way
+  if (unread && I.stay && !list.messages.some((x) => x.id === I.stay.id)) {
+    const at = list.messages.findIndex((x) => new Date(x.created) < new Date(I.stay.created));
+    list.messages.splice(at < 0 ? list.messages.length : at, 0, I.stay);
+  }
+  return { m, list };
+}
+
+function mailRender(d) {
+  const m = d.m;
+  if (!m) return h('div.dv-empty.dv-sub', {}, 'This daemon has no Mail yet; update Devid.');
+  if (S.mailDl || !m.enabled || m.state === 'not installed') return mailOff(m);
+  if (inboxShown()) return !d.list ? h('div.dv-empty.dv-sub', {}, 'Waiting for Mailpit…') : d.list.total ? mailInbox(d.list) : mailEmpty(m);
+  return mailSetup(m);
+}
+
+function showMailSettings(on) {
+  S.mailSettings = on;
+  closeMenu();
+  $('page').parentElement.scrollTop = 0;
+  renderChrome();
+  $('page').replaceChildren();
+  refresh(true);
+}
 
 /** The first time, `mail_set` waits for Mailpit's download; `status` shows how far it is meanwhile. */
 async function turnOnMail() {
@@ -485,7 +538,10 @@ async function turnOnMail() {
 
 async function clearMail(m) {
   if (await ask('Delete all ' + plural(m.total, 'message') + '?', 'They are deleted from ' + S.status.home + '/mail. This can\'t be undone.', 'Delete', true))
-    act('Deleting…', () => daemon({ cmd: 'mail_clear' }), 'Deleted all mail');
+    act('Deleting…', () => daemon({ cmd: 'mail_clear' }), () => {
+      Object.assign(S.inbox, { cur: null, msg: null, extra: null, stay: null });
+      return 'Deleted all mail';
+    });
 }
 
 function applyMailPort(value, current) {
@@ -505,22 +561,262 @@ function applyMailPort(value, current) {
 function mailMenu(m) {
   if (!m) return [];
   if (m.state === 'running') return ['-', { header: 'Mail' + (m.unread ? ' · ' + m.unread + ' new' : '') },
-    { label: 'Open inbox', kbd: '↗', run: openInbox }, { label: 'Send test email', run: sendTestMail }];
-  if (m.enabled) return ['-', { header: 'Mail · Stopped' }, { label: 'Mail…', run: () => go('mail') }];
-  return ['-', { label: 'Turn on Mail…', run: () => go('mail') }];
+    { label: 'Open inbox', run: openInbox }, { label: 'Send test email', run: sendTestMail }];
+  if (m.enabled) return ['-', { header: 'Mail · Stopped' }, { label: 'Mail…', run: openInbox }];
+  return ['-', { label: 'Turn on Mail…', run: openInbox }];
 }
 
 function mailTools() {
-  if (S.status?.mail?.state !== 'running') return [];
-  return [busyBtn('mail-test', 'Send test email', sendTestMail),
-    h('button.dv-btn.primary', { type: 'button', onclick: openInbox, disabled: !!S.busy }, 'Open inbox', icon('open'))];
+  const m = S.status?.mail;
+  if (m?.state !== 'running') return [];
+  const test = busyBtn('mail-test', 'Send test email', sendTestMail);
+  if (S.mailSettings) return [test];
+  return [test, moreBtn('More mail actions', () => [
+    { label: 'Mark all as read', disabled: !m.unread, run: () => mailDo({ cmd: 'mail_read', ids: [], read: true }, 'Marked all mail as read') },
+    { label: 'Open inbox in Mailpit', kbd: '↗', run: () => openMailpit() },
+    { label: 'Mail settings…', run: () => showMailSettings(true) },
+    '-',
+    { label: 'Delete all…', danger: true, disabled: !m.total, run: () => clearMail(m) },
+  ])];
 }
 
-function mailPage() {
+// The inbox, as on the canvas boards "Mail · Inbox" and "Mail · Inbox, empty": the messages on the
+// left, the open one on the right. Its email HTML shows in a sandboxed frame from the app's
+// `mailview:` scheme, without scripts (mailview.rs).
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad2 = (n) => String(n).padStart(2, '0');
+const sameDay = (a, b) => a.toDateString() === b.toDateString();
+const yesterday = () => new Date(Date.now() - 86400000);
+/** 14:05 today, "Yesterday", else "3 Nov" (with the year when it is another one). */
+function listTime(t) {
+  const d = new Date(t);
+  if (isNaN(d)) return '';
+  if (sameDay(d, new Date())) return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  if (sameDay(d, yesterday())) return 'Yesterday';
+  return d.getDate() + ' ' + MONTHS[d.getMonth()] + (d.getFullYear() === new Date().getFullYear() ? '' : ' ' + d.getFullYear());
+}
+function longTime(t) {
+  const d = new Date(t);
+  if (isNaN(d)) return '';
+  const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  if (sameDay(d, new Date())) return 'Today at ' + hm;
+  if (sameDay(d, yesterday())) return 'Yesterday at ' + hm;
+  return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() + ' at ' + hm;
+}
+const person = (p) => (p.name ? p.name + ' <' + p.address + '>' : p.address);
+/** The open message's part of the page; a change redraws it, anything else only the list. */
+const mailViewKey = () => JSON.stringify([S.inbox.cur, S.inbox.tab, !!S.inbox.msg, !!S.inbox.extra]);
+
+function mailInbox(list) {
+  const I = S.inbox;
+  return h('div.mx-body', {},
+    h('div.mx-list', {},
+      h('div.mx-lhead', {},
+        h('label.dv-search.dv-grow', {}, icon('search'), h('input.dv-input', { type: 'search', placeholder: 'Search mail', 'aria-label': 'Search mail',
+          value: I.q, spellcheck: 'false', autocomplete: 'off', oninput: (e) => searchMail(e.target.value) })),
+        h('div.dv-seg', { role: 'group', 'aria-label': 'Show' }, [['all', 'All'], ['unread', 'Unread']].map(([k, label]) =>
+          h('button', { type: 'button', 'data-filter': k, 'aria-pressed': String(I.filter === k), onclick: () => filterMail(k) }, label)))),
+      h('div.mx-items', { id: 'mx-items', role: 'listbox', 'aria-label': 'Messages', onkeydown: listKey }, mailItems(list))),
+    mailView(list.messages.find((x) => x.id === I.cur)));
+}
+
+function mailItems(list) {
+  const I = S.inbox;
+  const q = I.q.trim();
+  if (!list.messages.length) return [h('div.mx-none.dv-sub', {}, q ? 'No mail matches “' + q + '”.' : 'No unread mail.')];
+  // One stop for Tab; the arrow keys move from there (listKey).
+  const stop = list.messages.some((x) => x.id === I.cur) ? I.cur : list.messages[0].id;
+  return list.messages.map((x) => {
+    const from = x.from || '(no sender)';
+    const subject = x.subject || '(no subject)';
+    const to = x.to.join(', ');
+    const when = listTime(x.created);
+    return h('button.mx-item' + (x.read ? '' : '.is-unread') + (x.id === I.cur ? '.is-active' : ''), { type: 'button', role: 'option',
+      'aria-selected': String(x.id === I.cur), tabindex: x.id === stop ? '0' : '-1', 'data-id': x.id,
+      'aria-label': (x.read ? '' : 'Unread. ') + from + ': ' + subject + ', to ' + to + ', ' + when + (x.attachments ? ', with attachment' : ''),
+      onclick: () => pickMail(x.id) },
+    h('span.mx-udot', { 'aria-hidden': 'true' }), h('span.mx-from.dv-ellipsis', {}, from), h('span.mx-time', {}, when),
+    h('span.mx-subj.dv-ellipsis', {}, subject),
+    h('span.mx-to', {}, h('span.dv-ellipsis', {}, 'To ' + to), x.attachments ? icon('clip') : null));
+  });
+}
+
+function mailView(item) {
+  const I = S.inbox;
+  const view = (...kids) => h('div.mx-view', { id: 'mx-view', 'data-key': mailViewKey() }, kids);
+  if (!I.cur) return view(h('div.mx-pick.dv-sub', {}, 'Select a message to read it.'));
+  const id = I.cur; // the buttons act on the message they show, even if a redraw waits
+  const msg = I.msg?.error ? null : I.msg;
+  const meta = (k, v) => h('div.mx-mrow', {}, h('span.k', {}, k), h('span.v', {}, v));
+  return view(
+    h('div.mx-head', {},
+      h('div.mx-headtop', {},
+        h('h2.mx-subject', {}, (msg || item)?.subject || '(no subject)'),
+        h('div.mx-acts', {},
+          h('button.dv-btn', { type: 'button', id: 'mx-read', onclick: () => toggleRead(id) }, item && !item.read ? 'Mark as read' : 'Mark as unread'),
+          h('button.dv-btn.icon', { type: 'button', 'aria-label': 'Delete this message', title: 'Delete', onclick: () => deleteMail(id) }, icon('trash')))),
+      msg ? h('div.mx-meta', {},
+        meta('From', person(msg.from)),
+        meta('To', msg.to.map(person).join(', ') || '—'),
+        msg.cc.length ? meta('Cc', msg.cc.map(person).join(', ')) : null,
+        meta('Date', [longTime(msg.date), humanSize(msg.size)].filter(Boolean).join(' · '))) : null,
+      msg?.attachments.length ? h('div.mx-atts', {}, msg.attachments.map((a) => h('div.mx-att', {}, icon('file'),
+        h('span.dv-strong.dv-ellipsis', {}, a.name || 'attachment'), h('span.dv-sub', {}, humanSize(a.size)),
+        h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Save ' + (a.name || 'the attachment') + ' to Downloads', title: 'Save to Downloads',
+          onclick: () => saveAttachment(id, a) }, icon('download'))))) : null),
+    h('div.mx-bar', {},
+      h('div.dv-seg', { role: 'group', 'aria-label': 'View' }, [['preview', 'Preview'], ['text', 'Text'], ['headers', 'Headers'], ['raw', 'Raw']].map(([k, label]) =>
+        h('button', { type: 'button', 'aria-pressed': String(I.tab === k), onclick: () => pickTab(k) }, label))),
+      h('span.dv-grow'),
+      h('button.dv-btn.ghost', { type: 'button', onclick: () => openMailpit(id) }, 'Open in Mailpit', icon('open'))),
+    mailContent());
+}
+
+function mailContent() {
+  const I = S.inbox;
+  const msg = I.msg;
+  const box = (...kids) => h('div.mx-content', {}, kids);
+  if (!msg) return box();
+  if (msg.error) return box(h('div.dv-error', { role: 'alert' }, msg.error));
+  if (I.tab === 'preview') {
+    // sandbox before src: the frame never runs the email's scripts, nor gets the app's origin.
+    if (msg.html) return h('div.mx-content.is-frame', {}, h('iframe.mx-frame', { sandbox: 'allow-popups', title: 'Email preview',
+      src: 'mailview://localhost/' + encodeURIComponent(msg.id) }));
+    return box(h('div.mx-plaintext', { role: 'document', 'aria-label': 'Email preview' }, msg.text || 'This message is empty.'));
+  }
+  if (I.tab === 'text') return box(h('pre.mx-pre', {}, msg.text || 'This message has no text part.'));
+  const x = I.extra;
+  if (!x) return box();
+  if (x.error) return box(h('div.dv-error', { role: 'alert' }, x.error));
+  if (I.tab === 'headers') return box(Object.entries(x.headers).flatMap(([k, values]) =>
+    values.map((v) => h('div.mx-hrow', {}, h('div.k', {}, k), h('div.v', {}, v)))));
+  return box(h('pre.mx-pre.raw', {}, x.raw), x.cut ? h('p.dv-sub', {}, 'The source is cut at 512 KB here. Open it in Mailpit to see all of it.') : null);
+}
+
+/** No mail yet: how to send some. */
+function mailEmpty(m) {
+  return h('div.mx-empty', {}, h('div.mx-empty-in', {},
+    h('span.ml-tile', { 'aria-hidden': 'true' }, icon('mail')),
+    h('h2', {}, 'No mail yet'),
+    h('p', {}, 'Send mail from your app to Devid’s SMTP server. Each message shows up here at once.'),
+    h('div.mx-codebox', {}, h('pre.dv-pre.ml-code', { 'aria-label': '.env lines for Laravel' },
+      'MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT=' + m.port), btn('Copy', copyMailEnv, 'ml-copy')),
+    h('div.mx-empty-btns', {}, busyBtn('mail-test', 'Send test email', sendTestMail, 'primary'), btn('Mail settings', () => showMailSettings(true)))));
+}
+
+/** A redraw while the open message stays: only the list changes, so its frame does not reload. */
+function mailPatch(d) {
+  const box = $('mx-items');
+  if (!box || !inboxShown() || !d.list?.total || $('mx-view')?.dataset.key !== mailViewKey()) return false;
+  const focused = box.contains(document.activeElement) && document.activeElement.dataset.id;
+  const top = box.scrollTop;
+  box.replaceChildren(...mailItems(d.list));
+  box.scrollTop = top;
+  if (focused) box.querySelector('[data-id="' + CSS.escape(focused) + '"]')?.focus({ preventScroll: true });
+  for (const b of document.querySelectorAll('[data-filter]')) b.setAttribute('aria-pressed', String(b.dataset.filter === S.inbox.filter));
+  const item = d.list.messages.find((x) => x.id === S.inbox.cur);
+  if (item && $('mx-read')) $('mx-read').textContent = item.read ? 'Mark as unread' : 'Mark as read';
+  return true;
+}
+
+const focusItem = (yes) => { if (yes) $('mx-items')?.querySelector('.is-active')?.focus(); };
+/** A redraw waits while the search field has focus (renderPage); picking something else ends that. */
+const leaveSearch = () => { if (document.activeElement?.closest('.mx-lhead')) document.activeElement.blur(); };
+
+/** Opens a message; Mailpit marks it read. */
+async function pickMail(id, focus = false) {
+  const I = S.inbox;
+  if (I.cur === id) return focusItem(focus);
+  leaveSearch();
+  const item = S.data.mail?.list?.messages.find((x) => x.id === id);
+  Object.assign(I, { cur: id, msg: null, extra: null, stay: I.filter === 'unread' && item ? { ...item, read: true } : null });
+  renderPage();
+  focusItem(focus);
+  let msg;
+  try { msg = (await daemon({ cmd: 'mail_message', id })).message; } catch (e) { msg = { error: String(e) }; }
+  if (I.cur !== id) return;
+  I.msg = msg;
+  if (I.tab === 'headers' || I.tab === 'raw') await loadExtra();
+  renderPage();
+  focusItem(focus);
+  refresh(true); // its unread dot and the counts, now rather than at the next poll
+}
+
+async function pickTab(tab) {
+  const I = S.inbox;
+  if (I.tab === tab) return;
+  leaveSearch();
+  I.tab = tab;
+  I.extra = null;
+  renderPage();
+  if ((tab === 'headers' || tab === 'raw') && I.msg && !I.msg.error) { await loadExtra(); renderPage(); }
+}
+
+async function loadExtra() {
+  const I = S.inbox;
+  const { cur, tab } = I;
+  let x;
+  try { x = await daemon({ cmd: tab === 'headers' ? 'mail_headers' : 'mail_raw', id: cur }); } catch (e) { x = { error: String(e) }; }
+  if (I.cur === cur && I.tab === tab) I.extra = x;
+}
+
+function toggleRead(id) {
+  const item = S.data.mail?.list?.messages.find((x) => x.id === id);
+  mailDo({ cmd: 'mail_read', ids: [id], read: item ? !item.read : false });
+}
+
+/** Deletes a message; the next one in the list opens, as in Mail. */
+async function deleteMail(id) {
+  const items = S.data.mail?.list?.messages || [];
+  const i = items.findIndex((x) => x.id === id);
+  const subject = items[i]?.subject || S.inbox.msg?.subject || '(no subject)';
+  const next = i < 0 ? null : items[i + 1] || items[i - 1] || null;
+  const focus = !!$('mx-items')?.contains(document.activeElement);
+  try { await daemon({ cmd: 'mail_delete', ids: [id] }); } catch (e) { toast(String(e), true); return; }
+  toast('Deleted', false, subject);
+  if (S.inbox.cur === id) {
+    if (next) pickMail(next.id, focus);
+    else { Object.assign(S.inbox, { cur: null, msg: null, extra: null, stay: null }); renderPage(); }
+  }
+  refresh(true);
+}
+
+const saveAttachment = (id, a) => daemon({ cmd: 'mail_save', id, part: a.part })
+  .then((r) => toast('Saved ' + r.path.split('/').pop() + ' to Downloads'), (e) => toast(String(e), true));
+
+function listKey(e) {
+  const I = S.inbox;
+  const ids = [...e.currentTarget.querySelectorAll('[data-id]')].map((b) => b.dataset.id);
+  const i = ids.indexOf(I.cur);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const next = ids[Math.min(ids.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+    if (next) pickMail(next, true);
+  } else if ((e.key === 'Delete' || e.key === 'Backspace') && I.cur) {
+    e.preventDefault();
+    deleteMail(I.cur);
+  }
+}
+
+let searchTimer = null;
+function searchMail(q) {
+  S.inbox.q = q;
+  S.inbox.stay = null;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => refresh(true), 250);
+}
+
+function filterMail(filter) {
+  if (S.inbox.filter === filter) return;
+  S.inbox.filter = filter;
+  S.inbox.stay = null;
+  refresh(true);
+}
+
+/** Mail's settings, as on the board "Mail · Setup and status"; the only view while Mail is stopped. */
+function mailSetup(m) {
   const st = S.status;
-  const m = st.mail;
-  if (!m) return h('div.dv-empty.dv-sub', {}, 'This daemon has no Mail yet; update Devid.');
-  if (S.mailDl || !m.enabled || m.state === 'not installed') return mailOff(m);
   const [label, tone] = MAIL_STATES[m.state] || [capital(m.state), 'muted'];
   const port = m.port;
   const stopped = m.state === 'paused' || m.state === 'stopped';
@@ -1582,8 +1878,9 @@ function renderChrome() {
       key === 'settings' && upd ? h('span.dv-navpct', { 'aria-label': 'Updating, ' + pct + '%' }, pct + '%') :
       key === 'settings' && autoUpdates(st)?.count ? h('span.dv-navdot', { title: 'Updates available', 'aria-label': 'Updates available' }) : null)));
   $('title').textContent = heading;
-  $('lead').replaceChildren(...(S.page === 'sites' && S.site ? [h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Back to Sites',
-    title: 'Back to Sites', onclick: () => openSite(null) }, icon('back'))] : []));
+  const back = (label, run) => [h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': label, title: label, onclick: run }, icon('back'))];
+  $('lead').replaceChildren(...(S.page === 'sites' && S.site ? back('Back to Sites', () => openSite(null))
+    : S.page === 'mail' && S.mailSettings && st?.mail?.state === 'running' ? back('Back to Inbox', () => showMailSettings(false)) : []));
   $('subtitle').textContent = PAGES[S.page].sub();
   $('tools').replaceChildren(...(PAGES[S.page].tools?.() || []));
 
@@ -1608,12 +1905,14 @@ function renderChrome() {
 }
 
 function renderPage() {
+  // A page that can update in place does: the inbox keeps its open email's frame.
+  if (S.status && S.data[S.page] && PAGES[S.page].patch?.(S.data[S.page])) return;
   if (menuOpen || (!$('overlay').hidden && !S.ext)) { S.dirty = true; return; }
   // Typing in a field: redraw once it loses focus, so a poll never undoes what is typed.
   if (document.activeElement?.matches('#page input.dv-input')) { S.dirty = true; return; }
   S.dirty = false;
   const page = $('page');
-  page.parentElement.classList.toggle('is-panes', S.page === 'logs' && !!S.status);
+  page.parentElement.classList.toggle('is-panes', !!S.status && (S.page === 'logs' || (S.page === 'mail' && inboxShown() && !!S.data.mail?.list)));
   if (!S.status) {
     page.replaceChildren(h('div.dv-banner', { role: 'status' }, h('span.dv-dot.bad'),
       text(h('span.dv-strong', {}, 'Devid is not running'), S.error || '')));
@@ -1622,7 +1921,7 @@ function renderPage() {
   const data = S.data[S.page];
   if (!data) return;
   const scroll = page.parentElement.scrollTop;
-  const kept = ['lg-list', 'logbox'].map((id) => [id, $(id)?.scrollTop]);
+  const kept = ['lg-list', 'logbox', 'mx-items'].map((id) => [id, $(id)?.scrollTop]);
   page.replaceChildren(...[versionBanner(), portsBanner(), PAGES[S.page].render(data)].flat().filter(Boolean));
   page.parentElement.scrollTop = scroll;
   for (const [id, top] of kept) if (top != null && $(id)) $(id).scrollTop = top;
@@ -1651,9 +1950,10 @@ function portsBanner() {
 }
 
 function go(key) {
-  if (S.page === key && !S.site) return;
+  if (S.page === key && !S.site && !S.mailSettings) return;
   S.page = key;
   S.site = null;
+  S.mailSettings = false;
   S.logPanel = null;
   closeMenu();
   $('page').parentElement.scrollTop = 0;

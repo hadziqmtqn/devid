@@ -2,6 +2,7 @@
 //! created when opened and destroyed when closed. Like the CLI, it is only a daemon client.
 
 mod api;
+mod mailview;
 mod notify;
 mod tray;
 
@@ -41,6 +42,11 @@ fn main() {
             api::relaunch,
             api::quit,
         ])
+        // The inbox's email pages (D-051). Off the main thread: each one may ask the daemon.
+        .register_asynchronous_uri_scheme_protocol("mailview", |_, req, responder| {
+            let path = req.uri().path().to_string();
+            std::thread::spawn(move || responder.respond(mailview::reply(&path)));
+        })
         .setup(move |app| {
             // Menu bar only while no window is open; in the Dock and Cmd+Tab with one (D-030).
             #[cfg(target_os = "macos")]
@@ -99,7 +105,13 @@ pub fn open_window(app: &AppHandle, page: Option<&'static str>) {
         .title("Devid")
         .inner_size(width, height)
         .min_inner_size(MIN.0, MIN.1)
-        .center();
+        .center()
+        // Links in an email open in the browser, never in the window (D-051).
+        .on_navigation(mailview::navigate)
+        .on_new_window(|url, _| {
+            mailview::navigate(&url);
+            tauri::webview::NewWindowResponse::Deny
+        });
     // Before app.js runs: this app's version (to compare with the daemon's, G4) and the first page.
     let builder = builder.initialization_script(format!(
         "window.DEVID_APP_VERSION = '{}'; window.DEVID_START_PAGE = '{}';",
