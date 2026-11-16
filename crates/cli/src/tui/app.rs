@@ -10,18 +10,20 @@ pub enum Page {
     Sites,
     Php,
     Server,
+    Mail,
     Logs,
     Settings,
 }
 
 impl Page {
-    pub const ALL: [Page; 5] = [Page::Sites, Page::Php, Page::Server, Page::Logs, Page::Settings];
+    pub const ALL: [Page; 6] = [Page::Sites, Page::Php, Page::Server, Page::Mail, Page::Logs, Page::Settings];
 
     pub fn title(self) -> &'static str {
         match self {
             Page::Sites => "Sites",
             Page::Php => "PHP",
             Page::Server => "Server",
+            Page::Mail => "Mail",
             Page::Logs => "Logs",
             Page::Settings => "Settings",
         }
@@ -308,7 +310,48 @@ impl App {
             Page::Php => devid_daemon::php::SUPPORTED.len(),
             Page::Server => self.servers.len(),
             Page::Logs => self.logs.len(),
-            Page::Settings => 0,
+            Page::Mail | Page::Settings => 0,
+        }
+    }
+
+    /// `status.mail` (D-049), or Null without a daemon (or with one older than Mail).
+    pub fn mail(&self) -> &Value {
+        static NONE: Value = Value::Null;
+        self.status.as_ref().map_or(&NONE, |s| &s["mail"])
+    }
+
+    /// Mail page keys; None for a key the page does not use.
+    fn mail_key(&mut self, c: char) -> Option<Action> {
+        let m = self.mail().clone();
+        let running = m["state"] == "running";
+        let set = |enabled, php_mail| Request::MailSet { enabled, port: None, keep: None, php_mail, notify: None };
+        let daemon = |request, done: &str| Some(Action::Do(Effect::Daemon { request, done: done.into() }));
+        let not_running = |app: &mut Self| {
+            let off = m["enabled"] != true;
+            app.message = Some((if off { "Mail is off; m turns it on" } else { "Mail is not running" }.into(), true));
+            Some(Action::None)
+        };
+        match c {
+            'm' if m["enabled"] == true => daemon(set(Some(false), None), "Mail is off; the mail it caught stays"),
+            'm' => daemon(set(Some(true), None), "Mail is on"),
+            't' if running => daemon(Request::MailTest, "sent a test email to test@example.com"),
+            'o' if running => {
+                Some(Action::Do(Effect::OpenUrl(m["inbox_url"].as_str().unwrap_or_default().to_string())))
+            }
+            't' | 'o' | 'X' => not_running(self),
+            'c' => {
+                let env = format!(
+                    "MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT={}\n",
+                    m["port"].as_u64().unwrap_or(2525)
+                );
+                Some(Action::Do(Effect::Copy(env)))
+            }
+            'p' => {
+                let on = m["php_mail"] != false;
+                let done = if on { "PHP's mail() no longer goes to Mail" } else { "PHP's mail() goes to Mail" };
+                daemon(set(None, Some(!on)), done)
+            }
+            _ => None,
         }
     }
 
@@ -529,7 +572,7 @@ impl App {
             KeyCode::Tab | KeyCode::BackTab => {
                 self.focus = if self.focus == Focus::Sidebar { Focus::Page } else { Focus::Sidebar };
             }
-            KeyCode::Char(c @ '1'..='5') => self.select_page(Page::ALL[c as usize - '1' as usize]),
+            KeyCode::Char(c @ '1'..='6') => self.select_page(Page::ALL[c as usize - '1' as usize]),
             KeyCode::Up | KeyCode::Char('k') => self.step(-1),
             KeyCode::Down | KeyCode::Char('j') => self.step(1),
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if self.focus == Focus::Sidebar => {
@@ -564,6 +607,18 @@ impl App {
             }
             KeyCode::Char('A') if self.page == Page::Server => {
                 return Action::Do(Effect::Daemon { request: Request::StartAll, done: "started all services".into() });
+            }
+            KeyCode::Char('X') if self.page == Page::Mail && self.mail()["state"] == "running" => {
+                self.mode = Mode::Confirm {
+                    question: "Delete all mail? It is deleted from ~/.devid/mail.".into(),
+                    request: Box::new(Request::MailClear),
+                    done: "deleted all mail".into(),
+                };
+            }
+            KeyCode::Char(c) if self.page == Page::Mail => {
+                if let Some(action) = self.mail_key(c) {
+                    return action;
+                }
             }
             KeyCode::Char('d') if self.page == Page::Settings => return Action::Do(Effect::Doctor),
             KeyCode::Char('a') if self.page == Page::Settings => {
@@ -1517,6 +1572,29 @@ mod tests {
         assert_eq!(daemon_json(app.handle_key(ch('a'))), json!({"cmd": "autostart", "enabled": false}), "a toggles");
         app.status = Ok(json!({"autostart": false}));
         assert_eq!(daemon_json(app.handle_key(ch('a'))), json!({"cmd": "autostart", "enabled": true}));
+    }
+
+    #[test]
+    fn mail_page() {
+        let mut app = App::new(false);
+        app.page = Page::Mail;
+        app.status = Ok(json!({"mail": {"enabled": false, "state": "off", "port": 2525}}));
+        let on =
+            json!({"cmd": "mail_set", "enabled": true, "port": null, "keep": null, "php_mail": null, "notify": null});
+        assert_eq!(daemon_json(app.handle_key(ch('m'))), on, "m turns Mail on");
+        assert!(matches!(app.handle_key(ch('t')), Action::None));
+        assert_eq!(app.message.as_ref().map(|m| m.0.as_str()), Some("Mail is off; m turns it on"));
+        assert!(matches!(app.handle_key(ch('c')), Action::Do(Effect::Copy(env)) if env.contains("MAIL_PORT=2525")));
+        app.status = Ok(json!({"mail": {"enabled": true, "state": "running", "port": 2525,
+            "inbox_url": "http://127.0.0.1:2526/", "php_mail": true}}));
+        assert_eq!(daemon_json(app.handle_key(ch('t'))), json!({"cmd": "mail_test"}));
+        assert!(matches!(app.handle_key(ch('o')), Action::Do(Effect::OpenUrl(u)) if u == "http://127.0.0.1:2526/"));
+        assert_eq!(daemon_json(app.handle_key(ch('p')))["php_mail"], false, "p toggles PHP's mail()");
+        app.handle_key(ch('X'));
+        assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "mail_clear"}));
+        assert_eq!(daemon_json(app.handle_key(ch('m')))["enabled"], false, "m turns a running Mail off");
+        app.handle_key(ch('6'));
+        assert_eq!(app.page, Page::Settings, "Mail is page 4, so Settings is 6");
     }
 
     #[test]

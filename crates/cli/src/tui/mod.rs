@@ -320,12 +320,37 @@ mod tests {
         let (text, _) = render(&app(false));
         assert!(text.contains("Devid") && text.contains("● running") && text.contains("nginx"));
         assert!(text.contains("PHP 8.5 default") && text.contains("2 sites"));
-        for page in ["1 Sites", "2 PHP", "3 Server", "4 Logs", "5 Settings"] {
+        for page in ["1 Sites", "2 PHP", "3 Server", "4 Mail", "5 Logs", "6 Settings"] {
             assert!(text.contains(page), "sidebar shows {page}");
         }
         assert!(text.contains("https://erdbpro-saas.test"));
         assert!(text.contains("✗ PHP 8.3 not installed"), "missing PHP is marked with symbol + text");
         assert!(text.contains("q quit"), "footer lists keys");
+    }
+
+    #[test]
+    fn mail_page() {
+        let mut a = app(false);
+        a.page = Page::Mail;
+        assert!(render(&a).0.contains("This daemon has no Mail yet"), "a daemon older than Mail");
+        let mut st = status();
+        st["mail"] = json!({"enabled": false, "installed": false});
+        a.status = Ok(st.clone());
+        assert!(render(&a).0.contains("The first time, Devid downloads Mailpit"));
+        st["mail"] = json!({"enabled": true, "installed": true, "state": "running", "pid": 77, "version": "1.33.1",
+            "port": 2525, "inbox_url": "http://127.0.0.1:2526/", "total": 10, "unread": 3, "keep": 500, "php_mail": true});
+        a.status = Ok(st);
+        let text = render(&a).0;
+        for want in [
+            "running (Mailpit 1.33.1, pid 77)",
+            "MAIL_PORT=2525",
+            "http://127.0.0.1:2526/",
+            "10, 3 unread",
+            "goes to Mail",
+            "m on/off",
+        ] {
+            assert!(text.contains(want), "{want} missing: {text}");
+        }
     }
 
     #[test]
