@@ -28,12 +28,13 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 - One global web server: nginx (default, D-015), Caddy or Apache.
 - A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012); the Tauri desktop app came in Phase 7 (D-023) and is opt-in (`devid setup --gui`).
 - Phase 8 (accepted 2026-11-08): Node and static apps at `.test` (D-035), user commands run by the daemon (D-036), a local port per site and Share (D-037).
+- Phase 9 (accepted 2026-11-16): Mail, a mail catcher that runs Mailpit (D-049).
 
 **Non-goals:**
 - Databases. The owner uses DBngin for PostgreSQL and MySQL.
 - Per-site web server choice.
 - Arbitrary extra PHP extensions in v1 (see D-008).
-- In v1: mail catcher, dump viewer, log viewer, share/tunnel (deferred, D-011). Share/tunnel is scheduled for Phase 8 (D-037).
+- In v1: mail catcher, dump viewer, log viewer, share/tunnel (deferred, D-011). Share/tunnel is scheduled for Phase 8 (D-037), the mail catcher for Phase 9 (D-049).
 
 ## Phases (estimate 2–2.5 months)
 
@@ -47,6 +48,7 @@ The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 1
 | 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | done (2026-11-05): apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole for 8.3–8.5; Devid v0.4.1 installs them (CLI and TUI); recipe PRs are built, tested and published (E6) |
 | 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | done 2026-11-06 (G1–G5): Devid.app ships with v0.7.0, installed with `devid setup --gui` |
 | 8 | Apps, commands and sharing: app types and presets (D-035), user commands (D-036), a local port per site and Share (D-037); plan in `docs/roadmap/phase-8.md` | done 2026-11-09 (v0.12.1 installed): A2 in v0.8.0, A3 in v0.9.0, A4 in v0.10.0, A5 and A6 in v0.12.0, fixes in v0.12.1; one owner check left (both erd-builder-pro commands from Devid.app) |
+| 9 | Mail: Devid runs Mailpit, in two stages (D-049); plan in `docs/roadmap/phase-9.md` | accepted 2026-11-16; M1 (spike) done |
 
 ## Open risks (Phase 1 must prove)
 
