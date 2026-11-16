@@ -190,6 +190,39 @@ enum Command {
         #[arg(long)]
         stop: bool,
     },
+    /// Catch the mail your apps send, in an inbox on this Mac (Mailpit). With no action: its status
+    Mail {
+        #[command(subcommand)]
+        action: Option<MailAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum MailAction {
+    /// Turn Mail on (the first time, Devid downloads Mailpit)
+    On,
+    /// Turn Mail off; the mail it caught stays
+    Off,
+    /// The SMTP port apps send to (default 2525, as in Laravel's .env.example); the inbox takes the next one
+    Port { port: u16 },
+    /// How many messages to keep; the oldest go first (default 500)
+    Keep { count: u32 },
+    /// Whether PHP's mail() goes to Mail too, through sendmail_path in Devid's PHP (default on)
+    PhpMail {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// Whether the Devid app posts a notification for new mail
+    Notify {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// Send a test email to the inbox
+    Test,
+    /// Open the inbox in the browser
+    Open,
+    /// Delete all mail
+    Clear,
 }
 
 #[derive(Subcommand)]
@@ -537,6 +570,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
                 false => println!("{site} was not shared"),
             }
         }),
+        Command::Mail { action } => mail(action, paths),
         Command::Share { site, stop: false } => {
             println!("starting a Cloudflare quick tunnel…");
             let v = send(Request::ShareStart { site, cwd: cwd()? })?;
@@ -555,6 +589,86 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+fn mail(action: Option<MailAction>, paths: &Paths) -> Result<(), String> {
+    let send = |req: Request| request(paths, &req);
+    let set = |enabled, port, keep, php_mail, notify| send(Request::MailSet { enabled, port, keep, php_mail, notify });
+    let inbox = |v: &serde_json::Value| v["mail"]["inbox_url"].as_str().unwrap_or("?").to_string();
+    match action {
+        None => send(Request::Status).map(|v| print_mail(&v["mail"])),
+        Some(MailAction::On) => {
+            println!("turning Mail on (the first time, this downloads Mailpit, sha256-checked)…");
+            let v = set(Some(true), None, None, None, None)?;
+            let port = &v["mail"]["port"];
+            println!("Mail is on: SMTP on 127.0.0.1:{port}, inbox {}", inbox(&v));
+            println!("In a Laravel app's .env: MAIL_MAILER=smtp, MAIL_HOST=127.0.0.1, MAIL_PORT={port}");
+            Ok(())
+        }
+        Some(MailAction::Off) => set(Some(false), None, None, None, None)
+            .map(|_| println!("Mail is off; the mail it caught stays in ~/.devid/mail")),
+        Some(MailAction::Port { port }) => set(None, Some(port), None, None, None).map(|v| {
+            println!("Mail's SMTP port is {port}, its inbox {}; set MAIL_PORT={port} in your apps' .env", inbox(&v))
+        }),
+        Some(MailAction::Keep { count }) => {
+            set(None, None, Some(count), None, None).map(|_| println!("Mail keeps the newest {count} messages"))
+        }
+        Some(MailAction::PhpMail { state }) => {
+            set(None, None, None, Some(state == "on"), None).map(|_| match &*state {
+                "on" => println!("PHP's mail() goes to Mail while Mail is on"),
+                _ => println!("PHP's mail() no longer goes to Mail"),
+            })
+        }
+        Some(MailAction::Notify { state }) => set(None, None, None, None, Some(state == "on")).map(|_| match &*state {
+            "on" => println!("the Devid app notifies you of new mail"),
+            _ => println!("no notifications for new mail"),
+        }),
+        Some(MailAction::Test) => send(Request::MailTest).map(|v| {
+            let url = v["inbox_url"].as_str().unwrap_or("?");
+            println!("sent a test email to {}; see it at {url}", v["to"].as_str().unwrap_or("?"))
+        }),
+        Some(MailAction::Open) => {
+            let v = send(Request::Status)?;
+            match v["mail"]["state"].as_str().unwrap_or("off") {
+                "running" => {}
+                "off" => return Err("Mail is off; `devid mail on` turns it on".into()),
+                state => return Err(format!("Mail is {state}; `devid start mail` starts it")),
+            }
+            let url = inbox(&v);
+            std::process::Command::new("/usr/bin/open").arg(&url).status().map_err(|e| e.to_string())?;
+            println!("opened {url}");
+            Ok(())
+        }
+        Some(MailAction::Clear) => send(Request::MailClear).map(|_| println!("deleted all mail")),
+    }
+}
+
+/// `devid mail`: what Mail does now, and how an app sends to it.
+fn print_mail(m: &serde_json::Value) {
+    let state = m["state"].as_str().unwrap_or("?");
+    let port = &m["port"];
+    if state == "off" {
+        let first = if m["installed"] == true { "" } else { " (the first time, it downloads Mailpit, 11 MB)" };
+        println!("mail:        off; `devid mail on` turns it on{first}");
+        return;
+    }
+    let what = m["version"].as_str().map_or("Mailpit".to_string(), |v| format!("Mailpit {v}"));
+    let pid = m["pid"].as_u64().map(|p| format!(", pid {p}")).unwrap_or_default();
+    println!("mail:        {state} ({what}{pid})");
+    if let Some(problem) = m["error"].as_str() {
+        println!("problem:     {problem}");
+    }
+    println!("smtp:        127.0.0.1:{port}, any login, no TLS");
+    println!("  .env:      MAIL_MAILER=smtp MAIL_HOST=127.0.0.1 MAIL_PORT={port}");
+    println!("inbox:       {}", m["inbox_url"].as_str().unwrap_or("?"));
+    match (m["total"].as_u64(), m["unread"].as_u64()) {
+        (Some(total), Some(unread)) => {
+            println!("messages:    {total}, {unread} unread (keeps the newest {})", m["keep"])
+        }
+        _ => println!("keeps:       the newest {} messages", m["keep"]),
+    }
+    println!("php mail():  {}", if m["php_mail"] == true { "goes to Mail" } else { "not caught" });
+    println!("notify:      {}", if m["notify"] == true { "on" } else { "off" });
 }
 
 fn cmd(action: CmdAction, paths: &Paths) -> Result<(), String> {
@@ -817,6 +931,11 @@ fn print_status(v: &serde_json::Value, json: bool) {
     }
     if v["commands_running"].as_u64().is_some_and(|n| n > 0) {
         println!("  commands:    {} running (`devid cmd` in a project lists them)", v["commands_running"]);
+    }
+    let mail = &v["mail"];
+    if let Some(state) = mail["state"].as_str().filter(|s| *s != "off") {
+        let unread = mail["unread"].as_u64().map(|n| format!(", {n} unread")).unwrap_or_default();
+        println!("  mail:        {state} on 127.0.0.1:{}{unread} (`devid mail`)", mail["port"]);
     }
     print_php(&v["php"]);
 }

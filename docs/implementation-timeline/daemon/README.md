@@ -29,3 +29,4 @@
 | 2026-11-12 | [A new proxy site gets a free dev server port; `devid cmd <site>` lists (D-042, v0.12.5)](2026-11-12-auto-port.md) |
 | 2026-11-15 | [Fix: ports 80/443 are checked live, and `helper install` undoes `skip on lo0` (D-047)](2026-11-15-pf-lo0-skip.md) |
 | 2026-11-16 | [Fix: a service could stay "starting" for days because a sibling held its exec pipe](2026-11-16-spawn-fd-leak.md) |
+| 2026-11-16 | [Mail in the daemon and the CLI: Devid runs Mailpit (Phase 9 M3, D-049)](2026-11-16-mail-service.md) |

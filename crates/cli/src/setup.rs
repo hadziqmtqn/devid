@@ -319,6 +319,15 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
             let running =
                 s["php"].as_array().is_some_and(|l| l.iter().any(|p| p["default"] == true && p["status"] == "running"));
             check(running, &format!("default PHP {default} runs"), &format!("`devid php install {default}`"));
+            let mail = &s["mail"];
+            if mail["enabled"] == true {
+                let state = mail["state"].as_str().unwrap_or("?");
+                check(
+                    state == "running",
+                    &format!("mail {state} on 127.0.0.1:{}", mail["port"]),
+                    mail["error"].as_str().unwrap_or("`devid start mail`; its log is ~/.devid/log/mailpit.log"),
+                );
+            }
         }
         Err(e) => check(false, "daemon answers", &format!("{e}; or `devid setup`")),
     }

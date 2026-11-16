@@ -35,6 +35,31 @@ pub struct Config {
     /// Per-site changes to the detected app type (D-035): site name -> overrides.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub apps: BTreeMap<String, App>,
+    /// Mail (D-049): Mailpit catches the mail apps send.
+    pub mail: Mail,
+}
+
+/// `[mail]`: whether Devid runs Mailpit (D-049) and how.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Mail {
+    /// Off by default; the first time it is turned on, Mailpit is downloaded.
+    pub enabled: bool,
+    /// SMTP on 127.0.0.1; the inbox and its API use the next port.
+    pub port: u16,
+    /// Messages Mailpit keeps; it deletes the oldest beyond that.
+    pub keep: u32,
+    /// While Mail is on, PHP's mail() goes to Mailpit too (conf.d/devid-mail.ini).
+    pub php_mail: bool,
+    /// The app posts a notification for each new message.
+    pub notify: bool,
+}
+
+impl Default for Mail {
+    fn default() -> Self {
+        // 2525: the port Laravel's .env.example uses.
+        Self { enabled: false, port: 2525, keep: 500, php_mail: true, notify: false }
+    }
 }
 
 /// What the owner changed about one site's app type (D-035). A missing field falls back to
@@ -97,6 +122,7 @@ impl Default for Config {
             autostart: true,
             update_check_minutes: 20,
             apps: BTreeMap::new(),
+            mail: Mail::default(),
         }
     }
 }
@@ -161,6 +187,10 @@ mod tests {
         );
         Config::default().save(&path).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("apps"), "no empty [apps] table");
+
+        fs::write(&path, "[mail]\nenabled = true\n").unwrap();
+        let mail = Config::load_or_create(&path).unwrap().mail;
+        assert!(mail.enabled && mail.port == 2525 && mail.keep == 500 && mail.php_mail, "{mail:?}");
 
         fs::write(&path, "server = [").unwrap();
         assert!(Config::load_or_create(&path).is_err(), "invalid TOML is an error, not silently replaced");

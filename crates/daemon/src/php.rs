@@ -198,6 +198,7 @@ pub fn spec(paths: &Paths, version: &str) -> Spec {
             .chain(crate::phpext::env(paths, version).into_iter().map(|(k, v)| (k, v.into())))
             .collect(),
         pid_file: pid_file(paths, version),
+        write_pid: false,
         comm: "php-fpm",
         stop_signal: libc::SIGQUIT,
     }

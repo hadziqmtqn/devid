@@ -24,8 +24,11 @@ pub struct Spec {
     pub program: PathBuf,
     pub args: Vec<OsString>,
     pub env: Vec<(String, OsString)>,
-    /// Written by the service itself; used to find an orphan left by a dead daemon.
+    /// Written by the service itself, or by the supervisor when `write_pid` is set; used to find an
+    /// orphan left by a dead daemon.
     pub pid_file: PathBuf,
+    /// The service writes no pid file of its own (Mailpit), so the supervisor writes the child's pid.
+    pub write_pid: bool,
     /// Process name that must match before an orphan is signalled (pids get reused).
     pub comm: &'static str,
     /// Graceful stop: SIGQUIT for php-fpm and nginx, SIGTERM for Caddy and Apache
@@ -152,6 +155,9 @@ fn watch(name: &str, slot: &Slot) {
             }
         };
         slot.pid.store(child.id(), Ordering::SeqCst);
+        if slot.spec.write_pid {
+            let _ = fs::write(&slot.spec.pid_file, child.id().to_string());
+        }
         let status = child.wait();
         slot.pid.store(0, Ordering::SeqCst);
         if slot.stop.load(Ordering::SeqCst) {
@@ -290,6 +296,7 @@ mod tests {
             args: vec!["30".into()],
             env: Vec::new(),
             pid_file: PathBuf::new(),
+            write_pid: false,
             comm: "sleep",
             stop_signal: libc::SIGTERM,
         };

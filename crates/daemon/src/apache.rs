@@ -271,6 +271,7 @@ pub fn spec(paths: &Paths) -> Spec {
         args: vec!["-f".into(), conf(paths).into(), "-DFOREGROUND".into()],
         env: Vec::new(),
         pid_file: pid_file(paths),
+        write_pid: false,
         comm: "httpd",
         // SIGTERM stops Apache and its children; it does not handle SIGQUIT.
         stop_signal: libc::SIGTERM,
