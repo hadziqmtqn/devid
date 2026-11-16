@@ -44,7 +44,10 @@ mod tests {
             assert!(who.contains(&format!("pid {}", std::process::id())), "{who}");
         }
         drop(listener);
-        assert!(!in_use(port));
+        // Another test or process can take the freed port at once (this failed a release dry run
+        // on GitHub's arm64 runner), so a few fresh ports may stand in: one must be free.
+        let fresh = (0..5).map(|_| TcpListener::bind("0.0.0.0:0").unwrap().local_addr().unwrap().port());
+        assert!(std::iter::once(port).chain(fresh).any(|p| !in_use(p)), "in_use says yes to every closed port");
         assert_eq!(first_free(|p| p < 8005), (8005..9000).find(|p| !in_use(*p)));
     }
 }
