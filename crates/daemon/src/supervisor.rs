@@ -189,7 +189,31 @@ fn start(spec: &Spec) -> std::io::Result<Child> {
             Ok(())
         });
     }
+    keep_no_fds(&mut cmd);
     cmd.spawn()
+}
+
+/// Makes a long-lived child drop all of the daemon's file descriptors at exec. On macOS, std
+/// marks a new pipe or socket close-on-exec only after creating it, so a child forked by another
+/// thread in between inherits it. If that is another spawn's exec-status pipe, that spawn() blocks
+/// for as long as the child lives: php-fpm 8.4 ran for days while its slot said "starting".
+pub(crate) fn keep_no_fds(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // Read before fork. launchd gives the daemon 256; a shell may allow 60,000, and sweeping
+    // that many would cost about 45 ms per child.
+    // shortcut: fds above 4096 stay inheritable; fine while the daemon holds a few dozen.
+    // SAFETY: getdtablesize has no preconditions.
+    let limit = unsafe { libc::getdtablesize() }.min(4096);
+    // SAFETY: runs between fork and exec, where fcntl is async-signal-safe; it only sets a flag
+    // on fds this process holds.
+    unsafe {
+        cmd.pre_exec(move || {
+            for fd in 3..limit {
+                libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+            }
+            Ok(())
+        });
+    }
 }
 
 /// A service left over from a daemon that died would hold its socket or port; stop it first.
@@ -244,4 +268,39 @@ fn signal(pid: i32, sig: libc::c_int) {
 fn alive(pid: i32) -> bool {
     // SAFETY: signal 0 only checks that the process exists.
     unsafe { libc::kill(pid, 0) == 0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{io::Read, os::fd::FromRawFd, sync::mpsc};
+
+    /// A pipe that another thread has not yet marked close-on-exec must not stay open in a
+    /// service. When it did, that thread's spawn() never returned, and php-fpm 8.4 ran for days
+    /// while its slot still said "starting".
+    #[test]
+    fn a_service_keeps_none_of_the_daemons_fds() {
+        let mut fds = [0; 2];
+        // SAFETY: pipe(2) fills the array with two new fds, owned below.
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        // SAFETY: fds[0] is new and owned by nothing else.
+        let mut read_end = unsafe { fs::File::from_raw_fd(fds[0]) };
+        let spec = Spec {
+            program: "/bin/sleep".into(),
+            args: vec!["30".into()],
+            env: Vec::new(),
+            pid_file: PathBuf::new(),
+            comm: "sleep",
+            stop_signal: libc::SIGTERM,
+        };
+        let mut child = start(&spec).unwrap();
+        // SAFETY: fds[1] is ours and is not used again.
+        unsafe { libc::close(fds[1]) };
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || tx.send(read_end.read_to_end(&mut Vec::new()).map_err(|e| e.to_string())));
+        let eof = rx.recv_timeout(Duration::from_secs(5));
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(matches!(eof, Ok(Ok(0))), "the service kept the daemon's pipe open: {eof:?}");
+    }
 }

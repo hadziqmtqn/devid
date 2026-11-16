@@ -152,6 +152,7 @@ impl Commands {
                 Ok(())
             });
         }
+        crate::supervisor::keep_no_fds(&mut cmd);
         let child = cmd.spawn().map_err(|e| format!("could not start {run:?}: {e}"))?;
         let pgid = child.id() as i32;
         let pid_file = self.pid_file(site, name);
