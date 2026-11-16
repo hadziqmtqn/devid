@@ -660,17 +660,19 @@ function mailView(item) {
         meta('From', person(msg.from)),
         meta('To', msg.to.map(person).join(', ') || '—'),
         msg.cc.length ? meta('Cc', msg.cc.map(person).join(', ')) : null,
-        meta('Date', [longTime(msg.date), humanSize(msg.size)].filter(Boolean).join(' · '))) : null,
-      msg?.attachments.length ? h('div.mx-atts', {}, msg.attachments.map((a) => h('div.mx-att', {}, icon('file'),
-        h('span.dv-strong.dv-ellipsis', {}, a.name || 'attachment'), h('span.dv-sub', {}, humanSize(a.size)),
-        h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Save ' + (a.name || 'the attachment') + ' to Downloads', title: 'Save to Downloads',
-          onclick: () => saveAttachment(id, a) }, icon('download'))))) : null),
+        meta('Date', [longTime(msg.date), humanSize(msg.size)].filter(Boolean).join(' · '))) : null),
     h('div.mx-bar', {},
       h('div.dv-seg', { role: 'group', 'aria-label': 'View' }, [['preview', 'Preview'], ['text', 'Text'], ['headers', 'Headers'], ['raw', 'Raw']].map(([k, label]) =>
         h('button', { type: 'button', 'aria-pressed': String(I.tab === k), onclick: () => pickTab(k) }, label))),
       h('span.dv-grow'),
       h('button.dv-btn.ghost', { type: 'button', onclick: () => openMailpit(id) }, 'Open in Mailpit', icon('open'))),
-    mailContent());
+    mailContent(),
+    // Below the message, always in view: the email itself scrolls in its frame.
+    msg?.attachments.length ? h('div.mx-atts', { role: 'group', 'aria-label': plural(msg.attachments.length, 'attachment') },
+      msg.attachments.map((a) => h('div.mx-att', {}, icon('file'),
+        h('span.dv-strong.dv-ellipsis', {}, a.name || 'attachment'), h('span.dv-sub', {}, humanSize(a.size)),
+        h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Save ' + (a.name || 'the attachment') + ' to Downloads', title: 'Save to Downloads',
+          onclick: () => saveAttachment(id, a) }, icon('download'))))) : null);
 }
 
 function mailContent() {

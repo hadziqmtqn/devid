@@ -6,7 +6,8 @@
 
 - **The Mail page is the inbox** while Mail runs, as on the boards "Mail · Inbox" and "Mail · Inbox, empty":
   - **Left:** the messages, newest first, with an unread dot, the time, the subject, the recipients and a paperclip; a search field (Mailpit's search) and All or Unread. A message opened in the Unread view stays listed after it is read, as in Mail.
-  - **Right:** the open message with Mark as read or unread, Delete, From, To, Cc, Date and size, its attachments (saved to ~/Downloads), and the tabs Preview, Text, Headers and Raw. Open in Mailpit opens it in the browser.
+  - **Right:** the open message with Mark as read or unread, Delete, From, To, Cc, Date and size, and the tabs Preview, Text, Headers and Raw. Open in Mailpit opens it in the browser.
+  - **Attachments** sit below the message, always in view, since the email scrolls in its frame; each one saves to ~/Downloads. The owner moved them there from the header after a first look.
   - **Empty:** "No mail yet" with the `.env` lines, Send test email and Mail settings.
   - **Toolbar:** Send test email, and ⋯ with Mark all as read, Open inbox in Mailpit, Mail settings… and Delete all….
   - **Keys:** ↑ and ↓ move through the list; Delete or Backspace deletes the open message.
