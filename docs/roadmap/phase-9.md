@@ -87,9 +87,23 @@ The design is on the canvas page "0.15.x" (`https://claude.ai/artifact/TS8URDyBe
 
 ### Stage 2 (M6)
 
-- The app reads Mailpit's API through a Tauri command limited to `/api/v1/` and `/view/` at the inbox URL from `status`, so the window's CSP stays as it is.
-- A message's HTML is shown in a sandboxed frame with scripts off, and its links open in the browser.
-- New mail arrives over Mailpit's `/api/events`.
+As planned when stage 2 started (2026-11-16); it replaces the first sketch, a Tauri command that called Mailpit's API itself. Two PRs:
+
+- **M6a, daemon and CLI:**
+  - New requests, so the app, the CLI and the TUI all go through the daemon (D-012):
+    - `mail_list` (newest first, Mailpit's search, unread only);
+    - `mail_message` (sender, recipients, subject, date, text, HTML, attachments; Mailpit marks it read);
+    - `mail_headers`, and `mail_raw` (cut at 512 KB);
+    - `mail_read` (read or unread; no IDs: all), `mail_delete`, and `mail_save` (an attachment to ~/Downloads under a safe name that never overwrites).
+  - Message IDs must be letters and digits, so a client cannot reach another API path.
+  - CLI: `devid mail list [query] [--unread]`, `devid mail show <id>`, `devid mail delete <id>…`, `devid mail save <id> <part>`.
+- **M6b, the app:**
+  - The inbox as on the boards "Mail · Inbox" and "Mail · Inbox, empty". New mail appears with the window's 2 s refresh, which is cheaper than a WebSocket for a page that is only open now and then.
+  - **Isolation:** Mailpit's `/view/<id>.html` is the email's own HTML, `<script>` included. The app shows it through its own `mailview:` URL scheme:
+    - the scheme's reply carries its own CSP: no scripts; styles, fonts and images allowed;
+    - it is shown in a sandboxed iframe;
+    - links go to the browser through Tauri's `on_new_window`.
+    - The window's CSP only gains `frame-src mailview:`.
 
 ## Milestones
 

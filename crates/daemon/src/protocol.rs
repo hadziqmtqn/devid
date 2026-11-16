@@ -223,6 +223,43 @@ pub enum Request {
     MailTest,
     /// Delete every message in Mailpit.
     MailClear,
+    /// The newest messages, or those matching `query` (Mailpit's search: words, from:, to:, subject:,
+    /// has:attachment…); `unread` keeps only unread ones.
+    MailList {
+        #[serde(default)]
+        query: String,
+        #[serde(default)]
+        unread: bool,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    /// One message: sender, recipients, subject, date, text, HTML and attachments. Mailpit marks it read.
+    MailMessage {
+        id: String,
+    },
+    /// One message's headers.
+    MailHeaders {
+        id: String,
+    },
+    /// One message's source as it arrived (cut at 512 KB).
+    MailRaw {
+        id: String,
+    },
+    /// Mark messages read or unread; no IDs: all of them.
+    MailRead {
+        #[serde(default)]
+        ids: Vec<String>,
+        read: bool,
+    },
+    /// Delete messages (`MailClear` deletes all).
+    MailDelete {
+        ids: Vec<String>,
+    },
+    /// Save one attachment to ~/Downloads; the reply has its path.
+    MailSave {
+        id: String,
+        part: String,
+    },
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

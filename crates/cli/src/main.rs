@@ -223,6 +223,25 @@ enum MailAction {
     Open,
     /// Delete all mail
     Clear,
+    /// List the newest mail, or what matches a search (words, from:, to:, subject:, has:attachment…)
+    List {
+        query: Vec<String>,
+        /// Only unread mail
+        #[arg(long)]
+        unread: bool,
+        /// How many to list (default 20)
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+    },
+    /// Show one message: who sent it, to whom, its attachments and its text (marks it read)
+    Show { id: String },
+    /// Delete messages by ID
+    Delete {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
+    /// Save an attachment to ~/Downloads: `devid mail save <id> <part>` (`show` lists the parts)
+    Save { id: String, part: String },
 }
 
 #[derive(Subcommand)]
@@ -640,6 +659,85 @@ fn mail(action: Option<MailAction>, paths: &Paths) -> Result<(), String> {
             Ok(())
         }
         Some(MailAction::Clear) => send(Request::MailClear).map(|_| println!("deleted all mail")),
+        Some(MailAction::List { query, unread, limit }) => {
+            let v = send(Request::MailList { query: query.join(" "), unread, limit: Some(limit) })?;
+            print_mail_list(&v);
+            Ok(())
+        }
+        Some(MailAction::Show { id }) => send(Request::MailMessage { id }).map(|v| print_message(&v["message"])),
+        Some(MailAction::Delete { ids }) => send(Request::MailDelete { ids })
+            .map(|v| println!("deleted {}", plural(v["deleted"].as_u64().unwrap_or(0), "message"))),
+        Some(MailAction::Save { id, part }) => {
+            send(Request::MailSave { id, part }).map(|v| println!("saved {}", v["path"].as_str().unwrap_or("?")))
+        }
+    }
+}
+
+fn plural(n: u64, word: &str) -> String {
+    format!("{n} {word}{}", if n == 1 { "" } else { "s" })
+}
+
+/// "2026-11-16 21:46" from Mailpit's "2026-11-16T21:46:29.965+07:00".
+fn short_time(v: &serde_json::Value) -> String {
+    v.as_str().map(|t| t.chars().take(16).collect::<String>().replace('T', " ")).unwrap_or_default()
+}
+
+/// `devid mail list`: one line per message, unread ones marked with *.
+fn print_mail_list(v: &serde_json::Value) {
+    let shown = v["messages"].as_array().map_or(0, Vec::len) as u64;
+    let count = v["count"].as_u64().unwrap_or(shown);
+    let more = if count > shown { format!(", the newest {shown} here") } else { String::new() };
+    println!("{}{more} · {} unread in all", plural(count, "message"), v["unread"]);
+    for m in v["messages"].as_array().into_iter().flatten() {
+        let to: Vec<&str> = m["to"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).collect();
+        let files = match m["attachments"].as_u64().unwrap_or(0) {
+            0 => String::new(),
+            n => format!(" [{}]", plural(n, "file")),
+        };
+        println!(
+            "{} {}  {}  {} → {}: {}{files}",
+            if m["read"] == false { "*" } else { " " },
+            short_time(&m["created"]),
+            m["id"].as_str().unwrap_or("?"),
+            m["from"].as_str().unwrap_or("?"),
+            to.join(", "),
+            m["subject"].as_str().unwrap_or(""),
+        );
+    }
+    if shown > 0 {
+        println!("`devid mail show <id>` reads one.");
+    }
+}
+
+/// `devid mail show`: the header lines, the attachments, then the text.
+fn print_message(m: &serde_json::Value) {
+    let person = |p: &serde_json::Value| match (p["name"].as_str().filter(|n| !n.is_empty()), p["address"].as_str()) {
+        (Some(name), Some(address)) => format!("{name} <{address}>"),
+        (_, Some(address)) => address.to_string(),
+        _ => "?".into(),
+    };
+    let list = |v: &serde_json::Value| v.as_array().into_iter().flatten().map(person).collect::<Vec<_>>().join(", ");
+    println!("From:     {}", person(&m["from"]));
+    println!("To:       {}", list(&m["to"]));
+    if m["cc"].as_array().is_some_and(|c| !c.is_empty()) {
+        println!("Cc:       {}", list(&m["cc"]));
+    }
+    println!("Date:     {}", short_time(&m["date"]));
+    println!("Subject:  {}", m["subject"].as_str().unwrap_or(""));
+    for a in m["attachments"].as_array().into_iter().flatten() {
+        println!(
+            "File:     {} {} ({}); `devid mail save {} {}`",
+            a["part"].as_str().unwrap_or("?"),
+            a["name"].as_str().unwrap_or("?"),
+            crate::tui::human_size(a["size"].as_u64().unwrap_or(0)),
+            m["id"].as_str().unwrap_or("?"),
+            a["part"].as_str().unwrap_or("?"),
+        );
+    }
+    println!();
+    match m["text"].as_str().filter(|t| !t.trim().is_empty()) {
+        Some(text) => println!("{}", text.trim_end()),
+        None => println!("(This message has only HTML: open it in Devid's inbox, or `devid mail open`.)"),
     }
 }
 

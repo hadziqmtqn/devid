@@ -5,6 +5,8 @@ mod app;
 mod ui;
 
 use crate::request;
+/// Sizes as the TUI shows them, for `devid mail show` too.
+pub(crate) use app::human_size;
 use app::{Action, App, Effect};
 use devid_daemon::{paths::Paths, protocol::Request};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
