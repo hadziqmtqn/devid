@@ -37,7 +37,7 @@ On 2026-11-15:
 
 ## Proposed opportunities for Devid
 
-Ordered by value for the effort. All proposed; none accepted.
+Ordered by value for the effort. All proposed, except the first: the owner accepted a mail catcher on 2026-11-16 as D-049, with Mailpit instead of a listener of our own (Phase 9).
 
 1. **A free mail catcher.** Herd Pro, ServBay Pro and MAMP PRO charge for it. An SMTP listener in the daemon that already runs, with the mail shown in the app and the TUI. Reverses part of D-011, which deferred it from v1.
 2. **A Node.js version per site** from `.nvmrc` or `.node-version`, using the versions already installed by nvm, fnm or volta, without shell hooks.

@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-049 | 2026-11-16 | accepted (Phase 9; schedules D-011's deferred mail catcher) | Mail: Devid ships the official Mailpit build and runs it when Mail is on (off by default); 0.15.0 opens Mailpit's inbox in the browser, a later 0.15.x shows the inbox in the app |
 | D-048 | 2026-11-16 | accepted (amends D-027, D-039) | The desktop app restarts through LaunchServices (`open -n`), not by replacing itself with `exec` |
 | D-047 | 2026-11-15 | accepted (amends D-014) | Ports 80/443 are checked live, since another app can switch pf off on loopback; `devid helper install` undoes that |
 | D-046 | 2026-11-14 | accepted (completes D-044, amends D-010) | Apple silicon: every build is native on its own GitHub runner, and a release is smoke-tested with the real PHP and nginx on both arches before it is published |
@@ -780,3 +781,25 @@ See ARCHITECTURE, "PHP runtime".
 - **Not now:** keeping `exec` and sending the app an event from LaunchServices after the restart. That would be a workaround for one symptom of a behavior Apple does not document.
 - **Limit:** the fix ships in the app that an update replaces. The update from 0.14.0 still runs 0.14.0's `exec`. If the app does not come back after it, opening Devid again from Spotlight or `~/Applications` brings it back.
 - **Accepted:** by the owner, who merged #89 on 2026-11-16.
+
+## D-049: Mail: Devid runs Mailpit to catch the mail that apps send (accepted 2026-11-16, schedules D-011's deferred mail catcher)
+
+- **Context:**
+  - D-011 deferred the mail catcher until v1 was in daily use, which it now is (v0.14.1). D-037 kept it deferred because the owner already runs Mailpit; on 2026-11-16 the owner asked for it in Devid.
+  - Herd Pro ($99 a year), ServBay Pro and MAMP PRO charge for mail capture. Sail, DDEV, EnvKit and MAMP 7.5 ship Mailpit (`docs/research/competitors-2026-11.md`).
+  - The owner already runs Mailpit 1.33.0 by hand: `~/.local/bin/mailpit`, started by a LaunchAgent, on 127.0.0.1:1025 (SMTP) and 8025 (web). After 34 hours it used 8.4 MB RSS and 2.25 s of CPU in total.
+  - A catcher of our own in the daemon would save a process. But SMTP, MIME parsing and an inbox page are far more work than Mailpit already does, for less.
+- **Decision:**
+  - Devid ships Mailpit's official macOS builds (MIT license) in its runtime release, mirrored without a rebuild like Caddy, and the daemon runs Mailpit under its supervisor while Mail is on.
+  - Mail is off by default. Turning it on downloads Mailpit (11 MB); nothing runs before that.
+  - Mailpit listens on 127.0.0.1 only, with an allowlist for the Host header, no update check and no relay. SMTP is on 2525 by default (what Laravel's `.env.example` uses), and the inbox and its API on the next port.
+  - While Mail runs, PHP's `mail()` lands in it too: Devid's PHP gets a `sendmail_path` that pipes to Mailpit (a setting, on by default).
+  - Two stages, as designed on the canvas page "0.15.x", which the owner approved on 2026-11-16:
+    - Stage 1, 0.15.0: Mail in the daemon, the CLI (`devid mail`), the TUI and the app, with on/off, status, settings, the `.env` lines and the quick menu. "Open inbox" opens Mailpit's own page in the browser.
+    - Stage 2, a later 0.15.x: the inbox inside the app, over Mailpit's API.
+- **Consequences:**
+  - One more component to mirror and update. Mailpit releases often, so Devid pins the version it ships, as it does for Caddy.
+  - With Mail on: about 16 MB RSS at rest and 25 MB with 200 messages, with no idle CPU measured (Phase 9, M1). With Mail off, nothing changes.
+  - The owner's own Mailpit can keep its ports. Removing it is the owner's choice once Devid's Mail is in use.
+- **Not now:** a dump viewer (the rest of D-011's deferral), an inbox per site (Mailpit stores each message's SMTP user name, so a site that sets `MAIL_USERNAME` could be told apart), and relaying mail to a real server.
+- **Accepted:** by the owner on 2026-11-16, with the two stages and the canvas prototype.
