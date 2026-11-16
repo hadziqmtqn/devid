@@ -27,7 +27,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 struct State {
@@ -697,7 +697,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         | Request::MailDelete { .. }
         | Request::MailSave { .. } => {
             let config = state.config.lock().unwrap().clone();
-            if !matches!(state.supervisor.state().get(mail::SERVICE), Some(ProcState::Running(_))) {
+            if !wait_running(state, mail::SERVICE) {
                 return Err(match config.mail.enabled {
                     true => "Mail is not running; `devid start mail` starts it".into(),
                     false => "Mail is off; `devid mail on` turns it on".into(),
@@ -1087,7 +1087,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                  connect-networks/downloads/ (Devid uses an existing one and does not download it).",
             )?;
             let config = state.config.lock().unwrap().clone();
-            if !matches!(state.supervisor.state().get(&config.server), Some(ProcState::Running(_))) {
+            if !wait_running(state, &config.server) {
                 return Err(format!("{} is not running; start it first (`devid start all`)", config.server));
             }
             // Plain HTTP to the web server with the site's Host; cloudflared serves it over HTTPS.
@@ -1544,6 +1544,24 @@ fn mail_request(req: Request, m: &crate::config::Mail) -> Result<Value, String> 
     }
 }
 
+/// Whether `service` runs. The supervisor starts each service on its own thread, so a request right
+/// after an install, `devid start` or `mail on` can find it still starting; wait for that, up to 5 s.
+fn wait_running(state: &State, service: &str) -> bool {
+    settled_running(|| state.supervisor.state().get(service).cloned(), Duration::from_secs(5))
+}
+
+/// Polls `state` until it is no longer starting or `limit` has passed; whether it then runs.
+fn settled_running(state: impl Fn() -> Option<ProcState>, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        match state() {
+            Some(ProcState::Running(_)) => return true,
+            Some(ProcState::Starting) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            _ => return false,
+        }
+    }
+}
+
 /// Ports Mail may not take: Devid's own, and those sites use (local ports, dev servers).
 fn mail_taken(config: &Config, sites: &[Site]) -> Vec<(u16, String)> {
     let mut taken = vec![
@@ -1811,6 +1829,26 @@ fn check_updates(state: &State) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_starting_service_is_waited_for() {
+        use super::{Duration, Instant, ProcState, settled_running};
+        let seq = |states: Vec<Option<ProcState>>| {
+            let left = std::cell::RefCell::new(states);
+            move || {
+                let mut l = left.borrow_mut();
+                if l.len() > 1 { l.remove(0) } else { l[0].clone() }
+            }
+        };
+        let long = Duration::from_secs(5);
+        let starting = || Some(ProcState::Starting);
+        assert!(settled_running(seq(vec![starting(), starting(), Some(ProcState::Running(7))]), long), "it started");
+        assert!(!settled_running(seq(vec![starting(), Some(ProcState::Failed)]), long), "it failed");
+        assert!(!settled_running(seq(vec![None]), long), "not a service");
+        let start = Instant::now();
+        assert!(!settled_running(seq(vec![starting()]), Duration::from_millis(200)), "still starting");
+        assert!(start.elapsed() < Duration::from_secs(2), "the limit holds");
+    }
+
     #[test]
     fn share_avoids_pfs_redirect_target() {
         assert_eq!(super::share_origin(Some(8000), true, 8088), 8000, "the site's own local port first");
