@@ -103,9 +103,14 @@ pub fn open_window(app: &AppHandle, page: Option<&'static str>) {
         env!("CARGO_PKG_VERSION"),
         page.unwrap_or("")
     ));
-    // System Settings look: the sidebar runs under the traffic lights.
+    // System Settings look: the sidebar runs under the traffic lights, centred in the 52 px
+    // toolbar row as on the design canvas (circles at 13, 19). wry puts the 14×16 buttons at
+    // (x, y - 6), and each 12 px circle sits 1 px in and 2 px down (measured on macOS 14).
     #[cfg(target_os = "macos")]
-    let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(12.0, 23.0));
     match builder.build() {
         Ok(window) => {
             let _ = window.set_focus();
