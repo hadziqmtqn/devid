@@ -83,13 +83,14 @@ Implemented in M7:
   - its own `httpd.conf` (never `/etc/apache2`) with the module list from the spike, `127.0.0.1` listeners, and a 404 default vhost for HTTP;
   - it is validated with `httpd -t`, reloaded gracefully with SIGUSR1, and stopped with SIGTERM.
   - `shortcut:` the first HTTPS vhost also answers unknown hosts.
-- **`Spec.stop_signal`:** the supervisor stops each service with its own graceful signal: SIGQUIT for php-fpm and nginx, SIGTERM for Caddy and Apache.
+- **`Spec.stop_signal`:** the supervisor stops each service with its own graceful signal: SIGQUIT for php-fpm and nginx, SIGTERM for Caddy, Apache and Mailpit.
+- **`Spec.write_pid`:** for a service that writes no pid file of its own (Mailpit), the supervisor writes the child's pid to `pid_file`, so the next daemon can stop an orphan. Caddy writes none either and does not use it yet.
 - **Version probes** for `server install` time out after 5 s, so a wrong binary cannot hang the daemon.
 
 Implemented in Phase 5 R3:
 - **`daemon::releases`** reads `manifest.json` from `https://github.com/hadziqmtqn/devid-binaries/releases/download/runtime-latest/` (D-016; `releases/latest/download/` before D-038). It refuses any artifact URL outside that repository's release downloads, downloads with `curl --proto =https`, verifies SHA-256 (with `ring`, already in the tree) before unpacking, and removes the archive and the unpacked folder after installing. `DEVID_MANIFEST_URL` overrides the location for tests (`file://`).
 - `devid php install <ver>` and `devid server install <nginx|caddy>` download from the manifest when `--from` is omitted. `--from` still installs a local build.
-- `devid update [--check]` compares the installed PHP versions (`PHP_VERSION`), nginx and Caddy with the manifest and installs the newer ones through the same path, restarting the affected service.
+- `devid update [--check]` compares the installed PHP versions (`PHP_VERSION`), nginx, Caddy and Mailpit with the manifest and installs the newer ones through the same path, restarting the affected service.
 - **Update progress (2026-11-14):**
   - `update` first plans every change, then installs them one at a time. The order is each PHP version, then its changed catalog extensions, then nginx and Caddy. Each change in the reply carries its download `size` from the manifest.
   - While it installs, `update_progress` answers:
@@ -238,3 +239,17 @@ Implemented in T5:
 - **Requests and CLI:** `command_add`, `command_remove`, `command_start`, `command_stop`; `devid cmd [list|add|rm|start|stop]`. The `sites` reply carries each command's state and suggestions from `package.json` and Laravel; `status` lists `running_commands` for the menu bar.
 - **Share (A6, D-037):** `share_start` runs an existing `cloudflared tunnel --url http://127.0.0.1:<http_port> --http-host-header <site>.<tld>` as the site's `.share` command entry and reads its `trycloudflare.com` URL from `share-<site>.log`; `share_stop` ends it. `sites` reports `share` per site, `status` the `shares`.
 - **Desktop app (A5):** a site's detail view (type, serving, local port, commands with their log) and the menu bar's running commands with Stop; every action is a daemon request the CLI also sends.
+
+## Mail (Phase 9 M3, D-049)
+
+- **What it does:** the daemon runs Mailpit, so the mail apps send lands in an inbox on this Mac. Off by default; `[mail]` in `config.toml` holds `enabled`, `port` (SMTP, default 2525), `keep` (500), `php_mail` (on) and `notify` (off). The inbox and its API listen on `port + 1`.
+- **`daemon::mail`:**
+  - The first `mail_set {enabled: true}` downloads the `mailpit` artifact from the runtime release (sha256 checked) to `~/.devid/mailpit/bin/mailpit` and records its version in `~/.devid/mailpit/version`.
+  - The `mail` service runs `mailpit --smtp 127.0.0.1:<port> --listen 127.0.0.1:<port+1> --allowed-hosts 127.0.0.1:<port+1>,localhost:<port+1> --database ~/.devid/mail/mailpit.db --max <keep> --log-file ~/.devid/log/mailpit.log --disable-version-check --smtp-disable-rdns --smtp-auth-accept-any --smtp-auth-allow-insecure`. The Host allowlist keeps a web page from reading the inbox through DNS rebinding.
+  - Its orphan check matches `mailpit/bin/mailpit`, so a Mailpit the user runs elsewhere (`~/.local/bin`, Homebrew) is never signalled.
+  - **PHP's `mail()`:** while Mail is on with `php_mail`, every installed PHP gets `etc/conf.d/devid-mail.ini` with `sendmail_path` set to Mailpit's sendmail mode; `apply` restarts each php-fpm whose file changed. The CLI shim reads the same `conf.d`.
+  - **API calls:** HTTP/1.0 over a `TcpStream` to 127.0.0.1 (no HTTP client in the daemon): `/api/v1/info` for `status`, `DELETE /api/v1/messages` for `mail_clear`. `mail_test` speaks SMTP to Mailpit, as an app would.
+- **Ports:** `mail_set` refuses a port below 1024 or 65535, Devid's own ports, a site's local or dev server port, and one another program listens on (with its holder from `lsof`). A Mailpit that fails at start reports the holder of its port in `status`.
+- **Service:** `mail` is in `services()` while Mail is on, so `devid stop|start mail`, Stop all and Start all cover it, and it waits for `start all` when `autostart` is off. Turning Mail on clears a `stop mail`.
+- **Requests and CLI:** `mail_set`, `mail_test`, `mail_clear`; `status` carries `mail` (state, pid, version, ports, inbox URL, counts, settings, error). `devid mail [on|off|port|keep|php-mail|notify|test|open|clear]`; `devid status` prints a `mail:` line; `devid doctor` checks a Mail that is on.
+- **Updates:** `plan_updates` compares the recorded version with the release's, like nginx and Caddy, and installs a newer Mailpit, which then restarts.

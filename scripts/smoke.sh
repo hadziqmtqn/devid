@@ -50,3 +50,23 @@ case "$got" in
   "$want"*" $(uname -m)") echo "smoke test passed on $(uname -m)" ;;
   *) echo "FAIL: expected '$want<patch> $(uname -m)'" >&2; exit 1 ;;
 esac
+
+# Mail (D-049), once the runtime release has Mailpit: the real Mailpit on spare ports catches a test
+# email and one from PHP's mail(), and refuses a foreign Host header (DNS rebinding).
+"$DEVID" mail port 28525 > /dev/null
+if out="$("$DEVID" mail on 2>&1)"; then
+  "$DEVID" mail test
+  PHPRC="$DEVID_HOME/php/8.5/etc" PHP_INI_SCAN_DIR="$DEVID_HOME/php/8.5/etc/conf.d" "$DEVID_HOME/php/8.5/bin/php" \
+    -r 'mail("smoke@example.com", "PHP mail() smoke", "hello", "From: smoke@example.com") || exit(1);'
+  for _ in $(seq 50); do "$DEVID" mail | grep -q 'messages:    2,' && break; sleep 0.2; done
+  "$DEVID" mail
+  "$DEVID" mail | grep -q 'messages:    2,' || { echo "FAIL: Mail did not catch both messages" >&2; exit 1; }
+  code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' http://127.0.0.1:28526/api/v1/info)"
+  [ "$code" = 403 ] || { echo "FAIL: Mail's inbox answered a foreign Host with $code" >&2; exit 1; }
+  echo "mail smoke test passed on $(uname -m)"
+else
+  case "$out" in
+    *"has no Mailpit"*) echo "mail smoke test skipped: the runtime release has no Mailpit yet" ;;
+    *) echo "$out" >&2; exit 1 ;;
+  esac
+fi

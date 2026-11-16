@@ -205,6 +205,24 @@ pub enum Request {
     /// Before a restart Devid does itself (`devid setup`, also run by `self-update`): note the
     /// running commands so the next daemon starts them again (D-040). Not shares.
     RememberRunning,
+    /// Mail settings (D-049); a field left out stays as it is. The first time Mail is turned on,
+    /// Mailpit is downloaded from the release.
+    MailSet {
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        port: Option<u16>,
+        #[serde(default)]
+        keep: Option<u32>,
+        #[serde(default)]
+        php_mail: Option<bool>,
+        #[serde(default)]
+        notify: Option<bool>,
+    },
+    /// Send a test message to Mailpit over SMTP.
+    MailTest,
+    /// Delete every message in Mailpit.
+    MailClear,
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

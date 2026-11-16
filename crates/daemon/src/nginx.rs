@@ -307,6 +307,7 @@ pub fn spec(paths: &Paths) -> Spec {
         ],
         env: Vec::new(),
         pid_file: pid_file(paths),
+        write_pid: false,
         comm: "nginx",
         stop_signal: libc::SIGQUIT,
     }

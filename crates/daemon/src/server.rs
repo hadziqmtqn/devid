@@ -4,7 +4,7 @@ use crate::{
     ca,
     commands::{self, Commands},
     config::{App, AppCommand, Config},
-    dns, helper, install, logs, nginx,
+    dns, helper, install, logs, mail, nginx,
     paths::Paths,
     php, phpext, ports,
     protocol::Request,
@@ -155,6 +155,9 @@ impl State {
         if webserver::installed(&self.paths, &config.server) {
             out.insert(config.server.clone());
         }
+        if config.mail.enabled && mail::installed(&self.paths) {
+            out.insert(mail::SERVICE.into());
+        }
         out
     }
 
@@ -210,11 +213,25 @@ impl State {
             }
             wanted.insert(server.into(), webserver::spec(&self.paths, server));
         }
+        // Mail (D-049): Mailpit while it is on, and PHP's mail() into it.
+        let mail_on = config.mail.enabled && mail::installed(&self.paths);
+        let ini_changed = mail::sync_php(&self.paths, (mail_on && config.mail.php_mail).then_some(config.mail.port))
+            .map_err(|e| format!("PHP's mail() setting: {e}"))?;
+        if mail_on {
+            fs::create_dir_all(mail::data(&self.paths)).map_err(|e| e.to_string())?;
+            wanted.insert(mail::SERVICE.into(), mail::spec(&self.paths, &config.mail));
+        }
         {
             let paused = self.paused.lock().unwrap();
             wanted.retain(|name, _| !paused.contains(name));
         }
         self.supervisor.reconcile(&wanted);
+        // php-fpm reads conf.d only when it starts, so one that already ran restarts.
+        for name in ini_changed.iter().map(|v| php_service(v)) {
+            if wanted.contains_key(&name) && matches!(states.get(&name), Some(ProcState::Running(_))) {
+                self.supervisor.restart(&name);
+            }
+        }
         // A just-started php-fpm needs a moment to create its socket; reloading nginx or replying
         // before that gives the first request a 502.
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
@@ -523,6 +540,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                     .filter(|(_, n)| n == commands::SHARE)
                     .map(|(site, _)| json!({"site": site, "url": share_state(state, &site)["url"]}))
                     .collect::<Vec<_>>(),
+                "mail": mail_status(state, &config),
             }))
         }
         Request::Stop => {
@@ -625,6 +643,61 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             let config = state.config.lock().unwrap();
             state.apply(&config)?;
             Ok(json!({"ok": true}))
+        }
+        Request::MailSet { enabled, port, keep, php_mail, notify } => {
+            if let Some(k) = keep
+                && !(1..=100_000).contains(&k)
+            {
+                return Err(format!("keep {k}: use 1 to 100000 messages"));
+            }
+            if enabled == Some(true) {
+                // The first time, Mailpit is downloaded: outside the config lock, as that takes a while.
+                if !mail::installed(&state.paths) {
+                    install_mail(state, None, &|| {})?;
+                }
+                // Turning Mail on means running it, even after `devid stop mail`.
+                state.paused.lock().unwrap().remove(mail::SERVICE);
+            }
+            let running = matches!(state.supervisor.state().get(mail::SERVICE), Some(ProcState::Running(_)));
+            state.mutate(|c, sites| {
+                let was = c.mail.clone();
+                let m = &mut c.mail;
+                m.enabled = enabled.unwrap_or(m.enabled);
+                m.port = port.unwrap_or(m.port);
+                m.keep = keep.unwrap_or(m.keep);
+                m.php_mail = php_mail.unwrap_or(m.php_mail);
+                m.notify = notify.unwrap_or(m.notify);
+                let m = c.mail.clone();
+                if m.enabled && (m.port != was.port || !was.enabled) {
+                    mail::check_port(m.port, &mail_taken(c, sites))?;
+                    // The ports this Mailpit holds now are its own; another program's are not free.
+                    let own = if running { vec![was.port, mail::inbox_port(&was)] } else { Vec::new() };
+                    for p in [m.port, mail::inbox_port(&m)] {
+                        if !own.contains(&p) && ports::in_use(p) {
+                            let who = ports::holder(p).unwrap_or_else(|| "another program".into());
+                            return Err(format!("port {p} is in use by {who}"));
+                        }
+                    }
+                }
+                Ok(json!({"ok": true, "mail": {"enabled": m.enabled, "port": m.port, "inbox_url": mail::inbox_url(&m),
+                          "keep": m.keep, "php_mail": m.php_mail, "notify": m.notify}}))
+            })
+        }
+        Request::MailTest | Request::MailClear => {
+            let config = state.config.lock().unwrap().clone();
+            if !matches!(state.supervisor.state().get(mail::SERVICE), Some(ProcState::Running(_))) {
+                return Err(match config.mail.enabled {
+                    true => "Mail is not running; `devid start mail` starts it".into(),
+                    false => "Mail is off; `devid mail on` turns it on".into(),
+                });
+            }
+            if req == Request::MailTest {
+                mail::send_test(&config.mail).map_err(|e| format!("test email: {e}"))?;
+                Ok(json!({"ok": true, "to": "test@example.com", "inbox_url": mail::inbox_url(&config.mail)}))
+            } else {
+                mail::clear(&config.mail).map_err(|e| format!("deleting the mail: {e}"))?;
+                Ok(json!({"ok": true}))
+            }
         }
         Request::Logs => Ok(json!({"ok": true, "logs": logs::list(&state.paths)})),
         Request::LogRead { name, offset } => {
@@ -1401,6 +1474,82 @@ fn install_server(
     state.apply(&config)
 }
 
+/// Download Mailpit from the release (sha256 checked) and put it in place (D-049); a running Mailpit
+/// restarts on the new binary.
+fn install_mail(state: &State, manifest: Option<&Value>, on_downloaded: &dyn Fn()) -> Result<(), String> {
+    let fetched;
+    let manifest = match manifest {
+        Some(m) => m,
+        None => {
+            fetched = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
+            &fetched
+        }
+    };
+    let artifact = releases::artifact(manifest, "mailpit", None)
+        .ok_or("Devid's release has no Mailpit for this Mac yet; try again after the next runtime release")?;
+    let dir = releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?;
+    on_downloaded();
+    let result = mail::install(&state.paths, &dir.join("mailpit")).map_err(|e| e.to_string());
+    let _ = fs::remove_dir_all(&dir);
+    result?;
+    state.supervisor.restart(mail::SERVICE);
+    Ok(())
+}
+
+/// Ports Mail may not take: Devid's own, and those sites use (local ports, dev servers).
+fn mail_taken(config: &Config, sites: &[Site]) -> Vec<(u16, String)> {
+    let mut taken = vec![
+        (config.http_port, "Devid's HTTP port".to_string()),
+        (config.https_port, "Devid's HTTPS port".to_string()),
+        (config.dns_port, "Devid's DNS port".to_string()),
+    ];
+    for s in sites {
+        if let Some(p) = s.port {
+            taken.push((p, format!("the local port of {}.{}", s.name, config.tld)));
+        }
+        if s.mode == Mode::Proxy {
+            taken.push((s.upstream, format!("the dev server port of {}.{}", s.name, config.tld)));
+        }
+    }
+    taken
+}
+
+/// Mail's settings and state for `status` (D-049). While Mailpit runs, its version and the message
+/// and unread counts come from Mailpit itself.
+fn mail_status(state: &State, config: &Config) -> Value {
+    let m = &config.mail;
+    let installed = mail::installed(&state.paths);
+    let paused = state.paused.lock().unwrap().contains(mail::SERVICE);
+    let (status, pid) = match state.supervisor.state().get(mail::SERVICE) {
+        _ if !m.enabled => ("off", None),
+        _ if !installed => ("not installed", None),
+        Some(ProcState::Running(pid)) => ("running", Some(*pid)),
+        Some(ProcState::Starting) => ("starting", None),
+        Some(ProcState::Failed) => ("failed", None),
+        None if paused => ("paused", None),
+        None => ("stopped", None),
+    };
+    let info = if status == "running" { mail::info(m) } else { None };
+    // Why it failed: most often another program on one of its ports.
+    let error = (status == "failed").then(|| {
+        [m.port, mail::inbox_port(m)]
+            .into_iter()
+            .find(|p| ports::in_use(*p))
+            .map(|p| format!("port {p} is in use by {}", ports::holder(p).unwrap_or_else(|| "another program".into())))
+            .unwrap_or_else(|| format!("Mailpit keeps stopping; see {}", mail::log(&state.paths).display()))
+    });
+    let version = info.as_ref().and_then(|i| i["Version"].as_str()).map(|v| v.trim_start_matches('v').to_string());
+    json!({
+        "enabled": m.enabled, "installed": installed, "state": status, "pid": pid,
+        "version": version.or_else(|| mail::version(&state.paths)),
+        "port": m.port, "inbox_port": mail::inbox_port(m), "inbox_url": mail::inbox_url(m),
+        "keep": m.keep, "php_mail": m.php_mail, "notify": m.notify,
+        "total": info.as_ref().map(|i| i["Messages"].clone()),
+        "unread": info.as_ref().map(|i| i["Unread"].clone()),
+        "error": error,
+    })
+}
+
 /// `update`: newer PHP, web servers and catalog extensions in the release; installs them unless
 /// `check`. The periodic check (D-028) runs it with `check` on.
 fn find_updates(state: &State, check: bool) -> Result<Value, String> {
@@ -1428,6 +1577,7 @@ enum Install {
     /// A catalog extension the release no longer has, after its PHP was updated.
     RemoveExt(String, String),
     Server(&'static str),
+    Mail,
 }
 
 /// What is newer in the release, in the order `update` installs it: each PHP version, then its
@@ -1491,6 +1641,20 @@ fn plan_updates(state: &State, manifest: &Value) -> (Vec<Planned>, Vec<String>) 
             });
         }
     }
+    // Mailpit (D-049), once Mail has installed it.
+    if mail::installed(&state.paths)
+        && let Some(a) = releases::artifact(manifest, "mailpit", None)
+    {
+        match mail::version(&state.paths) {
+            None => unknown.push("mailpit".to_string()),
+            Some(current) if releases::newer(&a.version, &current) => plan.push(Planned {
+                change: json!({"what": "mailpit", "from": current, "to": a.version, "size": a.size}),
+                download: archive(&a),
+                install: Install::Mail,
+            }),
+            Some(_) => {}
+        }
+    }
     (plan, unknown)
 }
 
@@ -1536,6 +1700,7 @@ fn apply_updates(state: &State, manifest: &Value, plan: Vec<Planned>) -> Result<
                 .map_err(|e| e.to_string()),
             Install::RemoveExt(version, name) => phpext::remove(&state.paths, version, name).map_err(|e| e.to_string()),
             Install::Server(server) => install_server(state, server, None, Some(manifest), &installing),
+            Install::Mail => install_mail(state, Some(manifest), &installing),
         };
         if result.is_ok()
             && let Some(version) = ext_version(Some(p)).filter(|v| ext_version(plan.get(i + 1)).as_ref() != Some(v))

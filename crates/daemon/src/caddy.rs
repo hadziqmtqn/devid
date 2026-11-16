@@ -185,6 +185,7 @@ pub fn spec(paths: &Paths) -> Spec {
         ],
         // Caddy writes no pid file; the supervisor tracks the child directly.
         pid_file: paths.run_dir().join("caddy.pid"),
+        write_pid: false,
         comm: "caddy",
         stop_signal: libc::SIGTERM,
     }

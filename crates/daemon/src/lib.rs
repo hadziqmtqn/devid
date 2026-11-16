@@ -9,6 +9,7 @@ pub mod dns;
 pub mod helper;
 pub mod install;
 pub mod logs;
+pub mod mail;
 pub mod nginx;
 pub mod paths;
 pub mod php;
