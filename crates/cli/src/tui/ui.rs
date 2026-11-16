@@ -136,6 +136,7 @@ fn draw_page(frame: &mut Frame, app: &App, area: Rect) {
         Page::Sites => draw_sites(frame, app, inner),
         Page::Php => draw_php(frame, app, status, inner),
         Page::Server => draw_server(frame, app, status, inner),
+        Page::Mail => draw_mail(frame, app, inner),
         Page::Logs => draw_logs(frame, app, inner),
         Page::Settings => draw_settings(frame, app, status, inner),
     }
@@ -299,6 +300,50 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(body), inner);
 }
 
+/// Mail (D-049): what Mailpit does now, and how an app sends to it.
+fn draw_mail(frame: &mut Frame, app: &App, area: Rect) {
+    let m = app.mail();
+    let dim = Style::default().add_modifier(Modifier::DIM);
+    let lines = if m.is_null() {
+        vec![Line::styled("This daemon has no Mail yet; update Devid.", dim)]
+    } else if m["enabled"] != true {
+        let first = if m["installed"] == true { "" } else { " The first time, Devid downloads Mailpit (11 MB)." };
+        vec![
+            Line::raw("Mail is off. It catches the email your apps send, in an inbox on this Mac."),
+            Line::raw(format!("Press m to turn it on.{first}")),
+        ]
+    } else {
+        let state = s(&m["state"]);
+        let style = match state {
+            "running" => ok(app),
+            "failed" | "not installed" => bad(app),
+            _ => Style::default(),
+        };
+        let pid = m["pid"].as_u64().map(|p| format!(", pid {p}")).unwrap_or_default();
+        let port = &m["port"];
+        let mut lines = vec![
+            Line::styled(format!("Mail:      {state} (Mailpit {}{pid})", s(&m["version"])), style),
+            Line::raw(format!("SMTP:      127.0.0.1:{port}, any login, no TLS")),
+            Line::raw(format!(".env:      MAIL_MAILER=smtp MAIL_HOST=127.0.0.1 MAIL_PORT={port}")),
+            Line::raw(format!("Inbox:     {}", s(&m["inbox_url"]))),
+            Line::raw(match (m["total"].as_u64(), m["unread"].as_u64()) {
+                (Some(total), Some(unread)) => {
+                    format!("Messages:  {total}, {unread} unread (keeps the newest {})", m["keep"])
+                }
+                _ => format!("Keeps:     the newest {} messages", m["keep"]),
+            }),
+            Line::raw(format!("PHP mail(): {}", if m["php_mail"] == true { "goes to Mail" } else { "not caught" })),
+        ];
+        if let Some(e) = m["error"].as_str() {
+            lines.insert(1, Line::styled(format!("Problem:   {e}"), bad(app)));
+        }
+        lines.push(Line::raw(""));
+        lines.push(Line::styled("Port and how many to keep: `devid mail port <n>`, `devid mail keep <n>`.", dim));
+        lines
+    };
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+}
+
 fn draw_settings(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
     let mut lines = vec![
         Line::raw(format!("Domain:    *.{}", s(&status["tld"]))),
@@ -355,6 +400,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                     " d doctor · u check updates · U update PHP/nginx · D update devid · a serve at login · s setup · X uninstall · ? help · q quit"
                 }
                 (Page::Logs, _) => " ↑↓ pick a log · f follow · c clear · tab sidebar · ? help · q quit",
+                (Page::Mail, _) => {
+                    " m on/off · t test email · o open inbox · c copy .env · p PHP mail() · X delete all · ? help · q quit"
+                }
                 (Page::Php, _) => {
                     " enter actions (extensions, default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
                 }
@@ -524,7 +572,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("↑ ↓  or  j k     move"),
         Line::raw("tab              switch sidebar / page"),
         Line::raw("enter → l        open the page   ← h  back"),
-        Line::raw("1 – 5            jump to Sites, PHP, Server, Logs, Settings"),
+        Line::raw("1 – 6            jump to Sites, PHP, Server, Mail, Logs, Settings"),
         Line::raw("r                refresh now (also every 2 s)"),
         Line::raw("q  esc  ctrl-c   quit"),
         Line::raw(""),
@@ -533,6 +581,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("PHP:   enter = actions · u check updates · U update"),
         Line::raw("       Extensions…: space tick · enter install · r remove"),
         Line::raw("Server: enter = actions · S stop all · A start all"),
+        Line::raw("Mail:  m on/off · t test · o inbox · c copy .env · p mail() · X delete"),
         Line::raw("Logs:  f follow · c clear"),
         Line::raw("Settings: d doctor · u/U updates · D devid · s setup · X uninstall"),
         Line::raw("Every action is also a command: `devid --help`."),
