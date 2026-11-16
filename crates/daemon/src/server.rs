@@ -58,6 +58,9 @@ struct State {
     commands: Commands,
     /// The last check that port 80 reaches the web server (D-047): when, and the answer.
     redirect_check: Mutex<Option<(Instant, bool)>>,
+    /// Mailpit's archive while the first `mail on` downloads it, and its size (D-049), for the
+    /// app's progress bar.
+    mail_download: Mutex<Option<(PathBuf, u64)>>,
 }
 
 /// Progress of a `PhpExtInstall`. Downloads count for 0–90 % by bytes (the archive's size on disk
@@ -358,6 +361,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         busy_ports: Mutex::new(BTreeMap::new()),
         commands,
         redirect_check: Mutex::new(None),
+        mail_download: Mutex::new(None),
     });
     // D-036: commands a crashed daemon left running are stopped. Found before any request can
     // start a new one; stopped in the background, as that may take 10 s.
@@ -1487,7 +1491,10 @@ fn install_mail(state: &State, manifest: Option<&Value>, on_downloaded: &dyn Fn(
     };
     let artifact = releases::artifact(manifest, "mailpit", None)
         .ok_or("Devid's release has no Mailpit for this Mac yet; try again after the next runtime release")?;
-    let dir = releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?;
+    *state.mail_download.lock().unwrap() = Some((releases::archive_path(&state.paths, &artifact), artifact.size));
+    let downloaded = releases::download(&state.paths, &artifact).map_err(|e| e.to_string());
+    *state.mail_download.lock().unwrap() = None;
+    let dir = downloaded?;
     on_downloaded();
     let result = mail::install(&state.paths, &dir.join("mailpit")).map_err(|e| e.to_string());
     let _ = fs::remove_dir_all(&dir);
@@ -1539,6 +1546,7 @@ fn mail_status(state: &State, config: &Config) -> Value {
             .unwrap_or_else(|| format!("Mailpit keeps stopping; see {}", mail::log(&state.paths).display()))
     });
     let version = info.as_ref().and_then(|i| i["Version"].as_str()).map(|v| v.trim_start_matches('v').to_string());
+    let download = state.mail_download.lock().unwrap().clone();
     json!({
         "enabled": m.enabled, "installed": installed, "state": status, "pid": pid,
         "version": version.or_else(|| mail::version(&state.paths)),
@@ -1547,6 +1555,7 @@ fn mail_status(state: &State, config: &Config) -> Value {
         "total": info.as_ref().map(|i| i["Messages"].clone()),
         "unread": info.as_ref().map(|i| i["Unread"].clone()),
         "error": error,
+        "download": download.map(|d| json!({"got": arrived(&Some(d.clone()), true), "size": d.1})),
     })
 }
 
