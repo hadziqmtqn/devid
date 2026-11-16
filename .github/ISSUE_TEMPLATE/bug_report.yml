@@ -12,7 +12,7 @@ body:
     attributes:
       label: Devid version
       description: Output of `devid --version`
-      placeholder: devid 0.14.0
+      placeholder: devid 0.14.1
     validations:
       required: true
   - type: input
