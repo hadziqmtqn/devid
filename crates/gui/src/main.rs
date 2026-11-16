@@ -2,6 +2,7 @@
 //! created when opened and destroyed when closed. Like the CLI, it is only a daemon client.
 
 mod api;
+mod notify;
 mod tray;
 
 use std::sync::Mutex;
@@ -48,6 +49,7 @@ fn main() {
             } else {
                 tauri::ActivationPolicy::Regular
             });
+            notify::start(app.handle());
             tray::start(app)?;
             if !background {
                 open_window(app.handle(), page);

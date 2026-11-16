@@ -553,7 +553,10 @@ function mailPage() {
         h('div.dv-seg', { role: 'group', 'aria-label': 'Messages to keep' }, [100, 500, 1000].map((n) =>
           h('button', { type: 'button', 'aria-pressed': String(m.keep === n), disabled: !!S.busy,
             onclick: () => { if (m.keep !== n) mailSet('Saving…', { keep: n }, 'Mail keeps the newest ' + n.toLocaleString('en') + ' messages'); } },
-          n.toLocaleString('en')))))),
+          n.toLocaleString('en'))))),
+      // D-050: the first notification makes macOS ask, so turning this on posts one at once.
+      switchRow('sw-mail-notify', 'Notify on new mail', 'A macOS notification with the sender and the subject. The first time, macOS asks: choose Options, then Allow.', m.notify,
+        (on) => mailSet(on ? 'Turning on…' : 'Turning off…', { notify: on }, on ? 'Notifications are on; if macOS asks, choose Options, then Allow' : 'No notifications for new mail'))),
     h('h2.dv-h2', {}, 'Storage'),
     card(row(text('Mail folder', h('span.dv-mono', {}, st.home + '/mail')), btn('Show in Finder', () => openTarget({ what: 'finder', path: st.home + '/mail' })))),
   ];

@@ -201,9 +201,19 @@ fn reply_body(reply: &str) -> io::Result<String> {
     }
 }
 
-/// Mailpit's `/api/v1/info` (its version, and the message and unread counts); None if it does not answer.
-pub fn info(mail: &Mail) -> Option<serde_json::Value> {
-    serde_json::from_str(&api(inbox_port(mail), "GET", "/api/v1/info", "").ok()?).ok()
+/// The message and unread counts and the newest message, from Mailpit's message list; None if it
+/// does not answer.
+pub fn summary(mail: &Mail) -> Option<serde_json::Value> {
+    serde_json::from_str(&api(inbox_port(mail), "GET", "/api/v1/messages?limit=1", "").ok()?).ok()
+}
+
+/// The newest message of a `summary` as `status` reports it (D-050 notifies with it): when Mailpit
+/// received it, the sender's name (or address) and the subject.
+pub fn latest(summary: &serde_json::Value) -> Option<serde_json::Value> {
+    let m = summary["messages"].get(0)?;
+    let from = &m["From"];
+    let sender = from["Name"].as_str().filter(|n| !n.is_empty()).or(from["Address"].as_str()).unwrap_or("");
+    Some(serde_json::json!({"created": m["Created"], "from": sender, "subject": m["Subject"]}))
 }
 
 /// Delete every message (no IDs given means all of them).
@@ -381,6 +391,18 @@ mod tests {
         assert!(!php_ini(&paths, "8.5").exists());
         assert!(sync_php(&paths, None).unwrap().is_empty());
         fs::remove_dir_all(&paths.home).unwrap();
+    }
+
+    #[test]
+    fn reports_the_newest_message() {
+        let list = serde_json::json!({"total": 2, "unread": 1, "messages": [{"ID": "a", "Created": "2026-11-16T14:00:05Z",
+            "From": {"Name": "", "Address": "hello@example.com"}, "Subject": "Reset Password Notification"}]});
+        assert_eq!(
+            latest(&list).unwrap(),
+            serde_json::json!({"created": "2026-11-16T14:00:05Z", "from": "hello@example.com", "subject": "Reset Password Notification"}),
+            "no name: the address"
+        );
+        assert_eq!(latest(&serde_json::json!({"total": 0, "unread": 0, "messages": []})), None);
     }
 
     #[test]
