@@ -45,7 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
-| D-048 | 2026-11-16 | accepted when the owner merges its PR (amends D-027, D-039) | The desktop app restarts through LaunchServices (`open -n`), not by replacing itself with `exec` |
+| D-048 | 2026-11-16 | accepted (amends D-027, D-039) | The desktop app restarts through LaunchServices (`open -n`), not by replacing itself with `exec` |
 | D-047 | 2026-11-15 | accepted (amends D-014) | Ports 80/443 are checked live, since another app can switch pf off on loopback; `devid helper install` undoes that |
 | D-046 | 2026-11-14 | accepted (completes D-044, amends D-010) | Apple silicon: every build is native on its own GitHub runner, and a release is smoke-tested with the real PHP and nginx on both arches before it is published |
 | D-045 | 2026-11-14 | accepted (amends D-043) | Issues move from `devid-binaries` to `devid`, next to the code; `devid` gains a contributor guide and a security policy |
@@ -760,7 +760,7 @@ See ARCHITECTURE, "PHP runtime".
     Either would also end the iCloud Private Relay conflict that Yerd reports for any pf `rdr` rule (https://github.com/forjedio/yerd/issues/247), which is not yet checked for Devid.
 - **Accepted:** by the owner on 2026-11-15.
 
-## D-048: the desktop app restarts through LaunchServices, not with exec (2026-11-16, amends D-027 and D-039)
+## D-048: the desktop app restarts through LaunchServices, not with exec (accepted 2026-11-16, amends D-027 and D-039)
 
 - **Context:**
   - The app replaces itself in place with `exec` (same pid) in four cases:
@@ -779,4 +779,4 @@ See ARCHITECTURE, "PHP runtime".
   - Changed: the pid. For a moment two instances run while the old one quits.
 - **Not now:** keeping `exec` and sending the app an event from LaunchServices after the restart. That would be a workaround for one symptom of a behavior Apple does not document.
 - **Limit:** the fix ships in the app that an update replaces. The update from 0.14.0 still runs 0.14.0's `exec`. If the app does not come back after it, opening Devid again from Spotlight or `~/Applications` brings it back.
-- **Accepted:** when the owner merges the pull request that carries it.
+- **Accepted:** by the owner, who merged #89 on 2026-11-16.
