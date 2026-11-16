@@ -159,7 +159,7 @@ All behaviour lives in `daemon` and is reached through its socket API. `cli` and
 
 `crates/cli/src/tui/` (D-012 client rule, D-017 colors):
 - `app.rs` holds the state and the key handling as a pure function (tested without a terminal or a daemon).
-- `ui.rs` renders. Pages: Sites, PHP, Server, Logs, Settings. It uses the 16-color palette semantically, gives every state a symbol and text, and honours `NO_COLOR` (selection uses REVERSED, so it still shows).
+- `ui.rs` renders. Pages: Sites, PHP, Server, Mail (Phase 9, D-049), Logs, Settings. It uses the 16-color palette semantically, gives every state a symbol and text, and honours `NO_COLOR` (selection uses REVERSED, so it still shows).
 - `mod.rs` runs the loop. `ratatui::init()` sets up the alternate screen and a panic hook that restores the terminal. The loop polls `status` + `sites` every 2 s (or on `r`), checks keys every 250 ms, and stops polling when the TUI closes.
 - `devid` with no command opens the TUI only when stdout is a terminal; scripts and pipes get the help text. `devid tui` opens it explicitly.
 - **Actions (T2).** Keys produce an `Effect` instead of doing anything themselves: a daemon request, open a URL (`open`), open a folder in Terminal (`open -a Terminal`), or copy (`pbcopy`). Overlays (`Mode`) handle a site's action menu, path input (`~` expanded), a pick list (PHP version, parked folder) and a y/n confirmation for destructive actions. The result appears as ✓/✗ in the footer, and state refreshes right away. The daemon's `sites` reply includes the `parked` folders for unpark.
@@ -253,4 +253,5 @@ Implemented in T5:
 - **Service:** `mail` is in `services()` while Mail is on, so `devid stop|start mail`, Stop all and Start all cover it, and it waits for `start all` when `autostart` is off. Turning Mail on clears a `stop mail`.
 - **Requests and CLI:** `mail_set`, `mail_test`, `mail_clear`; `status` carries `mail` (state, pid, version, ports, inbox URL, counts, settings, error). `devid mail [on|off|port|keep|php-mail|notify|test|open|clear]`; `devid status` prints a `mail:` line; `devid doctor` checks a Mail that is on.
 - **Updates:** `plan_updates` compares the recorded version with the release's, like nginx and Caddy, and installs a newer Mailpit, which then restarts.
+- **TUI (M4):** a Mail page (key 4): its state, ports, `.env` lines, inbox and counts; `m` on/off, `t` test mail, `o` inbox in the browser, `c` copy the `.env` lines, `p` PHP's `mail()`, `X` delete all. Logs and Settings move to keys 5 and 6.
 - **Desktop app (M4):** a Mail page in the sidebar (off: Turn on Mail, with the first download's progress from `status.mail.download`; on: status, `.env` lines, PHP `mail()`, port, Keep, folder), and a Mail section in both quick menus. Open inbox goes through the `open` command's `inbox` target, which takes the URL from `status` and only a `http://127.0.0.1:` one; `copy_mail_env` copies the `.env` lines.
