@@ -845,6 +845,8 @@ name = "devid-gui"
 version = "0.14.1"
 dependencies = [
  "devid-daemon",
+ "objc2",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",

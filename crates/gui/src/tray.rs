@@ -19,6 +19,8 @@ const ID: &str = "devid";
 /// How often the icon asks the daemon for its state: one small socket request, so idle stays
 /// at about 0% CPU (the G1 limit).
 const EVERY: Duration = Duration::from_secs(15);
+/// While Mail runs with notifications on (D-050): a new message shows up within 5 s.
+const EVERY_MAIL: Duration = Duration::from_secs(5);
 
 /// What the icon and the menu show.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,8 +38,49 @@ pub struct View {
     pub commands: Vec<(String, String)>,
     /// Shared sites (D-037).
     pub shares: Vec<String>,
-    /// Mail (D-049): None while it is off, else whether Mailpit runs and its unread messages.
-    pub mail: Option<(bool, u64)>,
+    /// Mail (D-049): None while it is off.
+    pub mail: Option<MailView>,
+}
+
+/// Mail as the icon sees it (D-049, D-050).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MailView {
+    pub running: bool,
+    pub unread: u64,
+    pub notify: bool,
+    /// The newest message, from `status.mail.latest`.
+    pub latest: Option<Latest>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Latest {
+    /// When Mailpit received it (RFC 3339, so later sorts later).
+    pub created: String,
+    pub from: String,
+    pub subject: String,
+}
+
+/// What to post since the icon last looked at Mail (D-050), as (title, subtitle, text): a first
+/// notification when they were just turned on, so macOS asks for permission right then, or the
+/// newest message when it is newer than the last one seen, with the sender as the title, as Mail.app
+/// does, and the subject; nothing more, which was too much (the owner, 2026-11-16). Nothing at the
+/// first look, so old mail stays quiet when the app starts.
+pub fn mail_news(before: Option<&MailView>, now: Option<&MailView>) -> Option<(String, String, String)> {
+    let (before, now) = (before?, now?);
+    if !now.notify || !now.running {
+        return None;
+    }
+    if !before.notify {
+        return Some(("Devid Mail".into(), "Notifications are on".into(), String::new()));
+    }
+    let latest = now.latest.as_ref()?;
+    // shortcut: compares Mailpit's local-time strings; in the hour after a fall-back to winter time a new
+    // message can look older and stays quiet. Parse the times if that ever matters.
+    if before.latest.as_ref().is_some_and(|b| b.created >= latest.created) {
+        return None;
+    }
+    let subject = if latest.subject.is_empty() { "(no subject)".into() } else { latest.subject.clone() };
+    Some((latest.from.clone(), subject, String::new()))
 }
 
 pub fn view(status: Result<&Value, &str>) -> View {
@@ -79,7 +122,17 @@ pub fn view(status: Result<&Value, &str>) -> View {
     let shares =
         s["shares"].as_array().into_iter().flatten().filter_map(|x| x["site"].as_str().map(String::from)).collect();
     let m = &s["mail"];
-    let mail = (m["enabled"] == true).then(|| (m["state"] == "running", m["unread"].as_u64().unwrap_or(0)));
+    let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
+    let mail = (m["enabled"] == true).then(|| MailView {
+        running: m["state"] == "running",
+        unread: m["unread"].as_u64().unwrap_or(0),
+        notify: m["notify"] == true,
+        latest: m["latest"]["created"].as_str().map(|created| Latest {
+            created: created.to_string(),
+            from: text(&m["latest"]["from"]),
+            subject: text(&m["latest"]["subject"]),
+        }),
+    });
     View {
         icon: if failed > 0 || ports_off {
             "bad"
@@ -103,11 +156,13 @@ fn capital(s: &str) -> String {
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
-/// The last shown view (to skip redraws) and the last action's error (shown once in the menu).
+/// The last shown view (to skip redraws), the last action's error (shown once in the menu), and
+/// Mail as last seen, for new-mail notifications.
 #[derive(Default)]
 struct TrayState {
     shown: Mutex<String>,
     error: Mutex<Option<String>>,
+    mail: Mutex<Option<MailView>>,
 }
 
 pub fn start(app: &tauri::App) -> tauri::Result<()> {
@@ -124,15 +179,16 @@ pub fn start(app: &tauri::App) -> tauri::Result<()> {
     let handle = app.handle().clone();
     std::thread::spawn(move || {
         loop {
-            refresh(&handle);
-            std::thread::sleep(EVERY);
+            let mail_watch = refresh(&handle);
+            std::thread::sleep(if mail_watch { EVERY_MAIL } else { EVERY });
         }
     });
     Ok(())
 }
 
-/// Asks the daemon for its state and redraws the icon and the menu if anything changed.
-pub fn refresh(app: &AppHandle) {
+/// Asks the daemon for its state, posts a notification for new mail, and redraws the icon and the
+/// menu if anything changed. True while Mail runs with notifications on (check more often).
+pub fn refresh(app: &AppHandle) -> bool {
     // A self-update installed a new app while only this icon ran: become the new version now,
     // so the menu and the next window are current (D-027 restarts the same way).
     if crate::updated() && app.get_webview_window("main").is_none() {
@@ -142,18 +198,26 @@ pub fn refresh(app: &AppHandle) {
                 crate::restart(&handle, &["--background"]);
             }
         });
-        return;
+        return false;
     }
     let status = request(&Paths::from_env(), &Request::Status);
     let v = view(status.as_ref().map_err(String::as_str));
     let state = app.state::<TrayState>();
+    {
+        let mut seen = state.mail.lock().unwrap();
+        if let Some((title, subtitle, text)) = mail_news(seen.as_ref(), v.mail.as_ref()) {
+            crate::notify::post(app, title, subtitle, text);
+        }
+        *seen = v.mail.clone();
+    }
+    let mail_watch = v.mail.as_ref().is_some_and(|m| m.running && m.notify);
     let error = state.error.lock().unwrap().clone();
     let key = format!("{v:?}{error:?}");
     let mut shown = state.shown.lock().unwrap();
     if *shown == key {
-        return;
+        return mail_watch;
     }
-    let Some(tray) = app.tray_by_id(ID) else { return };
+    let Some(tray) = app.tray_by_id(ID) else { return mail_watch };
     match menu(app, &v, error.as_deref()) {
         Ok(m) => {
             let _ = tray.set_menu(Some(m));
@@ -166,6 +230,7 @@ pub fn refresh(app: &AppHandle) {
     let _ = tray.set_icon_as_template(true);
     let _ = tray.set_tooltip(Some(&v.header));
     *shown = key;
+    mail_watch
 }
 
 fn icon(v: &View) -> Image<'static> {
@@ -207,7 +272,7 @@ fn menu(app: &AppHandle, v: &View, error: Option<&str>) -> tauri::Result<Menu<Wr
     }
     if v.running.is_some() {
         m.append(&sep()?)?;
-        match v.mail {
+        match v.mail.as_ref().map(|m| (m.running, m.unread)) {
             Some((true, unread)) => {
                 let header = if unread > 0 { format!("Mail · {unread} new") } else { "Mail".into() };
                 m.append(&item("mail", &header, false, None)?)?;
@@ -358,13 +423,54 @@ mod tests {
         assert_eq!(view(Ok(&shared)).mail, None, "Mail is off");
         let mail = json!({"server": "nginx", "server_status": "running", "php": [],
             "mail": {"enabled": true, "state": "running", "unread": 3}});
-        assert_eq!(view(Ok(&mail)).mail, Some((true, 3)));
+        let m = view(Ok(&mail)).mail.unwrap();
+        assert_eq!((m.running, m.unread, m.notify, m.latest), (true, 3, false, None));
         let paused = json!({"server": "nginx", "server_status": "running", "php": [],
             "mail": {"enabled": true, "state": "paused", "unread": null}});
-        assert_eq!(view(Ok(&paused)).mail, Some((false, 0)));
+        assert_eq!(view(Ok(&paused)).mail.map(|m| (m.running, m.unread)), Some((false, 0)));
         assert_eq!(
             view(Ok(&commands)).commands,
             [("erd".to_string(), "dev:pg:local".to_string()), ("erd".to_string(), "tauri".to_string())]
         );
+    }
+
+    #[test]
+    fn new_mail_notifications() {
+        let latest = |created: &str| {
+            Some(Latest {
+                created: created.into(),
+                from: "ERD Builder Pro".into(),
+                subject: "Reset Password Notification".into(),
+            })
+        };
+        let mail = |notify, running, l: Option<Latest>| MailView { running, unread: 1, notify, latest: l };
+        let a = mail(true, true, latest("2026-11-16T14:00:00Z"));
+        assert_eq!(mail_news(None, Some(&a)), None, "nothing at the first look, when the app starts");
+        assert_eq!(mail_news(Some(&a), Some(&a)), None, "the same newest message");
+        let b = mail(true, true, latest("2026-11-16T14:00:05Z"));
+        let posted = mail_news(Some(&a), Some(&b)).unwrap();
+        assert_eq!(
+            (posted.0.as_str(), posted.1.as_str(), posted.2.as_str()),
+            ("ERD Builder Pro", "Reset Password Notification", ""),
+            "the sender as the title, as Mail.app shows it, and the subject"
+        );
+        assert_eq!(mail_news(Some(&b), Some(&a)), None, "the newest was deleted: an older one is not new");
+        assert_eq!(
+            mail_news(Some(&mail(true, true, None)), Some(&a)).map(|p| p.0),
+            Some("ERD Builder Pro".into()),
+            "the first message in an empty inbox"
+        );
+        let off = mail(false, true, latest("2026-11-16T14:00:00Z"));
+        assert_eq!(mail_news(Some(&off), Some(&b)).map(|p| p.0), Some("Devid Mail".into()), "turned on: ask macOS now");
+        assert_eq!(
+            mail_news(Some(&a), Some(&mail(false, true, latest("2026-11-16T14:00:09Z")))),
+            None,
+            "notifications off"
+        );
+        assert_eq!(mail_news(Some(&a), Some(&mail(true, false, latest("2026-11-16T14:00:09Z")))), None, "Mail stopped");
+        assert_eq!(mail_news(Some(&a), None), None, "Mail turned off");
+        let mut untitled = b.clone();
+        untitled.latest.as_mut().unwrap().subject.clear();
+        assert_eq!(mail_news(Some(&a), Some(&untitled)).map(|p| p.1), Some("(no subject)".into()));
     }
 }

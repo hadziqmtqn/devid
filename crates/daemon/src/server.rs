@@ -1521,8 +1521,8 @@ fn mail_taken(config: &Config, sites: &[Site]) -> Vec<(u16, String)> {
     taken
 }
 
-/// Mail's settings and state for `status` (D-049). While Mailpit runs, its version and the message
-/// and unread counts come from Mailpit itself.
+/// Mail's settings and state for `status` (D-049). While Mailpit runs, the message and unread counts
+/// and the newest message (D-050) come from Mailpit itself.
 fn mail_status(state: &State, config: &Config) -> Value {
     let m = &config.mail;
     let installed = mail::installed(&state.paths);
@@ -1536,7 +1536,7 @@ fn mail_status(state: &State, config: &Config) -> Value {
         None if paused => ("paused", None),
         None => ("stopped", None),
     };
-    let info = if status == "running" { mail::info(m) } else { None };
+    let summary = if status == "running" { mail::summary(m) } else { None };
     // Why it failed: most often another program on one of its ports.
     let error = (status == "failed").then(|| {
         [m.port, mail::inbox_port(m)]
@@ -1545,15 +1545,15 @@ fn mail_status(state: &State, config: &Config) -> Value {
             .map(|p| format!("port {p} is in use by {}", ports::holder(p).unwrap_or_else(|| "another program".into())))
             .unwrap_or_else(|| format!("Mailpit keeps stopping; see {}", mail::log(&state.paths).display()))
     });
-    let version = info.as_ref().and_then(|i| i["Version"].as_str()).map(|v| v.trim_start_matches('v').to_string());
     let download = state.mail_download.lock().unwrap().clone();
     json!({
         "enabled": m.enabled, "installed": installed, "state": status, "pid": pid,
-        "version": version.or_else(|| mail::version(&state.paths)),
+        "version": mail::version(&state.paths),
         "port": m.port, "inbox_port": mail::inbox_port(m), "inbox_url": mail::inbox_url(m),
         "keep": m.keep, "php_mail": m.php_mail, "notify": m.notify,
-        "total": info.as_ref().map(|i| i["Messages"].clone()),
-        "unread": info.as_ref().map(|i| i["Unread"].clone()),
+        "total": summary.as_ref().map(|s| s["total"].clone()),
+        "unread": summary.as_ref().map(|s| s["unread"].clone()),
+        "latest": summary.as_ref().and_then(mail::latest),
         "error": error,
         "download": download.map(|d| json!({"got": arrived(&Some(d.clone()), true), "size": d.1})),
     })

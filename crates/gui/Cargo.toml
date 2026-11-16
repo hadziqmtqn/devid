@@ -21,3 +21,8 @@ serde.workspace = true
 serde_json.workspace = true
 # No default features: no asset compression, no runtime ACL, no Linux X11/D-Bus.
 tauri = { version = "2.12.5", default-features = false, features = ["wry", "tray-icon"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# New-mail notifications (D-050). Both are already in Tauri's tree; NSUserNotification is the only new feature.
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSBundle", "NSObject", "NSString", "NSUserNotification"] }

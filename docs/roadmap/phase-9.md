@@ -83,7 +83,7 @@ The design is on the canvas page "0.15.x" (`https://claude.ai/artifact/TS8URDyBe
   - "Open inbox" opens the inbox URL from `status`, through a new `Open::Inbox` target, since `api.rs` only opens fixed kinds of targets.
   - Both quick menus, the window's status card menu and the tray, get a Mail section: "N new", "Open inbox" and "Send test email", or "Turn on Mail".
   - Logs: `mailpit.log` in a Mail group.
-  - Notifications: the tray compares the unread count at each refresh (every 15 s, and after each request) and posts a notification when it grows. M4 picks the way to post it (Tauri's notification plugin, or the system API) that works for the ad-hoc signed app.
+  - Notifications: the tray compares the unread count at each refresh (every 15 s, and after each request) and posts a notification when it grows. M4 picks the way to post it (Tauri's notification plugin, or the system API) that works for the ad-hoc signed app. As built: the newest message instead of the count, checked every 5 s, through `NSUserNotificationCenter`, because UserNotifications refuses ad-hoc signed apps (D-050).
 
 ### Stage 2 (M6)
 

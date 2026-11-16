@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-050 | 2026-11-16 | accepted (amends D-049) | New-mail notifications use the legacy NSUserNotification API, since UserNotifications refuses an ad-hoc signed app; they show the sender and the subject |
 | D-049 | 2026-11-16 | accepted (Phase 9; schedules D-011's deferred mail catcher) | Mail: Devid ships the official Mailpit build and runs it when Mail is on (off by default); 0.15.0 opens Mailpit's inbox in the browser, a later 0.15.x shows the inbox in the app |
 | D-048 | 2026-11-16 | accepted (amends D-027, D-039) | The desktop app restarts through LaunchServices (`open -n`), not by replacing itself with `exec` |
 | D-047 | 2026-11-15 | accepted (amends D-014) | Ports 80/443 are checked live, since another app can switch pf off on loopback; `devid helper install` undoes that |
@@ -803,3 +804,23 @@ See ARCHITECTURE, "PHP runtime".
   - The owner's own Mailpit can keep its ports. Removing it is the owner's choice once Devid's Mail is in use.
 - **Not now:** a dump viewer (the rest of D-011's deferral), an inbox per site (Mailpit stores each message's SMTP user name, so a site that sets `MAIL_USERNAME` could be told apart), and relaying mail to a real server.
 - **Accepted:** by the owner on 2026-11-16, with the two stages and the canvas prototype.
+
+## D-050: notifications for new mail use NSUserNotification (accepted 2026-11-16, amends D-049)
+
+- **Context:**
+  - The Mail page's "Notify on new mail" (D-049, the canvas board) needs macOS notifications from Devid.app, which is ad-hoc signed (D-010).
+  - Tested on the owner's Mac (macOS 14.8) with ad-hoc signed test bundles:
+    - **UserNotifications** (`UNUserNotificationCenter`): `requestAuthorization` failed at once with UNErrorDomain 1, "Notifications are not allowed for this application". No prompt was shown.
+    - **`NSUserNotificationCenter`**, deprecated since macOS 11: the first notification made macOS show its permission banner ("Notifications may include alerts, sounds and icon badges", Options › Allow). After Allow, banners showed with their title, subtitle, text and sound.
+- **Decision:**
+  - Devid.app posts with `NSUserNotificationCenter` through objc2-foundation. Both objc2 crates are already in Tauri's tree; only their NSUserNotification feature is new.
+  - **A new message:** the sender as the title, as in Mail.app, and the subject below it. No snippet: three lines were too much text for the owner.
+  - **Turning notifications on** posts "Devid Mail · Notifications are on" at once, so macOS asks while the user expects it.
+  - **Show** opens the Mail page. Banners show while the Devid window is in front, too.
+  - **Checking:** the daemon's `status` carries the newest message (`mail.latest`: when Mailpit received it, the sender and the subject). The menu-bar icon checks every 5 s while Mail runs with notifications on (15 s otherwise). It notifies when the newest message is newer than the one it last saw, and stays quiet at its first look, so old mail does not notify when the app starts.
+  - Outside an app bundle (a debug build run from a terminal), nothing is posted.
+- **Consequences:**
+  - A deprecated API: if a later macOS removes it, notifications stop and the switch should be hidden. A Developer ID signature, which D-010 does not plan, would allow UserNotifications.
+  - Allowing notifications is up to the user. After Don't Allow, they stay quiet until allowed in System Settings › Notifications › Devid.
+- **Not chosen:** `osascript` with `display notification`, which shows as Script Editor and needs its own permission, and no notifications at all.
+- **Accepted:** by the owner on 2026-11-16, after the test notifications and with the two-line layout.
