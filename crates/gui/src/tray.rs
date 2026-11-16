@@ -310,23 +310,12 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
     match event.id().as_ref() {
         "open" => crate::open_window(app, None),
         "settings" | "updates" => crate::open_window(app, Some("settings")),
-        "mail-page" => crate::open_window(app, Some("mail")),
-        id @ ("mail-open" | "mail-test") => {
-            let (app, id) = (app.clone(), id.to_string());
+        // The inbox is the window's Mail page (D-051).
+        "mail-page" | "mail-open" => crate::open_window(app, Some("mail")),
+        "mail-test" => {
+            let app = app.clone();
             std::thread::spawn(move || {
-                let paths = Paths::from_env();
-                let error = match id.as_str() {
-                    // Full path, as in api::open: a terminal's own `open` may come first on PATH.
-                    "mail-open" => crate::api::inbox_url(&paths).and_then(|url| {
-                        std::process::Command::new("/usr/bin/open")
-                            .arg(url)
-                            .status()
-                            .map(|_| ())
-                            .map_err(|e| e.to_string())
-                    }),
-                    _ => request(&paths, &Request::MailTest).map(|_| ()),
-                };
-                *app.state::<TrayState>().error.lock().unwrap() = error.err();
+                *app.state::<TrayState>().error.lock().unwrap() = request(&Paths::from_env(), &Request::MailTest).err();
                 refresh(&app);
             });
         }

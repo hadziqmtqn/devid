@@ -17,3 +17,4 @@
 | 2026-11-16 | [Fix: the app comes back after an update, through LaunchServices instead of exec (D-048)](2026-11-16-relaunch-through-launchservices.md) |
 | 2026-11-16 | [Mail in the desktop app and the TUI, stage 1: the Mail page, quick menus and the inbox in the browser (Phase 9 M4, D-049)](2026-11-16-mail-page.md) |
 | 2026-11-16 | [Notifications for new mail: sender and subject, through NSUserNotificationCenter (Phase 9 M4, D-050)](2026-11-16-mail-notifications.md) |
+| 2026-11-16 | [The inbox in the app: messages, preview in a sandboxed frame, links to the browser (Phase 9 M6b, D-051)](2026-11-16-mail-inbox.md) |

@@ -40,6 +40,9 @@ pub async fn daemon(app: tauri::AppHandle, req: Request) -> Result<Value, String
             status["version"].as_str().unwrap_or("?").to_string()
         })
     });
+    if let (Request::MailMessage { .. }, Ok(v)) = (&req, &reply) {
+        crate::mailview::opened(v);
+    }
     if !read {
         crate::tray::refresh(&app);
     }
@@ -59,6 +62,9 @@ fn is_read(req: &Request) -> bool {
             | Request::PhpExtList { .. }
             | Request::PhpExtProgress
             | Request::Update { check: true }
+            | Request::MailList { .. }
+            | Request::MailHeaders { .. }
+            | Request::MailRaw { .. }
     )
 }
 
@@ -93,8 +99,8 @@ pub enum Open {
     Finder { path: String },
     /// A PHP version's php.ini, in the default text editor.
     PhpIni { version: String },
-    /// Mail's inbox (Mailpit's own page, D-049), in the default browser.
-    Inbox,
+    /// Mailpit's own page (D-049), or one message there, in the default browser.
+    Inbox { id: Option<String> },
 }
 
 /// The inbox of a running Mail as the daemon reports it, and only Mailpit's address on 127.0.0.1.
@@ -144,10 +150,16 @@ pub async fn open(target: Open) -> Result<String, String> {
             cmd.arg("-t").arg(&ini);
             format!("Opened {ini}")
         }
-        Open::Inbox => {
-            let url = inbox_url(&paths)?;
+        Open::Inbox { id } => {
+            let mut url = inbox_url(&paths)?;
+            if let Some(id) = id {
+                if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                    return Err(format!("{id:?} is not a message ID"));
+                }
+                url = format!("{url}view/{id}");
+            }
             cmd.arg(&url);
-            format!("Opened the inbox at {url}")
+            format!("Opened {url} in the browser")
         }
     };
     run(&mut cmd)?;
@@ -502,5 +514,7 @@ mod tests {
     fn only_changes_redraw_the_menu_bar() {
         assert!(is_read(&Request::Status) && is_read(&Request::Update { check: true }));
         assert!(!is_read(&Request::StopAll) && !is_read(&Request::Update { check: false }));
+        assert!(is_read(&Request::MailList { query: String::new(), unread: false, limit: None }));
+        assert!(!is_read(&Request::MailMessage { id: "a1".into() }), "opening a message marks it read");
     }
 }

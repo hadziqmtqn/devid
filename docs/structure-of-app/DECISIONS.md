@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-051 | 2026-11-16 | proposed (amends D-049) | The app's inbox shows an email's HTML through its own `mailview:` scheme: its own CSP without scripts, a sandboxed frame, and links that open in the browser |
 | D-050 | 2026-11-16 | accepted (amends D-049) | New-mail notifications use the legacy NSUserNotification API, since UserNotifications refuses an ad-hoc signed app; they show the sender and the subject |
 | D-049 | 2026-11-16 | accepted (Phase 9; schedules D-011's deferred mail catcher) | Mail: Devid ships the official Mailpit build and runs it when Mail is on (off by default); 0.15.0 opens Mailpit's inbox in the browser, a later 0.15.x shows the inbox in the app |
 | D-048 | 2026-11-16 | accepted (amends D-027, D-039) | The desktop app restarts through LaunchServices (`open -n`), not by replacing itself with `exec` |
@@ -824,3 +825,26 @@ See ARCHITECTURE, "PHP runtime".
   - Allowing notifications is up to the user. After Don't Allow, they stay quiet until allowed in System Settings › Notifications › Devid.
 - **Not chosen:** `osascript` with `display notification`, which shows as Script Editor and needs its own permission, and no notifications at all.
 - **Accepted:** by the owner on 2026-11-16, after the test notifications and with the two-line layout.
+
+## D-051: the app's inbox shows email HTML through its own `mailview:` scheme (proposed 2026-11-16, amends D-049)
+
+- **Context:**
+  - Stage 2 of D-049 puts the inbox inside Devid.app, as on the boards "Mail · Inbox" and "Mail · Inbox, empty".
+  - Whoever sent an email wrote its HTML. Mailpit's `/view/<id>.html` serves it with its `<script>`, and the app's page can call the app's commands.
+  - Laravel's mails need their inline styles and `<style>` blocks, and some embed images by `cid:`. A `srcdoc` frame would inherit the window's CSP (`style-src 'self'`) and lose them.
+- **Decision:**
+  - **Data through the daemon (D-012):** the page uses the inbox requests of M6a (`mail_list`, `mail_message`, `mail_headers`, `mail_raw`, `mail_read`, `mail_delete`, `mail_save`) and never calls Mailpit's API. New mail shows with the window's 2 s refresh, not over Mailpit's WebSocket.
+  - **Email HTML through `mailview://localhost/<id>`,** a URI scheme the app registers:
+    - Its reply carries its own CSP: `default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:; form-action 'none'`. No scripts, frames, forms or plugins; styles, images and fonts load.
+    - The page shows it in an iframe with `sandbox="allow-popups"`: an opaque origin, no scripts, no navigation of the window.
+    - Before serving, `cid:` images point to Mailpit's part URL on 127.0.0.1, every `http-equiv` is renamed so no `<meta http-equiv="refresh">` works, and `<base target="_blank">` is appended.
+    - The HTML comes from the `mail_message` reply the page just got, kept in the app. Asking Mailpit again would mark the message read again after "Mark as unread".
+  - **Links:** each link in an email opens as a new window. The window's navigation handler opens http, https and mailto URLs in the default browser, and allows nothing else outside the app's own pages and `mailview:`.
+    - WebKit asks that handler before it opens a new window.
+    - A link that would navigate the frame itself to http:// is blocked by WebKit as mixed content before the handler is asked; hence the `<base>`.
+  - **Opening the inbox:** "Open inbox" in the menu-bar menu and in the quick menu opens the Mail page. Mailpit's own page stays one click away: ⋯ › "Open inbox in Mailpit", and "Open in Mailpit" for one message.
+- **Consequences:**
+  - Remote images in an email load, as in most mail apps. The mail comes from the user's own apps.
+  - A link with an explicit `target="_self"` to an http:// URL does nothing. Laravel's buttons use `target="_blank"`, and its plain links get the `<base>`.
+  - Saving an attachment writes to ~/Downloads from the daemon. macOS may ask the first time whether `devid` may use the Downloads folder, and again after an update, since the signature is ad hoc (D-010). Not seen yet: the test daemon ran where Downloads is not reachable.
+- **Not chosen:** a `srcdoc` frame (the window's CSP strips the email's styles) and Mailpit's `/view/<id>.html` in a frame (its scripts run).

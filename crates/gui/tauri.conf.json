@@ -8,7 +8,7 @@
     "withGlobalTauri": true,
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src mailview:"
     }
   },
   "bundle": {
