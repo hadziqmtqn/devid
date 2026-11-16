@@ -61,6 +61,7 @@ p.dv-note { margin: 10px 4px 0; }
 .dv-nav:nth-child(1) .dv-ico { background: #0A84FF; }
 .dv-nav:nth-child(2) .dv-ico { background: #5E5CE6; }
 .dv-nav:nth-child(3) .dv-ico { background: #30B158; }
+.dv-nav.is-mail .dv-ico { background: #F07818; }
 .dv-nav .dv-chip { background: none; color: var(--text-2); font-weight: 400; }
 .dv-nav.is-active .dv-chip { color: rgba(255,255,255,.85); }
 .dv-navdot { width: 7px; height: 7px; flex: none; margin-right: 4px; border-radius: 50%; background: var(--switch-on); }
@@ -313,3 +314,26 @@ p.dv-note { margin: 10px 4px 0; }
 .up-done { display: flex; align-items: center; gap: 8px; margin: 10px 0 0 44px; font-size: 12px; color: var(--ok); transition: opacity .4s; }
 .up-done.is-fading { opacity: 0; }
 .up-wait { margin: 8px 0 0 44px; }
+
+/* Mail (Phase 9, D-049), as on the canvas boards "Mail · Off" and "Mail · Setup and status". */
+.ml-tile { width: 56px; height: 56px; flex: none; display: grid; place-items: center; margin: 0 auto; border-radius: 13px; background: #F07818; color: #fff; }
+.ml-tile .dv-ico { width: 30px; height: 30px; }
+.ml-tile.sm { width: 32px; height: 32px; margin: 0; border-radius: 8px; }
+.ml-tile.sm .dv-ico { width: 18px; height: 18px; stroke-width: 1.7; }
+.ml-title { display: flex; align-items: center; gap: 8px; }
+.ml-status { margin-top: 20px; }
+.ml-hero { max-width: 470px; margin: 64px auto 0; text-align: center; }
+.ml-hero h2 { margin: 16px 0 0; font-size: 17px; font-weight: 700; }
+.ml-hero p { margin: 6px 0 0; }
+.ml-points { display: grid; gap: 7px; width: fit-content; margin: 18px auto 0; padding: 0; list-style: none; text-align: left; font-size: 12px; }
+.ml-points li { display: flex; align-items: center; gap: 8px; }
+.ml-points .dv-ico { width: 14px; height: 14px; color: var(--ok); stroke-width: 2; }
+.ml-cta { margin-top: 24px; }
+.ml-cta .dv-btn { height: 28px; padding: 0 16px; }
+.ml-fine { margin-top: 8px; }
+.ml-dl { width: 320px; margin: 24px auto 0; text-align: left; }
+.ml-dl .dv-strong { font-size: 12px; }
+.ml-dl .up-bar { margin-top: 8px; }
+.ml-env { position: relative; padding: 0 12px 12px; }
+.ml-code { margin: 0; white-space: pre; -webkit-user-select: text; user-select: text; cursor: text; }
+.ml-copy { position: absolute; top: 8px; right: 20px; }

@@ -93,6 +93,22 @@ pub enum Open {
     Finder { path: String },
     /// A PHP version's php.ini, in the default text editor.
     PhpIni { version: String },
+    /// Mail's inbox (Mailpit's own page, D-049), in the default browser.
+    Inbox,
+}
+
+/// The inbox of a running Mail as the daemon reports it, and only Mailpit's address on 127.0.0.1.
+pub fn inbox_url(paths: &Paths) -> Result<String, String> {
+    let status = request(paths, &Request::Status)?;
+    let m = &status["mail"];
+    if m["state"] != "running" {
+        return Err(if m["enabled"] == true { "Mail is not running".into() } else { "Mail is off".into() });
+    }
+    m["inbox_url"]
+        .as_str()
+        .filter(|u| u.starts_with("http://127.0.0.1:"))
+        .map(String::from)
+        .ok_or_else(|| "the daemon gave no inbox address".into())
 }
 
 /// Opens something with macOS's `open`; returns the message to show, in the TUI's wording.
@@ -128,6 +144,11 @@ pub async fn open(target: Open) -> Result<String, String> {
             cmd.arg("-t").arg(&ini);
             format!("Opened {ini}")
         }
+        Open::Inbox => {
+            let url = inbox_url(&paths)?;
+            cmd.arg(&url);
+            format!("Opened the inbox at {url}")
+        }
     };
     run(&mut cmd)?;
     Ok(done)
@@ -150,6 +171,15 @@ pub async fn copy_url(name: String, share: Option<bool>) -> Result<String, Strin
         _ => site_url(&paths, &name)?,
     };
     pbcopy(&url).map(|_| format!("Copied {url}"))
+}
+
+/// Copies the `.env` lines a Laravel app needs to send to Mail (D-049), with the daemon's port.
+#[tauri::command]
+pub async fn copy_mail_env() -> Result<String, String> {
+    let status = request(&Paths::from_env(), &Request::Status)?;
+    let port = status["mail"]["port"].as_u64().ok_or("this daemon has no Mail; update Devid")?;
+    pbcopy(&format!("MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT={port}\n"))
+        .map(|_| "Copied the .env lines".into())
 }
 
 /// Copies the full path of a log the daemon lists.
@@ -358,10 +388,12 @@ fn known(paths: &Paths, path: &str, finder: bool) -> Result<(), String> {
     ok.extend(items(&sites["parked"]).filter_map(Value::as_str));
     ok.extend(items(&sites["ignored"]).filter_map(|i| i["path"].as_str()));
     let home = paths.home.display().to_string();
+    let mail = format!("{home}/mail");
     let servers = if finder { request(paths, &Request::ServerList)? } else { Value::Null };
     let logs = if finder { log_paths(paths)? } else { Vec::new() };
     if finder {
         ok.push(&home);
+        ok.push(&mail);
         ok.extend(items(&servers["servers"]).filter_map(|s| s["config"].as_str()));
         ok.extend(logs.iter().map(String::as_str));
     }

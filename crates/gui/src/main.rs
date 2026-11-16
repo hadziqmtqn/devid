@@ -28,6 +28,7 @@ fn main() {
             api::open,
             api::copy_url,
             api::copy_log_path,
+            api::copy_mail_env,
             api::server_config,
             api::choose_folder,
             api::doctor,
@@ -133,7 +134,7 @@ fn replaced(running: Option<(u64, u64)>, now: Option<(u64, u64)>) -> bool {
 
 /// One of the window's pages, by name.
 pub fn start_page(name: &str) -> Option<&'static str> {
-    ["sites", "php", "server", "logs", "settings"].into_iter().find(|p| *p == name)
+    ["sites", "php", "server", "mail", "logs", "settings"].into_iter().find(|p| *p == name)
 }
 
 /// Starts a fresh copy of the app with `args` (`--background` for the menu-bar icon only, `--page

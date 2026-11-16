@@ -15,3 +15,4 @@
 | 2026-11-14 | [The Sites page as a table, a quick menu on the status card, and a Link a site dialog](2026-11-14-sites-table.md) |
 | 2026-11-14 | [Update progress: real percentages for PHP, the web server and Devid itself](2026-11-14-update-progress.md) |
 | 2026-11-16 | [Fix: the app comes back after an update, through LaunchServices instead of exec (D-048)](2026-11-16-relaunch-through-launchservices.md) |
+| 2026-11-16 | [Mail in the desktop app, stage 1: the Mail page, quick menus and the inbox in the browser (Phase 9 M4, D-049)](2026-11-16-mail-page.md) |
