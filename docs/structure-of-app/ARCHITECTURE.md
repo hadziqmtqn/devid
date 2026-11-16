@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-15 (D-047: live check of ports 80/443)
+> Verified against: 2026-11-16 (children keep no inherited fds)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -61,6 +61,7 @@ Implemented in M5:
 
 Implemented in M6:
 - **Signals.** The daemon blocks SIGTERM/SIGINT/SIGHUP before starting any thread. A `sigwait` thread turns them into the same clean stop as `devid daemon stop`. The supervisor clears the inherited mask in children (`pre_exec`), so nginx still gets SIGHUP for reloads.
+- **No inherited fds.** Services and site commands mark every fd above stderr close-on-exec (`supervisor::keep_no_fds`, 2026-11-16). On macOS, std marks a new pipe or socket close-on-exec only after creating it, so a child forked by another thread in between could keep another spawn's exec-status pipe open for its whole life, and that spawn would never return.
 - **`daemon::install`** (user level, no root):
   - copies the binary to `~/.devid/bin/devid`, with `php` and `composer` symlinks to it;
   - adds a marked PATH line to `~/.zshrc` (or `~/.bash_profile`), appended so Devid's `php` wins over Homebrew;
