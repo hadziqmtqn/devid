@@ -1,10 +1,10 @@
 # Devid
 
-Devid is a local development environment for Laravel, PHP and Node.js on Intel Macs. Every project folder you park or link gets its own `https://<name>.test` address with a trusted certificate. Devid ships PHP and the web servers prebuilt, so it needs no Homebrew, no Docker and no virtual machine. You use it from the command line, from a terminal UI (TUI) or from the menu-bar desktop app.
+Devid is a local development environment for Laravel, PHP and Node.js on Macs, Intel or Apple silicon. Every project folder you park or link gets its own `https://<name>.test` address with a trusted certificate. Devid ships PHP and the web servers prebuilt, so it needs no Homebrew, no Docker and no virtual machine. You use it from the command line, from a terminal UI (TUI) or from the menu-bar desktop app.
 
 **Website and guide:** [devid.bekenweb.com](https://devid.bekenweb.com), with the user guide at [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs).
 
-> **Status:** v0.13, used daily on one Mac. It runs on Intel Macs only for now. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
+> **Status:** v0.14, used daily on one Intel Mac. Apple silicon builds start with v0.14 and are tested on GitHub's runners only so far (D-046). This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
 
 ```sh
 devid park ~/Projects                  # every subfolder becomes <folder>.test
@@ -59,7 +59,7 @@ Devid is an open-source personal project, provided as is. The builds are ad-hoc 
 
 | | |
 |---|---|
-| System | Intel Mac, macOS 12 or newer (tested on 14 Sonoma) |
+| System | Mac with Intel or Apple silicon, macOS 12 or newer. Tested by hand on Intel with 14 Sonoma; Apple silicon on GitHub's runners only |
 | Setup | Admin password, once: `.test` DNS, Devid's CA and ports 80/443 |
 | Ports | 80 and 443 free (stop Valet first) |
 | Not included | Databases (use a tool such as DBngin), and Node.js: Devid uses yours |
@@ -78,10 +78,10 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 - Node.js projects and dev servers.
 - Sharing a site through a Cloudflare tunnel.
 - The CLI, the TUI and the menu-bar app.
+- Apple silicon: Devid, PHP, the extensions and the web servers built for arm64, and smoke-tested on GitHub's Apple silicon runners before each release (D-046).
 
 **Next**
 
-- Apple silicon: Devid, PHP, the extensions and the web servers built for arm64, and tested on GitHub's Apple silicon runners (D-044).
 - macOS 15 up to the latest macOS, on Intel, tested as far as GitHub's macOS runners allow.
 - A shorter install command, on Devid's own domain.
 
