@@ -1,6 +1,6 @@
 //! The menu-bar icon and its menu (Phase 7 G3): the state at a glance, Start all, Stop all and
-//! Restart, available updates (D-028), running commands with Stop (Phase 8 A5, D-036), Open Devid,
-//! Settings and Quit.
+//! Restart, available updates (D-028), running commands with Stop (Phase 8 A5, D-036), Mail
+//! (Phase 9, D-049), Open Devid, Settings and Quit.
 
 use devid_daemon::{
     paths::Paths,
@@ -36,6 +36,8 @@ pub struct View {
     pub commands: Vec<(String, String)>,
     /// Shared sites (D-037).
     pub shares: Vec<String>,
+    /// Mail (D-049): None while it is off, else whether Mailpit runs and its unread messages.
+    pub mail: Option<(bool, u64)>,
 }
 
 pub fn view(status: Result<&Value, &str>) -> View {
@@ -48,6 +50,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
             updates: 0,
             commands: Vec::new(),
             shares: Vec::new(),
+            mail: None,
         };
     };
     let failed = s["php"].as_array().into_iter().flatten().filter(|p| p["status"] == "failed").count()
@@ -75,6 +78,8 @@ pub fn view(status: Result<&Value, &str>) -> View {
         .collect();
     let shares =
         s["shares"].as_array().into_iter().flatten().filter_map(|x| x["site"].as_str().map(String::from)).collect();
+    let m = &s["mail"];
+    let mail = (m["enabled"] == true).then(|| (m["state"] == "running", m["unread"].as_u64().unwrap_or(0)));
     View {
         icon: if failed > 0 || ports_off {
             "bad"
@@ -89,6 +94,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
         updates,
         commands,
         shares,
+        mail,
     }
 }
 
@@ -199,6 +205,22 @@ fn menu(app: &AppHandle, v: &View, error: Option<&str>) -> tauri::Result<Menu<Wr
             m.append(&item(&format!("share-stop:{site}"), &format!("Stop sharing {site}"), true, None)?)?;
         }
     }
+    if v.running.is_some() {
+        m.append(&sep()?)?;
+        match v.mail {
+            Some((true, unread)) => {
+                let header = if unread > 0 { format!("Mail · {unread} new") } else { "Mail".into() };
+                m.append(&item("mail", &header, false, None)?)?;
+                m.append(&item("mail-open", "Open inbox", true, None)?)?;
+                m.append(&item("mail-test", "Send test email", true, None)?)?;
+            }
+            Some((false, _)) => {
+                m.append(&item("mail", "Mail · Stopped", false, None)?)?;
+                m.append(&item("mail-page", "Mail…", true, None)?)?;
+            }
+            None => m.append(&item("mail-page", "Turn on Mail…", true, None)?)?,
+        }
+    }
     match v.running {
         Some(true) => {
             m.append(&sep()?)?;
@@ -223,6 +245,26 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
     match event.id().as_ref() {
         "open" => crate::open_window(app, None),
         "settings" | "updates" => crate::open_window(app, Some("settings")),
+        "mail-page" => crate::open_window(app, Some("mail")),
+        id @ ("mail-open" | "mail-test") => {
+            let (app, id) = (app.clone(), id.to_string());
+            std::thread::spawn(move || {
+                let paths = Paths::from_env();
+                let error = match id.as_str() {
+                    // Full path, as in api::open: a terminal's own `open` may come first on PATH.
+                    "mail-open" => crate::api::inbox_url(&paths).and_then(|url| {
+                        std::process::Command::new("/usr/bin/open")
+                            .arg(url)
+                            .status()
+                            .map(|_| ())
+                            .map_err(|e| e.to_string())
+                    }),
+                    _ => request(&paths, &Request::MailTest).map(|_| ()),
+                };
+                *app.state::<TrayState>().error.lock().unwrap() = error.err();
+                refresh(&app);
+            });
+        }
         "quit" => app.exit(0),
         id if id.starts_with("share-stop:") => {
             let (app, site) = (app.clone(), id.trim_start_matches("share-stop:").to_string());
@@ -313,6 +355,13 @@ mod tests {
         let shared = json!({"server": "nginx", "server_status": "running", "php": [],
             "shares": [{"site": "erd", "url": "https://a-b.trycloudflare.com"}]});
         assert_eq!(view(Ok(&shared)).shares, ["erd"]);
+        assert_eq!(view(Ok(&shared)).mail, None, "Mail is off");
+        let mail = json!({"server": "nginx", "server_status": "running", "php": [],
+            "mail": {"enabled": true, "state": "running", "unread": 3}});
+        assert_eq!(view(Ok(&mail)).mail, Some((true, 3)));
+        let paused = json!({"server": "nginx", "server_status": "running", "php": [],
+            "mail": {"enabled": true, "state": "paused", "unread": null}});
+        assert_eq!(view(Ok(&paused)).mail, Some((false, 0)));
         assert_eq!(
             view(Ok(&commands)).commands,
             [("erd".to_string(), "dev:pg:local".to_string()), ("erd".to_string(), "tauri".to_string())]

@@ -31,6 +31,7 @@ const ICONS = {
   sites: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2"/><ellipse cx="8" cy="8" rx="2.7" ry="6.2"/><path d="M2 8h12"/></svg>',
   php: '<svg viewBox="0 0 16 16"><path d="M5 4 1.5 8 5 12M11 4l3.5 4L11 12M9.3 2.8 6.7 13.2"/></svg>',
   server: '<svg viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="4.5" rx="1.3"/><rect x="2" y="9" width="12" height="4.5" rx="1.3"/><circle class="f" cx="4.8" cy="4.75" r=".9"/><circle class="f" cx="4.8" cy="11.25" r=".9"/></svg>',
+  mail: '<svg viewBox="0 0 16 16"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6"/><path d="m2.4 4.3 5.6 4.5 5.6-4.5"/></svg>',
   logs: '<svg viewBox="0 0 16 16"><rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"/></svg>',
   settings: '<svg viewBox="0 0 16 16"><path d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7"/><circle cx="11" cy="4.5" r="1.6"/><circle cx="5" cy="11.5" r="1.6"/></svg>',
   folder: '<svg viewBox="0 0 16 16"><path d="M1.8 4.2a1.2 1.2 0 0 1 1.2-1.2h3.3l1.5 1.5H13a1.2 1.2 0 0 1 1.2 1.2v6.6A1.2 1.2 0 0 1 13 13.5H3a1.2 1.2 0 0 1-1.2-1.2z"/></svg>',
@@ -43,6 +44,7 @@ const ICONS = {
   play: '<svg viewBox="0 0 16 16"><path class="f" d="M5 3.2v9.6L12.8 8z"/></svg>',
   stop: '<svg viewBox="0 0 16 16"><rect class="f" x="4" y="4" width="8" height="8" rx="1.2"/></svg>',
   search: '<svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>',
+  check: '<svg viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg>',
 };
 
 const S = {
@@ -63,6 +65,8 @@ const S = {
   ext: null, // the open Extensions dialog
   site: null, // the site whose detail view is open (Phase 8 A5)
   logPanel: null, // the command whose log shows under its site's commands
+  mailDl: null, // the first `mail on`'s download: {got, size}
+  mailPort: null, // the SMTP port being typed, until it is applied
 };
 const $ = (id) => document.getElementById(id);
 
@@ -246,6 +250,9 @@ const PAGES = {
   php: { title: 'PHP', sub: () => 'PHP 8.3, 8.4 and 8.5 side by side; pick one per site.',
     load: () => daemon({ cmd: 'php_list' }), render: phpPage },
   server: { title: 'Web Server', sub: () => 'Status, engine choice and configuration.', load: () => daemon({ cmd: 'server_list' }), render: serverPage },
+  // Mail's state is in `status`; returning it redraws the page when the counts change.
+  mail: { title: 'Mail', sub: () => 'Catches the email your apps send. Nothing leaves this Mac.', load: async () => S.status?.mail || {},
+    render: mailPage, tools: mailTools },
   logs: { title: 'Logs', sub: () => 'Log files in ' + (S.status?.home || '~/.devid') + '/log.', load: loadLogs, render: logsPage },
   settings: { title: 'Settings', sub: () => 'Preferences for Devid on this Mac.', load: async () => ({}), render: settingsPage },
 };
@@ -436,6 +443,7 @@ async function quickMenu(anchor) {
     sites.length && { header: 'Sites' },
     ...sites.map((s) => ({ label: siteHost(s), kbd: s.mode === 'php' ? 'PHP ' + s.php : s.mode === 'proxy' ? ':' + s.upstream : 'Static',
       run: () => openTarget({ what: 'site', name: s.name }) })),
+    ...mailMenu(st.mail),
     '-',
     ...(running ? [{ label: 'Stop all', run: stopAll }, { label: 'Restart ' + st.server, run: () => restart(st.server) }] : [{ label: 'Start all', run: startAll }]),
     '-',
@@ -447,6 +455,128 @@ async function quickMenu(anchor) {
     { label: 'Settings…', run: () => go('settings') },
     { label: 'Quit Devid', run: () => invoke('quit') },
   ], false, anchor.closest('.dv-statuscard'));
+}
+
+// ---------- Mail (Phase 9, D-049): Devid runs Mailpit; its inbox opens in the browser ----------
+
+const MAIL_STATES = { running: ['Running', 'ok'], starting: ['Starting', 'muted'], paused: ['Stopped', 'warn'],
+  stopped: ['Stopped', 'warn'], failed: ['Failed', 'bad'] };
+const mailSet = (label, fields, done) => act(label, () => daemon({ cmd: 'mail_set', ...fields }), done);
+const openInbox = () => openTarget({ what: 'inbox' });
+const sendTestMail = () => act('Sending…', () => daemon({ cmd: 'mail_test' }), 'Test email sent to test@example.com', 'mail-test');
+const copyMailEnv = () => invoke('copy_mail_env').then((m) => toast(m), (e) => toast(String(e), true));
+
+/** The first time, `mail_set` waits for Mailpit's download; `status` shows how far it is meanwhile. */
+async function turnOnMail() {
+  if (S.busy) return;
+  const first = !S.status?.mail?.installed;
+  if (first) S.mailDl = { got: 0, size: 0 };
+  const timer = first && setInterval(async () => {
+    try { S.mailDl = (await daemon({ cmd: 'status' })).mail?.download || S.mailDl; renderPage(); } catch { /* the next tick asks again */ }
+  }, 500);
+  try {
+    await act('Turning Mail on…', () => daemon({ cmd: 'mail_set', enabled: true }), (r) => 'Mail is on · SMTP on 127.0.0.1:' + r.mail.port, 'mail-on');
+  } finally {
+    clearInterval(timer);
+    S.mailDl = null;
+    renderPage();
+  }
+}
+
+async function clearMail(m) {
+  if (await ask('Delete all ' + plural(m.total, 'message') + '?', 'They are deleted from ' + S.status.home + '/mail. This can\'t be undone.', 'Delete', true))
+    act('Deleting…', () => daemon({ cmd: 'mail_clear' }), 'Deleted all mail');
+}
+
+function applyMailPort(value, current) {
+  const port = Number(value);
+  if (port === current) { S.mailPort = null; return; }
+  if (!/^\d{1,5}$/.test(value) || port < 1024 || port > 65534) {
+    toast('Use a port from 1024 to 65534; the inbox takes the next one', true);
+    S.mailPort = null;
+    renderPage();
+    return;
+  }
+  S.mailPort = null;
+  mailSet('Changing the port…', { port }, 'SMTP port is now ' + port + '; set MAIL_PORT=' + port + ' in your apps\' .env');
+}
+
+/** The window's quick menu: what the menu-bar icon shows for Mail. */
+function mailMenu(m) {
+  if (!m) return [];
+  if (m.state === 'running') return ['-', { header: 'Mail' + (m.unread ? ' · ' + m.unread + ' new' : '') },
+    { label: 'Open inbox', kbd: '↗', run: openInbox }, { label: 'Send test email', run: sendTestMail }];
+  if (m.enabled) return ['-', { header: 'Mail · Stopped' }, { label: 'Mail…', run: () => go('mail') }];
+  return ['-', { label: 'Turn on Mail…', run: () => go('mail') }];
+}
+
+function mailTools() {
+  if (S.status?.mail?.state !== 'running') return [];
+  return [busyBtn('mail-test', 'Send test email', sendTestMail),
+    h('button.dv-btn.primary', { type: 'button', onclick: openInbox, disabled: !!S.busy }, 'Open inbox', icon('open'))];
+}
+
+function mailPage() {
+  const st = S.status;
+  const m = st.mail;
+  if (!m) return h('div.dv-empty.dv-sub', {}, 'This daemon has no Mail yet; update Devid.');
+  if (S.mailDl || !m.enabled || m.state === 'not installed') return mailOff(m);
+  const [label, tone] = MAIL_STATES[m.state] || [capital(m.state), 'muted'];
+  const port = m.port;
+  const stopped = m.state === 'paused' || m.state === 'stopped';
+  const counts = m.total == null ? (m.state === 'running' ? 'Asking Mailpit…' : 'Shown while Mail runs') : plural(m.total, 'message') + ' · ' + m.unread + ' unread';
+  return [
+    h('div.dv-card.ml-status', {},
+      row(h('span.ml-tile.sm', { 'aria-hidden': 'true' }, icon('mail')),
+        h('label.dv-grow', { for: 'sw-mail' }, h('div.ml-title', {}, h('span.dv-strong', {}, 'Mail catcher'), h('span.dv-chip.' + tone, {}, label)),
+          h('div.dv-sub', {}, 'Mailpit ' + (m.version || '') + ' · SMTP on 127.0.0.1:' + port)),
+        stopped ? btn('Start', () => act('Starting Mail…', () => daemon({ cmd: 'service_start', service: 'mail' }), 'Mail started')) : null,
+        h('input.dv-switch', { type: 'checkbox', role: 'switch', id: 'sw-mail', checked: true, disabled: !!S.busy,
+          onchange: () => mailSet('Turning Mail off…', { enabled: false }, 'Mail is off; apps that send mail get a connection error until it is on again') })),
+      m.error ? row(h('div.dv-grow.dv-error', { role: 'alert' }, m.error)) : null,
+      row(text('Inbox', counts), btn('Delete all…', () => clearMail(m), 'danger-text', { disabled: !!S.busy || !m.total }))),
+    h('h2.dv-h2', {}, 'Send mail from your app'),
+    card(
+      row(text('Laravel', 'Add these lines to the app\'s .env. Nothing else to install.')),
+      h('div.ml-env', {}, h('pre.dv-pre.ml-code', { 'aria-label': '.env lines for Laravel' },
+        'MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT=' + port), btn('Copy', copyMailEnv, 'ml-copy')),
+      row(text('Other apps', h('span.dv-mono', {}, 'SMTP 127.0.0.1:' + port + ' · any login, or none · no TLS'))),
+      switchRow('sw-php-mail', 'Catch PHP\'s mail()', 'Points sendmail_path in Devid\'s PHP here, for WordPress and plain PHP.', m.php_mail,
+        (on) => mailSet(on ? 'Turning on…' : 'Turning off…', { php_mail: on }, on ? 'PHP\'s mail() goes to Mail' : 'PHP\'s mail() no longer goes to Mail'))),
+    h('h2.dv-h2', {}, 'Settings'),
+    card(
+      row(h('label.dv-grow', { for: 'mail-port' }, h('div', {}, 'SMTP port'), h('div.dv-sub', {}, 'Laravel\'s .env.example uses 2525. The inbox takes the next port.')),
+        h('input.dv-input.port.dv-mono', { id: 'mail-port', type: 'text', inputmode: 'numeric', maxlength: '5', spellcheck: 'false',
+          value: S.mailPort ?? String(port), disabled: !!S.busy, oninput: (e) => { S.mailPort = e.target.value; },
+          onchange: (e) => applyMailPort(e.target.value.trim(), port) })),
+      row(text('Keep', 'The oldest mail goes when the inbox is full.'),
+        h('div.dv-seg', { role: 'group', 'aria-label': 'Messages to keep' }, [100, 500, 1000].map((n) =>
+          h('button', { type: 'button', 'aria-pressed': String(m.keep === n), disabled: !!S.busy,
+            onclick: () => { if (m.keep !== n) mailSet('Saving…', { keep: n }, 'Mail keeps the newest ' + n.toLocaleString('en') + ' messages'); } },
+          n.toLocaleString('en')))))),
+    h('h2.dv-h2', {}, 'Storage'),
+    card(row(text('Mail folder', h('span.dv-mono', {}, st.home + '/mail')), btn('Show in Finder', () => openTarget({ what: 'finder', path: st.home + '/mail' })))),
+  ];
+}
+
+/** Mail is off: what it does, and Turn on Mail; the first time, the download's progress. */
+function mailOff(m) {
+  const dl = S.mailDl;
+  const pct = dl?.size ? Math.min(100, Math.round(100 * dl.got / dl.size)) : 0;
+  return h('div.ml-hero', {},
+    h('span.ml-tile', { 'aria-hidden': 'true' }, icon('mail')),
+    h('h2', {}, 'Catch the email your apps send'),
+    h('p.dv-sub', {}, 'Password resets, invoices and notifications land in an inbox on this Mac instead of real mailboxes. Devid runs Mailpit for it.'),
+    h('ul.ml-points', {}, ['Works with Laravel\'s smtp mailer and PHP\'s mail()', 'Each message with its HTML, text, headers and attachments',
+      'Nothing runs in the background until you turn it on'].map((t) => h('li', {}, icon('check'), t))),
+    dl
+      ? h('div.ml-dl', {}, h('div.dv-strong', {}, 'Downloading Mailpit'),
+        h('progress.up-bar', { max: '100', value: pct, 'aria-label': 'Downloading Mailpit' }),
+        h('div.up-meta', {}, h('span', {}, dl.size ? humanSize(dl.got) + ' of ' + humanSize(dl.size) : 'Starting…'), h('span', {}, dl.size ? pct + '%' : '')))
+      : [h('div.ml-cta', {}, busyBtn('mail-on', 'Turn on Mail', turnOnMail, 'primary')),
+        h('div.dv-sub.ml-fine', {}, m.installed
+          ? 'Mailpit ' + (m.version || '') + ' is installed. The mail it caught is still in ' + S.status.home + '/mail.'
+          : 'Downloads Mailpit (about 11 MB, MIT license) from Devid\'s releases.')]);
 }
 
 // ---------- site detail (Phase 8 A5: app type D-035, local port D-037, commands D-036) ----------
@@ -780,8 +910,9 @@ function logSources(d) {
   const st = S.status;
   const left = new Set(d.logs);
   const take = (name) => left.delete(name);
-  const groups = [{ label: 'Devid', items: [] }, { label: 'Web server', items: [] }, { label: 'PHP', items: [] }];
+  const groups = [{ label: 'Devid', items: [] }, { label: 'Web server', items: [] }, { label: 'PHP', items: [] }, { label: 'Mail', items: [] }];
   if (take('daemon.log')) groups[0].items.push({ name: 'daemon.log', label: 'Daemon', on: true });
+  if (take('mailpit.log')) groups[3].items.push({ name: 'mailpit.log', label: 'Mailpit', on: st.mail?.state === 'running' });
   for (const name of d.logs) {
     const web = /^(nginx|caddy|apache)-(\w+)\.log$/.exec(name);
     if (web && take(name)) groups[1].items.push({ name, label: (SERVERS[web[1]]?.label || web[1]) + ' · ' + (web[2] === 'error' ? 'errors' : web[2]),
@@ -1437,13 +1568,14 @@ function renderChrome() {
   const upd = [S.upd.dv, S.upd.rt].find((u) => u?.state === 'running');
   const pct = upd && (upd === S.upd.dv ? devidPercent(upd) : upd.percent || 0);
   const key = JSON.stringify([S.page, S.site, heading, PAGES[S.page].sub(), !!S.busy, cardBusy, autoUpdates(st)?.count, pct,
-    st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status)]]);
+    st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status), st.mail?.state, st.mail?.unread]]);
   if (key === chromeKey) return;
   chromeKey = key;
   $('nav').replaceChildren(...Object.entries(PAGES).map(([key, p]) =>
-    h('button.dv-nav' + (key === S.page ? '.is-active' : ''), { type: 'button', 'aria-current': key === S.page ? 'page' : null,
+    h('button.dv-nav' + (key === S.page ? '.is-active' : '') + (key === 'mail' ? '.is-mail' : ''), { type: 'button', 'aria-current': key === S.page ? 'page' : null,
       onclick: () => go(key) }, icon(key), h('span.dv-grow', {}, p.title),
     key === 'sites' && st ? h('span.dv-chip', {}, String(st.sites)) : key === 'php' && st ? h('span.dv-chip', {}, st.default_php) :
+      key === 'mail' && st?.mail?.unread ? h('span.dv-chip', { 'aria-label': plural(st.mail.unread, 'unread message') }, String(st.mail.unread)) :
       key === 'settings' && upd ? h('span.dv-navpct', { 'aria-label': 'Updating, ' + pct + '%' }, pct + '%') :
       key === 'settings' && autoUpdates(st)?.count ? h('span.dv-navdot', { title: 'Updates available', 'aria-label': 'Updates available' }) : null)));
   $('title').textContent = heading;

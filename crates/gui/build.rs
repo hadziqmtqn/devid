@@ -5,6 +5,7 @@ fn main() {
         "open",
         "copy_url",
         "copy_log_path",
+        "copy_mail_env",
         "server_config",
         "choose_folder",
         "doctor",
