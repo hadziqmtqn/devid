@@ -110,6 +110,7 @@ As planned when stage 2 started (2026-11-16); it replaces the first sketch, a Ta
     - Mark as unread, then Preview again, left the message unread: the frame reuses the HTML the page fetched.
     - A bug found and fixed: while the search field had focus, a redraw waited, and the Delete button of the old view acted on the newly picked message. The view's buttons now act on the message they show, and picking leaves the search field.
     - At the window's smallest size (760×520) the tab row wraps; a fixed-width email scrolls in its frame.
+    - In dark mode, an email with dark-mode rules showed white text on the frame's white. Switching off `color-scheme` in the email makes every email show its light design; a template's own background still shows.
 
 ## Milestones
 

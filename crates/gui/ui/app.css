@@ -379,7 +379,7 @@ p.dv-note { margin: 10px 4px 0; }
 .mx-content { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 28px; background: var(--log-bg); -webkit-user-select: text; user-select: text; cursor: text; }
 .mx-content.is-frame { padding: 0; overflow: hidden; }
 /* The email as its app sent it: light in dark mode too. */
-.mx-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.mx-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; color-scheme: light; }
 .mx-plaintext { max-width: 570px; margin: 0 auto; padding: 22px 26px; border-radius: 8px; background: #fff; color: #1D1D1F; font: 14px/1.55 -apple-system, BlinkMacSystemFont, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mx-pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, "SF Mono", Menlo, monospace; }
 .mx-pre.raw { white-space: pre; overflow-wrap: normal; font-size: 11.5px; }

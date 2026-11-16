@@ -838,6 +838,7 @@ See ARCHITECTURE, "PHP runtime".
     - Its reply carries its own CSP: `default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:; form-action 'none'`. No scripts, frames, forms or plugins; styles, images and fonts load.
     - The page shows it in an iframe with `sandbox="allow-popups"`: an opaque origin, no scripts, no navigation of the window.
     - Before serving, `cid:` images point to Mailpit's part URL on 127.0.0.1, every `http-equiv` is renamed so no `<meta http-equiv="refresh">` works, and `<base target="_blank">` is appended.
+    - Every `color-scheme` is renamed too, so each email shows its light design: its own backgrounds, and white where it sets none, as in Gmail and Mailpit. In dark mode, an email's dark rules otherwise put light text on that white (seen on 2026-11-16).
     - The HTML comes from the `mail_message` reply the page just got, kept in the app. Asking Mailpit again would mark the message read again after "Mark as unread".
   - **Links:** each link in an email opens as a new window. The window's navigation handler opens http, https and mailto URLs in the default browser, and allows nothing else outside the app's own pages and `mailview:`.
     - WebKit asks that handler before it opens a new window.
@@ -845,6 +846,7 @@ See ARCHITECTURE, "PHP runtime".
   - **Opening the inbox:** "Open inbox" in the menu-bar menu and in the quick menu opens the Mail page. Mailpit's own page stays one click away: ⋯ › "Open inbox in Mailpit", and "Open in Mailpit" for one message.
 - **Consequences:**
   - Remote images in an email load, as in most mail apps. The mail comes from the user's own apps.
+  - An email's dark-mode design does not show. The words `http-equiv` and `color-scheme` in an email's visible text show renamed.
   - A link with an explicit `target="_self"` to an http:// URL does nothing. Laravel's buttons use `target="_blank"`, and its plain links get the `<base>`.
   - Saving an attachment writes to ~/Downloads from the daemon. macOS may ask the first time whether `devid` may use the Downloads folder, and again after an update, since the signature is ad hoc (D-010). Not seen yet: the test daemon ran where Downloads is not reachable.
 - **Not chosen:** a `srcdoc` frame (the window's CSP strips the email's styles) and Mailpit's `/view/<id>.html` in a frame (its scripts run).

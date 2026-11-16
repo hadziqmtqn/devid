@@ -12,7 +12,7 @@
   - **Toolbar:** Send test email, and ⋯ with Mark all as read, Open inbox in Mailpit, Mail settings… and Delete all….
   - **Keys:** ↑ and ↓ move through the list; Delete or Backspace deletes the open message.
 - **Mail settings** is the stage 1 page, behind ⋯ (with a back button) and as the only view while Mail is stopped.
-- **`crates/gui/src/mailview.rs`:** the `mailview://localhost/<id>` scheme serves the email's HTML for a sandboxed frame, with its own CSP (no scripts), `cid:` images pointed at Mailpit, `http-equiv` switched off and `<base target="_blank">` appended. `navigate`, the window's navigation handler, opens http, https and mailto links in the browser and keeps the window on the app's pages.
+- **`crates/gui/src/mailview.rs`:** the `mailview://localhost/<id>` scheme serves the email's HTML for a sandboxed frame, with its own CSP (no scripts), `cid:` images pointed at Mailpit, `http-equiv` and `color-scheme` switched off, and `<base target="_blank">` appended. `navigate`, the window's navigation handler, opens http, https and mailto links in the browser and keeps the window on the app's pages.
 - **Redraws:** `PAGES.mail.patch` redraws only the list while the open message stays, so its frame does not reload every 2 s.
 - **Daemon:** `mail_message` also lists the inline parts (`inline`: part and Content-ID).
 - **Menu bar and quick menu:** Open inbox opens the Mail page instead of the browser.
@@ -27,11 +27,13 @@
 - Unread view, search, Delete (the next message opens), Mail settings and back, Delete all (the empty view), and the first message after it.
 - Saving an attachment, with the test daemon's HOME in `/tmp`.
 - At 760×520 the tab row wraps.
+- Backgrounds, in dark mode, after the owner asked whether the page follows each email's template: a dark template shows dark, Laravel's shows its gray and white, an email without colors shows white. Two emails with dark-mode rules (with and without a `color-scheme` meta) showed white text on white until `color-scheme` was switched off; now they show their light design.
 - Tests: `email_html_loses_its_pragmas_and_gets_its_inline_images`, `only_message_ids_reach_the_daemon`, `the_web_view_stays_on_the_app_and_email_pages`, `only_changes_redraw_the_menu_bar`, and the inline parts in `inbox_ids_queries_and_messages`.
 - `cargo fmt`, `cargo clippy --all-targets -D warnings` and `cargo test` for the workspace and for `-p devid-gui`.
 
 ## Found and fixed while testing
 
+- An email with dark-mode rules showed white text on the white page in dark mode. Each email now shows its light design (D-051).
 - While the search field had focus, a redraw waited (so typing is never undone), and the old view's Delete button deleted the newly picked message. The view's buttons now act on the message they show, and picking a message or a tab leaves the search field.
 
 ## Left

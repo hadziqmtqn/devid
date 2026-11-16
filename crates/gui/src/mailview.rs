@@ -62,10 +62,13 @@ fn page(path: &str) -> Result<String, String> {
     Ok(prepare(html, id, inline.map(Vec::as_slice).unwrap_or_default(), inbox.as_deref()))
 }
 
-/// The email's HTML with its inline images (`cid:`) loaded from Mailpit, every `http-equiv` renamed
-/// so no `<meta http-equiv="refresh">` navigates the frame without a click, and a `<base>` that
-/// makes links without a target open a new window. In the frame itself, WebKit blocks a link to
-/// http:// (mixed content) before `navigate` is asked.
+/// The email's HTML, ready for the frame:
+/// - its inline images (`cid:`) load from Mailpit;
+/// - every `http-equiv` is renamed, so no `<meta http-equiv="refresh">` moves the frame without a click;
+/// - every `color-scheme` is renamed too, so the email shows its light design, as in Gmail and Mailpit.
+///   In dark mode, its dark rules could otherwise put light text on the white page behind it;
+/// - a `<base>` makes links without a target open a new window. In the frame itself, WebKit blocks
+///   a link to http:// (mixed content) before `navigate` is asked.
 fn prepare(html: &str, id: &str, inline: &[Value], inbox: Option<&str>) -> String {
     let mut html = html.to_string();
     if let Some(inbox) = inbox {
@@ -76,19 +79,28 @@ fn prepare(html: &str, id: &str, inline: &[Value], inbox: Option<&str>) -> Strin
             }
         }
     }
+    let mut out = switch_off(&switch_off(&html, "http-equiv"), "color-scheme");
+    // At the end, so the doctype stays first; the first `<base target>` in the page counts, so an
+    // email's own still wins.
+    out.push_str("<base target=\"_blank\">");
+    out
+}
+
+/// Every `name`, in any case, renamed `data-off-name`: an attribute, CSS property or media feature
+/// that nothing knows, so it does nothing.
+// shortcut: the name changes in the email's visible text too, which only an email about HTML or CSS
+// would show; parse the HTML if that ever matters.
+fn switch_off(html: &str, name: &str) -> String {
     // ASCII lowercase keeps every byte offset, so the matches index `html` too.
     let lower = html.to_ascii_lowercase();
     let mut out = String::with_capacity(html.len() + 64);
     let mut last = 0;
-    for (at, _) in lower.match_indices("http-equiv") {
+    for (at, _) in lower.match_indices(name) {
         out.push_str(&html[last..at]);
         out.push_str("data-off-");
         last = at;
     }
     out.push_str(&html[last..]);
-    // At the end, so the doctype stays first; the first `<base target>` in the page counts, so an
-    // email's own still wins.
-    out.push_str("<base target=\"_blank\">");
     out
 }
 
@@ -136,6 +148,13 @@ mod tests {
         assert!(out.contains("src=\"http://127.0.0.1:2526/api/v1/message/AbC123/part/1.2\""), "{out}");
         assert!(out.contains("src=\"cid:evil\""), "a part ID that is not one stays as it was");
         assert!(out.starts_with("<!DOCTYPE html><html><head>"), "the doctype stays first");
+        let dark = "<meta name=\"color-scheme\" content=\"light dark\"><style>@media (prefers-color-scheme: dark) { body { color: #fff } }</style>";
+        let out = prepare(dark, "a", &[], None);
+        assert!(!out.contains(" color-scheme") && !out.contains("(prefers-color-scheme"), "{out}");
+        assert!(
+            out.contains("name=\"data-off-color-scheme\"") && out.contains("(prefers-data-off-color-scheme: dark)"),
+            "{out}"
+        );
         assert_eq!(prepare("<p>é</p>", "a", &[], None), "<p>é</p><base target=\"_blank\">");
     }
 
