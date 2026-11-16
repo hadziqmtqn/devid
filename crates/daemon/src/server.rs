@@ -687,7 +687,15 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                           "keep": m.keep, "php_mail": m.php_mail, "notify": m.notify}}))
             })
         }
-        Request::MailTest | Request::MailClear => {
+        Request::MailTest
+        | Request::MailClear
+        | Request::MailList { .. }
+        | Request::MailMessage { .. }
+        | Request::MailHeaders { .. }
+        | Request::MailRaw { .. }
+        | Request::MailRead { .. }
+        | Request::MailDelete { .. }
+        | Request::MailSave { .. } => {
             let config = state.config.lock().unwrap().clone();
             if !matches!(state.supervisor.state().get(mail::SERVICE), Some(ProcState::Running(_))) {
                 return Err(match config.mail.enabled {
@@ -695,13 +703,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                     false => "Mail is off; `devid mail on` turns it on".into(),
                 });
             }
-            if req == Request::MailTest {
-                mail::send_test(&config.mail).map_err(|e| format!("test email: {e}"))?;
-                Ok(json!({"ok": true, "to": "test@example.com", "inbox_url": mail::inbox_url(&config.mail)}))
-            } else {
-                mail::clear(&config.mail).map_err(|e| format!("deleting the mail: {e}"))?;
-                Ok(json!({"ok": true}))
-            }
+            mail_request(req, &config.mail)
         }
         Request::Logs => Ok(json!({"ok": true, "logs": logs::list(&state.paths)})),
         Request::LogRead { name, offset } => {
@@ -1501,6 +1503,45 @@ fn install_mail(state: &State, manifest: Option<&Value>, on_downloaded: &dyn Fn(
     result?;
     state.supervisor.restart(mail::SERVICE);
     Ok(())
+}
+
+/// Mail requests that need a running Mailpit (D-049; the inbox, Phase 9 M6).
+fn mail_request(req: Request, m: &crate::config::Mail) -> Result<Value, String> {
+    let e = |what: &'static str| move |e: io::Error| format!("{what}: {e}");
+    match req {
+        Request::MailTest => {
+            mail::send_test(m).map_err(e("test email"))?;
+            Ok(json!({"ok": true, "to": "test@example.com", "inbox_url": mail::inbox_url(m)}))
+        }
+        Request::MailClear => mail::clear(m).map(|_| json!({"ok": true})).map_err(e("deleting the mail")),
+        Request::MailList { query, unread, limit } => {
+            let mut v =
+                mail::list(m, &query, unread, limit.unwrap_or(200).clamp(1, 1000)).map_err(e("the mail list"))?;
+            v["ok"] = json!(true);
+            Ok(v)
+        }
+        Request::MailMessage { id } => {
+            mail::message(m, &id).map(|v| json!({"ok": true, "message": v})).map_err(e("the message"))
+        }
+        Request::MailHeaders { id } => {
+            mail::headers(m, &id).map(|v| json!({"ok": true, "headers": v})).map_err(e("the headers"))
+        }
+        Request::MailRaw { id } => {
+            mail::raw(m, &id).map(|(raw, cut)| json!({"ok": true, "raw": raw, "cut": cut})).map_err(e("the source"))
+        }
+        Request::MailRead { ids, read } => {
+            mail::mark_read(m, &ids, read).map(|_| json!({"ok": true})).map_err(e("marking the mail"))
+        }
+        Request::MailDelete { ids } => {
+            mail::delete(m, &ids).map(|_| json!({"ok": true, "deleted": ids.len()})).map_err(e("deleting the mail"))
+        }
+        Request::MailSave { id, part } => {
+            let dir = crate::paths::user_home().join("Downloads");
+            let path = mail::save_part(m, &id, &part, &dir).map_err(e("saving the attachment"))?;
+            Ok(json!({"ok": true, "path": path.display().to_string()}))
+        }
+        _ => unreachable!("only mail requests come here"),
+    }
 }
 
 /// Ports Mail may not take: Devid's own, and those sites use (local ports, dev servers).

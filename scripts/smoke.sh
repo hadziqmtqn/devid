@@ -63,6 +63,10 @@ if out="$("$DEVID" mail on 2>&1)"; then
   "$DEVID" mail | grep -q 'messages:    2,' || { echo "FAIL: Mail did not catch both messages" >&2; exit 1; }
   code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' http://127.0.0.1:28526/api/v1/info)"
   [ "$code" = 403 ] || { echo "FAIL: Mail's inbox answered a foreign Host with $code" >&2; exit 1; }
+  # The inbox (Phase 9 M6): the list finds the test mail, and show reads its text.
+  id="$("$DEVID" mail list | grep 'Test email from Devid' | grep -o -E '[A-Za-z0-9]{20,}' | head -1)"
+  [ -n "$id" ] || { echo "FAIL: devid mail list has no test email" >&2; exit 1; }
+  "$DEVID" mail show "$id" | grep -q 'If you can read this, Mail works.' || { echo "FAIL: devid mail show $id" >&2; exit 1; }
   echo "mail smoke test passed on $(uname -m)"
 else
   case "$out" in
