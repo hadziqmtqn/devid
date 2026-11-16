@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-15
+> Verified against: 2026-11-16
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-048 | 2026-11-16 | accepted when the owner merges its PR (amends D-027, D-039) | The desktop app restarts through LaunchServices (`open -n`), not by replacing itself with `exec` |
 | D-047 | 2026-11-15 | accepted (amends D-014) | Ports 80/443 are checked live, since another app can switch pf off on loopback; `devid helper install` undoes that |
 | D-046 | 2026-11-14 | accepted (completes D-044, amends D-010) | Apple silicon: every build is native on its own GitHub runner, and a release is smoke-tested with the real PHP and nginx on both arches before it is published |
 | D-045 | 2026-11-14 | accepted (amends D-043) | Issues move from `devid-binaries` to `devid`, next to the code; `devid` gains a contributor guide and a security policy |
@@ -758,3 +759,24 @@ See ARCHITECTURE, "PHP runtime".
 
     Either would also end the iCloud Private Relay conflict that Yerd reports for any pf `rdr` rule (https://github.com/forjedio/yerd/issues/247), which is not yet checked for Devid.
 - **Accepted:** by the owner on 2026-11-15.
+
+## D-048: the desktop app restarts through LaunchServices, not with exec (2026-11-16, amends D-027 and D-039)
+
+- **Context:**
+  - The app replaces itself in place with `exec` (same pid) in four cases:
+    - its window closes (D-027);
+    - after an update from the app, with the window on Settings (D-039);
+    - the menu-bar icon finds a new binary at the path (v0.10.1);
+    - the window opens after an update (v0.10.1).
+  - On 2026-11-16 the owner updated 0.13.0 to 0.14.0 from the app. The app did not come back: no window and no menu-bar icon.
+    - The process ran the new binary with the same pid. It sat in AppKit's event loop with two threads, and Tauri's setup never ran because `applicationDidFinishLaunching` never came.
+    - Its log showed the check-in with the process manager and LaunchServices registering the swapped bundle again ("Failed to get unit … from store"), then nothing.
+    - `open ~/Applications/Devid.app` sent it an event from LaunchServices, and the window and the icon appeared at once.
+  - The same `exec` did not hang with a test copy of the app. The tests covered the window open, the icon only, and another version swapped in. So the hang depends on the state of LaunchServices, and `exec` gives no guarantee.
+- **Decision:**
+  - Every restart goes through `tauri::process::restart`: `open -n` on the bundle with the same arguments, then the old process exits. The new process is an ordinary launch by LaunchServices.
+  - Unchanged: when the app restarts, with which arguments, and that the daemon and the sites are not touched. D-027's memory gain stays, since the new process starts fresh.
+  - Changed: the pid. For a moment two instances run while the old one quits.
+- **Not now:** keeping `exec` and sending the app an event from LaunchServices after the restart. That would be a workaround for one symptom of a behavior Apple does not document.
+- **Limit:** the fix ships in the app that an update replaces. The update from 0.14.0 still runs 0.14.0's `exec`. If the app does not come back after it, opening Devid again from Spotlight or `~/Applications` brings it back.
+- **Accepted:** when the owner merges the pull request that carries it.

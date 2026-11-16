@@ -14,3 +14,4 @@
 | 2026-11-14 | [The Logs page in two panes: sources by site, levels, search; log text without escape codes](2026-11-14-logs-sources.md) |
 | 2026-11-14 | [The Sites page as a table, a quick menu on the status card, and a Link a site dialog](2026-11-14-sites-table.md) |
 | 2026-11-14 | [Update progress: real percentages for PHP, the web server and Devid itself](2026-11-14-update-progress.md) |
+| 2026-11-16 | [Fix: the app comes back after an update, through LaunchServices instead of exec (D-048)](2026-11-16-relaunch-through-launchservices.md) |
