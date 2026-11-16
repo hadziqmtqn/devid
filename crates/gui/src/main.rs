@@ -56,17 +56,17 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("cannot start the Devid app");
 
-    app.run(|_app, event| match event {
+    app.run(|app, event| match event {
         // The last window closed. Quit passes an exit code and is not caught here.
         // Restarting gives the memory the window used back to the system: about 20 MB, mostly
         // graphics, stays in the process after the window and its web view are gone (D-027).
         RunEvent::ExitRequested { code: None, api, .. } => {
             api.prevent_exit();
-            restart(&["--background"]);
+            restart(app, &["--background"]);
         }
         // Opened again from Finder or Spotlight while running.
         #[cfg(target_os = "macos")]
-        RunEvent::Reopen { .. } => open_window(_app, None),
+        RunEvent::Reopen { .. } => open_window(app, None),
         _ => {}
     });
 }
@@ -89,7 +89,7 @@ pub fn open_window(app: &AppHandle, page: Option<&'static str>) {
     // Updated while only the menu-bar icon ran (the icon checks every 15 s): open the window in
     // the new version, not in this one.
     if updated() {
-        restart(&[]);
+        restart(app, &[]);
     }
     let (width, height) = fit(app);
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -136,17 +136,16 @@ pub fn start_page(name: &str) -> Option<&'static str> {
     ["sites", "php", "server", "logs", "settings"].into_iter().find(|p| *p == name)
 }
 
-/// Replaces this process with a fresh copy of the app binary at the same path (same pid), with
-/// `args`: `--background` for the menu-bar icon only, none for its window. Returns only if that
-/// fails; the app then keeps running as it is and does not try again for this binary.
-pub fn restart(args: &[&str]) {
-    use std::os::unix::process::CommandExt;
-    let err = match std::env::current_exe() {
-        Ok(exe) => std::process::Command::new(exe).args(args).exec(),
-        Err(e) => e,
-    };
-    eprintln!("devid-gui: cannot restart: {err}");
-    *RUNNING.lock().unwrap() = binary_id();
+/// Starts a fresh copy of the app with `args` (`--background` for the menu-bar icon only, `--page
+/// <name>` for its window on that page) and quits this one. Tauri relaunches the bundle through
+/// LaunchServices (`open -n`), like any other launch. Replacing this process with exec() instead
+/// left the update to 0.14.0 with no icon and no window: the new image waited for a launch event
+/// from LaunchServices that never came, until the app was opened again (D-048).
+pub fn restart(app: &AppHandle, args: &[&str]) -> ! {
+    let mut env = app.env();
+    let program = env.args_os.first().cloned().unwrap_or_default();
+    env.args_os = std::iter::once(program).chain(args.iter().map(|a| std::ffi::OsString::from(*a))).collect();
+    tauri::process::restart(&env)
 }
 
 /// The default size, shrunk to the primary screen's visible area (without the menu bar

@@ -280,13 +280,14 @@ fn update_reply(out: Output) -> Result<Value, String> {
     Ok(json!({"installed": installed, "text": first_line(&out.stdout, "done")}))
 }
 
-/// Restart this app as the binary now at its path, with its window on `page` (after an update).
+/// Restart this app as the bundle now at its path, with its window on `page` (after an update).
 #[tauri::command]
 pub fn relaunch(app: tauri::AppHandle, page: Option<String>) {
     let page = page.and_then(|p| crate::start_page(&p));
+    let handle = app.clone();
     let _ = app.run_on_main_thread(move || match page {
-        Some(p) => crate::restart(&["--page", p]),
-        None => crate::restart(&[]),
+        Some(p) => crate::restart(&handle, &["--page", p]),
+        None => crate::restart(&handle, &[]),
     });
 }
 
