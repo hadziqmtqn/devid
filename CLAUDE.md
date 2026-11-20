@@ -14,7 +14,7 @@ Phase 1 (spike) is done. Phase 2 (daemon + CLI) is in progress; the milestones a
 
 ## Hard constraints
 
-- Target machine: Intel Mac, 2 cores, 16 GB RAM, macOS 14.8. Idle RAM, CPU and battery cost matter in every design choice.
+- Target machine (D-052): Apple M1, 8 cores, 8 GB RAM, macOS 26. Idle RAM, CPU and battery cost matter in every design choice, and RAM is the tightest. Intel Macs stay supported, so work that is heavy on 2 cores still needs a reason.
 - No Homebrew and no VM dependency at runtime.
 - PHP 8.3, 8.4 and 8.5 (see D-009), static builds, php-fpm with `pm = ondemand`.
 - One global web server: nginx by default, Caddy or Apache as alternatives (D-015).

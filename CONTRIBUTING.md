@@ -1,6 +1,6 @@
 # Contributing to Devid
 
-Thanks for helping. Devid is a personal project: one maintainer, who uses it daily on an Intel Mac. Bug reports, small fixes and docs fixes are the easiest to take. For anything bigger, open an issue first, so we can agree on the approach before you write the code.
+Thanks for helping. Devid is a personal project: one maintainer, who uses it daily on an Apple silicon Mac (an Intel Mac until November 2026). Bug reports, small fixes and docs fixes are the easiest to take. For anything bigger, open an issue first, so we can agree on the approach before you write the code.
 
 ## Where things go
 
@@ -20,8 +20,8 @@ These limits are decisions (see [`docs/structure-of-app/DECISIONS.md`](docs/stru
 - **PHP 8.3, 8.4 and 8.5**, each with php-fpm in `pm = ondemand`.
 - **One web server for every site:** nginx by default, Caddy or Apache instead.
 - **No databases.** Use DBngin, Docker or anything else next to Devid.
-- **Idle cost matters.** Devid is built on a 2-core Intel Mac with 16 GB of RAM. Background work, polling and memory at idle need a reason.
-- **One platform at a time** (D-044): Intel macOS today, then Apple silicon, then Debian-based Linux, then Windows. Code for one operating system stays in as few places as possible (D-019), such as `crates/daemon/src/helper.rs` for the system setup.
+- **Idle cost matters.** Devid is built on an Apple M1 with 8 GB of RAM, and it also runs on 2-core Intel Macs. Background work, polling and memory at idle need a reason.
+- **One platform at a time** (D-044): macOS on Intel and Apple silicon today, then Debian-based Linux, then Windows. Code for one operating system stays in as few places as possible (D-019), such as `crates/daemon/src/helper.rs` for the system setup.
 
 ## The code
 
