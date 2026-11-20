@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-16
+> Verified against: 2026-11-20
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-052 | 2026-11-20 | proposed | The target machine is the owner's Apple M1 (8 cores, 8 GB RAM, macOS 26), not the Intel Mac; RAM is the tightest budget; Intel stays supported |
 | D-051 | 2026-11-16 | accepted 2026-11-17 (amends D-049) | The app's inbox shows an email's HTML through its own `mailview:` scheme: its own CSP without scripts, a sandboxed frame, and links that open in the browser |
 | D-050 | 2026-11-16 | accepted (amends D-049) | New-mail notifications use the legacy NSUserNotification API, since UserNotifications refuses an ad-hoc signed app; they show the sender and the subject |
 | D-049 | 2026-11-16 | accepted (Phase 9; schedules D-011's deferred mail catcher) | Mail: Devid ships the official Mailpit build and runs it when Mail is on (off by default); 0.15.0 opens Mailpit's inbox in the browser, a later 0.15.x shows the inbox in the app (both ship in 0.15.0: D-051) |
@@ -852,3 +853,19 @@ See ARCHITECTURE, "PHP runtime".
   - Saving an attachment writes to ~/Downloads from the daemon. macOS may ask the first time whether `devid` may use the Downloads folder, and again after an update, since the signature is ad hoc (D-010). Not seen yet: the test daemon ran where Downloads is not reachable.
 - **Not chosen:** a `srcdoc` frame (the window's CSP strips the email's styles) and Mailpit's `/view/<id>.html` in a frame (its scripts run).
 - **Accepted:** by the owner, who merged #98 on 2026-11-16 after testing a debug build, and chose on 2026-11-17 to ship the inbox in 0.15.0 with stage 1.
+
+## D-052: the target machine is the owner's Apple M1 with 8 GB RAM (proposed 2026-11-20)
+
+- **Context:**
+  - Since the start, the owner's Intel Mac (i5-8210Y, 2 cores/4 threads, 16 GB RAM, macOS 14.8) set the budget for every design choice. CLAUDE.md, PROJECT_CONTEXT and CONTRIBUTING named it.
+  - On 2026-11-20 the owner moved Devid work to a new Mac: Apple M1, 8 cores, 8 GB RAM, macOS 26.6.1.
+  - Devid 0.15.0 runs on it: `devid doctor` reports all good. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass natively on arm64.
+- **Decision:**
+  - The target machine is the M1 with 8 GB RAM.
+  - Idle RAM, CPU and battery cost still matter in every design choice. RAM is now the tightest, at half of the old Mac's, and macOS, the browser and the owner's dev servers share it.
+  - Intel Macs stay a supported platform (D-044 unchanged). Work that is light on 8 cores but heavy on 2 cores still needs a reason.
+- **Consequences:**
+  - Apple silicon builds are now tested by hand on the owner's Mac, as well as on GitHub's runners (D-046). On the owner's request, the README says Devid supports Macs with Apple silicon (M series) and is tested on an M1.
+  - Intel builds keep CI on `macos-15-intel`. Whether they still get a hand test is open.
+  - Measurements taken on the Intel Mac (Phase 7, Phase 8, PROJECT_CONTEXT) stay as recorded, with that machine named. New measurements name the M1.
+- **Accepted:** when the owner merges the PR.
