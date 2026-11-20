@@ -82,15 +82,19 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
     // setup can all be in place while pf ignores them (D-047), and only the sudo step repairs that.
     let ports_down = !dry_run && redirect_down(paths);
     let bin = install::installed_bin(paths);
-    step(dry_run, &format!("install {} and php/composer shims", bin.display()), || {
+    step(dry_run, &format!("install {} and the shims beside it (php, composer…)", bin.display()), || {
         install::install_binary(paths).map(|_| String::new()).map_err(|e| e.to_string())
     })?;
-    let rc = install::rc_file();
-    step(dry_run, &format!("put {} first on PATH in {}", install::bin_dir(paths).display(), rc.display()), || {
-        install::ensure_rc_line(&rc, &install::rc_line(paths))
-            .map(|changed| if changed { "open a new terminal".into() } else { "already there".into() })
-            .map_err(|e| e.to_string())
-    })?;
+    let rcs: Vec<String> = install::rc_files().iter().map(|rc| rc.display().to_string()).collect();
+    step(
+        dry_run,
+        &format!("put {} first on PATH in {}", install::bin_dir(paths).display(), rcs.join(" and ")),
+        || {
+            install::set_on_path(paths, true)
+                .map(|changed| if changed.is_empty() { "already there".into() } else { "open a new terminal".into() })
+                .map_err(|e| e.to_string())
+        },
+    )?;
     step(dry_run, "run the daemon as a LaunchAgent (now and at every login)", || {
         // D-040: the running commands start again in the new daemon. An older daemon does not know
         // the request, and none may run; either way there is nothing to note.
@@ -282,14 +286,24 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
             .map(|p| p.display().to_string())
     };
     let ours = |name: &str| on_path(name).is_some_and(|p| Path::new(&p).starts_with(install::bin_dir(paths)));
-    // The PATH line may already be in the rc file but not loaded by this (older) terminal.
-    let rc = install::rc_file();
-    let rc_has_line = std::fs::read_to_string(&rc).is_ok_and(|t| t.lines().any(|l| l == install::rc_line(paths)));
-    let path_fix = if rc_has_line {
-        format!("{} already has Devid's PATH line; open a new terminal or run `exec zsh`", rc.display())
+    // The PATH line may already be in the startup files but not loaded by this (older) terminal.
+    let rcs = install::rc_files();
+    let line = install::rc_line(paths);
+    let missing: Vec<String> =
+        rcs.iter().filter(|rc| !install::rc_has_line(rc, &line)).map(|rc| rc.display().to_string()).collect();
+    let path_fix = if missing.is_empty() {
+        "Devid's PATH line is in place; open a new terminal or run `exec $SHELL`".to_string()
     } else {
-        "run `devid setup`, then open a new terminal".to_string()
+        "run `devid path on` (or Add to PATH in the app's Settings), then open a new terminal".to_string()
     };
+    check(
+        missing.is_empty(),
+        &format!(
+            "new terminals get Devid's commands: the PATH line is in {}",
+            rcs.iter().map(|rc| rc.display().to_string()).collect::<Vec<_>>().join(" and ")
+        ),
+        &format!("missing in {}; run `devid path on`", missing.join(" and ")),
+    );
     check(ours("devid"), "devid on PATH is ~/.devid/bin/devid", &path_fix);
     check(
         ours("php"),
@@ -387,9 +401,9 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
         let _ = std::fs::remove_dir_all(&app);
         Ok(String::new())
     })?;
-    let rc = install::rc_file();
-    step(dry_run, &format!("remove Devid's PATH line from {}", rc.display()), || {
-        install::remove_rc_line(&rc).map(|_| String::new()).map_err(|e| e.to_string())
+    let rcs: Vec<String> = install::rc_files().iter().map(|rc| rc.display().to_string()).collect();
+    step(dry_run, &format!("remove Devid's PATH line from {}", rcs.join(" and ")), || {
+        install::set_on_path(paths, false).map(|_| String::new()).map_err(|e| e.to_string())
     })?;
     let target = if purge { paths.home.clone() } else { install::bin_dir(paths) };
     step(dry_run, &format!("delete {}", target.display()), || {

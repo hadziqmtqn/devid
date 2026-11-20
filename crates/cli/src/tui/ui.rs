@@ -360,12 +360,20 @@ fn draw_settings(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
             if status["login_item"].is_string() { "opens" } else { "does not open" }
         )),
         Line::raw(format!(
+            "Terminal:  {} (p toggles)",
+            if status["terminal"]["on"] == true {
+                "php, php8.x, composer, nginx, caddy and mailpit are on PATH"
+            } else {
+                "Devid's commands are not on PATH"
+            }
+        )),
+        Line::raw(format!(
             "Updates:   {}",
             crate::updates_line(&status["updates"]).unwrap_or_else(|| "not checked yet (every few minutes)".into())
         )),
         Line::raw(""),
         Line::raw(
-            "d doctor · u check updates · U update PHP/nginx · D update devid · a serve at login · s setup · X uninstall",
+            "d doctor · u check updates · U update PHP/nginx · D update devid · a serve at login · p PATH · s setup · X uninstall",
         ),
         Line::raw(""),
     ];
@@ -397,7 +405,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                     " enter actions (use, install, restart, stop/start, view config) · S stop all · A start all · ? help · q quit"
                 }
                 (Page::Settings, _) => {
-                    " d doctor · u check updates · U update PHP/nginx · D update devid · a serve at login · s setup · X uninstall · ? help · q quit"
+                    " d doctor · u check updates · U update PHP/nginx · D update devid · a serve at login · p PATH · s setup · X uninstall · ? help · q quit"
                 }
                 (Page::Logs, _) => " ↑↓ pick a log · f follow · c clear · tab sidebar · ? help · q quit",
                 (Page::Mail, _) => {

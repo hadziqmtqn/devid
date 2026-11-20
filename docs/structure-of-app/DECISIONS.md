@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-053 | 2026-11-20 | proposed (amends D-014) | Devid's commands on PATH for every shell: `php8.3`–`php8.5`, `nginx`, `caddy` and `mailpit` join `php` and `composer` as shims, the PATH line goes into `~/.zshenv` and `~/.zshrc`, and Settings › Terminal, `devid path on/off` and the TUI add or remove it |
 | D-052 | 2026-11-20 | proposed | The target machine is the owner's Apple M1 (8 cores, 8 GB RAM, macOS 26), not the Intel Mac; RAM is the tightest budget; Intel stays supported |
 | D-051 | 2026-11-16 | accepted 2026-11-17 (amends D-049) | The app's inbox shows an email's HTML through its own `mailview:` scheme: its own CSP without scripts, a sandboxed frame, and links that open in the browser |
 | D-050 | 2026-11-16 | accepted (amends D-049) | New-mail notifications use the legacy NSUserNotification API, since UserNotifications refuses an ad-hoc signed app; they show the sender and the subject |
@@ -868,4 +869,22 @@ See ARCHITECTURE, "PHP runtime".
   - Apple silicon builds are now tested by hand on the owner's Mac, as well as on GitHub's runners (D-046). On the owner's request, the README says Devid supports Macs with Apple silicon (M series) and is tested on an M1.
   - Intel builds keep CI on `macos-15-intel`. Whether they still get a hand test is open.
   - Measurements taken on the Intel Mac (Phase 7, Phase 8, PROJECT_CONTEXT) stay as recorded, with that machine named. New measurements name the M1.
+- **Accepted:** when the owner merges the PR.
+
+## D-053: Devid's commands on PATH for every shell, with a button to add them (proposed 2026-11-20, amends D-014)
+
+- **Context:**
+  - Setup (D-014) puts `~/.devid/bin` on PATH with one line in `~/.zshrc`, and that folder holds `devid`, `php` and `composer`. Only a terminal reads `~/.zshrc`; the shells that editors, scripts and tools such as Claude Code start do not, so `php` and `devid` are missing there.
+  - The PHP versions, nginx, Caddy and Mailpit that Devid installs have no command of their own. Running one meant typing a path inside `~/.devid` and the flags Devid passes, such as nginx's prefix and config.
+  - Nothing in the app showed whether a terminal finds Devid's commands, or put them back after the line was removed.
+  - On 2026-11-20 the owner asked for an "Add to PATH" button, so that Devid's services are easy to call from a terminal, and chose the commands below, Settings plus the CLI, and `~/.zshenv`.
+- **Decision:**
+  - **More shims** in `~/.devid/bin`, hard links to `devid` like `php` (D-014): `php8.3`, `php8.4` and `php8.5` (that version anywhere, with Devid's ini), `nginx` (Devid's nginx on Devid's config, for `-t`, `-T`, `-s`, `-v`, `-V`, `-h` only, since the daemon starts it), `caddy` (with the daemon's XDG folders) and `mailpit` (`mailpit sendmail` delivers to Devid's SMTP port). A missing program says how to install it.
+  - **Two startup files for zsh:** the marked PATH line goes into `~/.zshenv`, which every zsh reads, and stays in `~/.zshrc`. In a terminal, macOS's `/etc/zprofile` runs `path_helper` after `~/.zshenv` and moves its entries behind `/usr/local/bin`, so without the `~/.zshrc` line Homebrew's `php` would win again. bash keeps `~/.bash_profile`. The shell comes from the user database, since the daemon's launchd environment need not have `SHELL`.
+  - **One switch in three places:** Settings › Terminal in the app (Add to PATH / Remove from PATH, with the command list) through the daemon's `shell_path`; `devid path [on|off]`, which works while the daemon is down; and `p` on the TUI's Settings page. `status` reports `terminal`, and `devid doctor` checks that every startup file has the line.
+- **Consequences:**
+  - A terminal opened before the change keeps its PATH until it is reopened; every message says so.
+  - `nginx`, `caddy` and `mailpit` on PATH are Devid's. Devid's folder comes first on PATH, so it hides a Homebrew nginx, Caddy or Mailpit too. Removing the line from PATH, or calling the other copy by its full path, reaches those.
+  - Existing installs get the shims and the `~/.zshenv` line with the next `devid self-update`, which runs setup.
+- **Not chosen:** symlinks for the new commands (PHP resolves them for `PHP_BINARY`, and nginx would run without Devid's config); a PATH line in `~/.zshenv` only (Homebrew's `php` would win in a terminal); adding any folder the user picks, such as `~/.local/bin` (outside Devid's job).
 - **Accepted:** when the owner merges the PR.

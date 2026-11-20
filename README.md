@@ -38,6 +38,7 @@ Homebrew moved Intel Macs to Tier 3: there are no more prebuilt packages, so Val
 - **Web server:** nginx by default, or Caddy or Apache. One runs at a time; switch with `devid server use`.
 - **Share:** `devid share` gives a site a temporary public link through a Cloudflare quick tunnel (it uses your own `cloudflared`). `devid app port` serves a site on a local port for a tunnel of your own.
 - **Mail:** `devid mail on` catches the mail your apps send, in an inbox on your Mac that the desktop app shows. Laravel's SMTP mailer and PHP's `mail()` both work, and nothing reaches a real mailbox. Devid runs Mailpit for it.
+- **Terminal commands:** `php`, `composer`, `php8.3` to `php8.5`, `nginx -t`, `caddy` and `mailpit` run Devid's own copies from any terminal, editor or script. Add to PATH in the app's Settings (or `devid path on`) sets this up.
 - **Interfaces:** the CLI, the TUI and the menu-bar app. Every action works the same in all three. `devid doctor` checks the whole setup and tells you how to fix what's wrong.
 
 ## Install

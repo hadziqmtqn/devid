@@ -154,6 +154,13 @@ enum Command {
         #[arg(long)]
         app: Option<PathBuf>,
     },
+    /// Put Devid's commands on PATH for new terminals (php, php8.4, composer, nginx, caddy, mailpit…).
+    /// With no state: whether they are
+    #[command(name = "path")]
+    ShellPath {
+        #[arg(value_parser = ["on", "off"])]
+        state: Option<String>,
+    },
     /// Serve every subfolder of a folder (default: the current one) as <subfolder>.test
     Park { path: Option<PathBuf> },
     /// Stop serving a parked folder
@@ -571,6 +578,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
                 None => println!("Devid no longer opens at login"),
             })
         }
+        Command::ShellPath { state } => shell_path(paths, state.as_deref()),
         Command::Park { path } => {
             send(Request::Park { path: abs(path)? }).map(|v| println!("parked {}", v["parked"].as_str().unwrap_or("?")))
         }
@@ -608,6 +616,44 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// `devid path [on|off]` (D-053). Done here, not in the daemon, so it works while the daemon is down;
+/// the app goes through the daemon's `shell_path`, which does the same.
+fn shell_path(paths: &Paths, state: Option<&str>) -> Result<(), String> {
+    use devid_daemon::install;
+    let files = |list: &[PathBuf]| list.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" and ");
+    let rcs = install::rc_files();
+    match state {
+        None => {
+            let line = install::rc_line(paths);
+            let on = rcs.iter().all(|rc| install::rc_has_line(rc, &line));
+            println!(
+                "path:      {} ({})",
+                if on { "new terminals get Devid's commands" } else { "off; `devid path on` adds them" },
+                files(&rcs)
+            );
+            println!("folder:    {}", install::bin_dir(paths).display());
+            println!("commands:  {}", install::commands().join(", "));
+        }
+        Some(state) => {
+            let on = state == "on";
+            let changed = install::set_on_path(paths, on).map_err(|e| e.to_string())?;
+            match (on, changed.is_empty()) {
+                (true, true) => println!("Devid's commands are already on PATH ({})", files(&rcs)),
+                (true, false) => {
+                    println!("put {} first on PATH in {}", install::bin_dir(paths).display(), files(&changed));
+                    println!("open a new terminal (or run `exec $SHELL`) to use: {}", install::commands().join(", "));
+                }
+                (false, true) => println!("Devid's PATH line is not in {}", files(&rcs)),
+                (false, false) => {
+                    println!("removed Devid's PATH line from {}", files(&changed));
+                    println!("new terminals no longer find Devid's commands; ~/.devid/bin/devid still works");
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn mail(action: Option<MailAction>, paths: &Paths) -> Result<(), String> {
@@ -1017,6 +1063,11 @@ fn print_status(v: &serde_json::Value, json: bool) {
         if v["autostart"] == false { "wait for `devid start all`" } else { "served" },
         if v["login_item"].is_string() { "opens" } else { "does not open" }
     );
+    match v["terminal"]["on"].as_bool() {
+        Some(true) => println!("  terminal:    Devid's commands are on PATH (`devid path` lists them)"),
+        Some(false) => println!("  terminal:    Devid's commands are not on PATH; `devid path on` adds them"),
+        None => {} // an older daemon
+    }
     if let Some(line) = updates_line(&v["updates"]) {
         println!("  updates:     {line}");
     }
