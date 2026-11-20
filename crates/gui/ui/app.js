@@ -1389,6 +1389,20 @@ function switchRow(id, label, sub, on, change) {
     h('input.dv-switch', { type: 'checkbox', role: 'switch', id, checked: on, disabled: !!S.busy, onchange: (e) => change(e.target.checked) }));
 }
 
+/** D-053: Devid's commands on PATH for new terminals; Add to PATH writes one line per startup file. */
+function terminalRows(t) {
+  const files = t.files.map((f) => f.file.replace(/^\/Users\/[^/]+/, '~')).join(' and ');
+  const set = (on) => act(on ? 'Adding…' : 'Removing…', () => daemon({ cmd: 'shell_path', enabled: on }),
+    on ? 'Devid\'s commands are on PATH. Open a new terminal window to use them.' : 'Removed from PATH. New terminal windows no longer find Devid\'s commands.', 'path');
+  return [
+    row(text('Devid\'s commands in Terminal', t.on
+      ? 'On PATH in ' + files + '. A terminal window opened before this needs reopening.'
+      : 'Lets a terminal run them by name. Adds one line to ' + files + '.'),
+    t.on ? busyBtn('path', 'Remove from PATH', () => set(false)) : busyBtn('path', 'Add to PATH', () => set(true), 'primary')),
+    row(h('span.dv-sub.dv-mono', {}, t.commands.join('  '))),
+  ];
+}
+
 function settingsPage() {
   const st = S.status;
   const ports = portsText(st);
@@ -1405,6 +1419,7 @@ function settingsPage() {
       switchRow('sw-login', 'Open Devid at login', 'Shows the Devid icon in the menu bar. Your sites don\'t need it.',
         !!st.login_item, (on) => act(on ? 'Turning on…' : 'Turning off…', () => invoke('login_item', { enabled: on }),
           (r) => r.login_item ? 'Devid opens at login' : 'Devid no longer opens at login'))),
+    ...(st.terminal ? [h('h2.dv-h2', {}, 'Terminal'), card(...terminalRows(st.terminal))] : []),
     h('h2.dv-h2', {}, 'Domains'),
     card(row(text('Top-level domain', 'Every site is served over HTTPS with a local certificate'), h('span.dv-mono.dv-strong', {}, '.' + st.tld)),
       row(text('Ports'), h('span.dv-sub.dv-mono', {}, ports))),

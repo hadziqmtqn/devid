@@ -122,6 +122,11 @@ pub enum Request {
         enabled: bool,
         app: Option<String>,
     },
+    /// Put `~/.devid/bin` (devid, php, php8.4, composer, nginx, caddy, mailpit…) on PATH in the
+    /// login shell's startup files, or take it out (D-053). `status` reports it as `terminal`.
+    ShellPath {
+        enabled: bool,
+    },
     /// Pin a site to a PHP version; the site is `site` or the one containing `cwd`.
     Isolate {
         version: String,

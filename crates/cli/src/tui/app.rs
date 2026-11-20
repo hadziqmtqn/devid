@@ -627,6 +627,16 @@ impl App {
                     if on { "after login, nginx and PHP wait for start all" } else { "sites are served at login" };
                 return Action::Do(Effect::Daemon { request: Request::Autostart { enabled: !on }, done: done.into() });
             }
+            KeyCode::Char('p') if self.page == Page::Settings => {
+                // D-053: Devid's commands on PATH for new terminals, or not.
+                let on = self.status.as_ref().is_ok_and(|s| s["terminal"]["on"] == true);
+                let done = if on {
+                    "new terminals no longer get Devid's commands"
+                } else {
+                    "Devid's commands are on PATH; open a new terminal to use them"
+                };
+                return Action::Do(Effect::Daemon { request: Request::ShellPath { enabled: !on }, done: done.into() });
+            }
             KeyCode::Char('u') if self.page == Page::Settings => return Action::Do(Effect::CheckUpdates),
             KeyCode::Char('U') if self.page == Page::Settings => {
                 self.mode = Mode::Confirm {
@@ -1572,6 +1582,10 @@ mod tests {
         assert_eq!(daemon_json(app.handle_key(ch('a'))), json!({"cmd": "autostart", "enabled": false}), "a toggles");
         app.status = Ok(json!({"autostart": false}));
         assert_eq!(daemon_json(app.handle_key(ch('a'))), json!({"cmd": "autostart", "enabled": true}));
+        app.status = Ok(json!({"terminal": {"on": false}}));
+        assert_eq!(daemon_json(app.handle_key(ch('p'))), json!({"cmd": "shell_path", "enabled": true}), "p adds");
+        app.status = Ok(json!({"terminal": {"on": true}}));
+        assert_eq!(daemon_json(app.handle_key(ch('p'))), json!({"cmd": "shell_path", "enabled": false}));
     }
 
     #[test]

@@ -533,6 +533,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "php": php_list(state),
                 "autostart": config.autostart,
                 "login_item": install::app_agent_program(),
+                "terminal": terminal_status(&state.paths),
                 "update_check_minutes": config.update_check_minutes,
                 "updates": *state.updates.lock().unwrap(),
                 "commands_running": state.commands.running().iter().filter(|(_, n)| n != commands::SHARE).count(),
@@ -750,6 +751,11 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         Request::LoginItem { enabled, app } => {
             let app = install::set_app_agent(enabled, app.as_deref())?;
             Ok(json!({"ok": true, "login_item": app}))
+        }
+        Request::ShellPath { enabled } => {
+            let changed = install::set_on_path(&state.paths, enabled).map_err(|e| e.to_string())?;
+            let changed: Vec<String> = changed.iter().map(|p| p.display().to_string()).collect();
+            Ok(json!({"ok": true, "changed": changed, "terminal": terminal_status(&state.paths)}))
         }
         Request::ServerUse { server } => {
             webserver::check(&server)?;
@@ -1578,6 +1584,22 @@ fn mail_taken(config: &Config, sites: &[Site]) -> Vec<(u16, String)> {
         }
     }
     taken
+}
+
+/// Whether Devid's commands are on PATH for new terminals (D-053): `on` when every startup file of
+/// the login shell has the PATH line; each file, and the commands in `~/.devid/bin`.
+fn terminal_status(paths: &Paths) -> Value {
+    let line = install::rc_line(paths);
+    let files: Vec<Value> = install::rc_files()
+        .iter()
+        .map(|rc| json!({"file": rc.display().to_string(), "has_line": install::rc_has_line(rc, &line)}))
+        .collect();
+    json!({
+        "on": files.iter().all(|f| f["has_line"] == true),
+        "files": files,
+        "bin": install::bin_dir(paths).display().to_string(),
+        "commands": install::commands(),
+    })
 }
 
 /// Mail's settings and state for `status` (D-049). While Mailpit runs, the message and unread counts

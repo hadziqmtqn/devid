@@ -1,8 +1,10 @@
 //! User-level installation (D-014, macOS): the binary and shims in `~/.devid/bin`, a PATH line in
-//! the shell rc file, and a LaunchAgent that keeps the daemon running. Root steps live in helper.rs.
+//! the shell's startup files, and a LaunchAgent that keeps the daemon running. Root steps live in
+//! helper.rs.
 
 use crate::paths::{Paths, user_home};
 use std::{
+    ffi::CStr,
     fs, io,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -10,8 +12,9 @@ use std::{
 };
 
 pub const AGENT_LABEL: &str = "dev.devid.daemon";
-/// Names that run through `devid` itself (argv[0] dispatch in the CLI).
-pub const SHIMS: [&str; 2] = ["php", "composer"];
+/// Names that run through `devid` itself (argv[0] dispatch in the CLI): the PHP of the current
+/// folder and composer, then (D-053) one PHP version each, and Devid's own nginx, Caddy and Mailpit.
+pub const SHIMS: [&str; 8] = ["php", "composer", "php8.3", "php8.4", "php8.5", "nginx", "caddy", "mailpit"];
 const RC_MARKER: &str = "# added by devid";
 const COMPOSER_URL: &str = "https://getcomposer.org/download/latest-stable/composer.phar";
 
@@ -115,14 +118,70 @@ fn xml_unescape(s: &str) -> String {
     s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 }
 
-/// The rc file for the login shell: zsh (the macOS default) or bash.
-pub fn rc_file() -> PathBuf {
-    let shell = std::env::var("SHELL").unwrap_or_default();
-    user_home().join(if shell.ends_with("bash") { ".bash_profile" } else { ".zshrc" })
+/// The user's login shell from the user database. The daemon runs under launchd, whose
+/// environment need not have SHELL; $SHELL is the fallback.
+fn login_shell() -> String {
+    let mut buf = vec![0 as libc::c_char; 4096];
+    // SAFETY: getpwuid_r (thread-safe, the daemon has threads) fills `pw` with strings that point
+    // into `buf`, which outlives the read; `found` is null when there is no record.
+    let shell = unsafe {
+        let mut pw: libc::passwd = std::mem::zeroed();
+        let mut found: *mut libc::passwd = std::ptr::null_mut();
+        let rc = libc::getpwuid_r(libc::getuid(), &mut pw, buf.as_mut_ptr(), buf.len(), &mut found);
+        if rc != 0 || found.is_null() || pw.pw_shell.is_null() {
+            None
+        } else {
+            Some(CStr::from_ptr(pw.pw_shell).to_string_lossy().into_owned())
+        }
+    };
+    shell.filter(|s| !s.is_empty()).or_else(|| std::env::var("SHELL").ok()).unwrap_or_default()
+}
+
+/// The startup files that put `~/.devid/bin` on PATH (D-053), for the login shell:
+/// - zsh (the macOS default): ~/.zshenv, which every zsh reads, also the shells that editors,
+///   scripts and other tools start; and ~/.zshrc, because in a terminal macOS's path_helper
+///   (/etc/zprofile) runs after ~/.zshenv and moves its entries behind /usr/local/bin. The line in
+///   ~/.zshrc, read last, puts Devid's `php` before Homebrew's again.
+/// - bash: ~/.bash_profile.
+pub fn rc_files() -> Vec<PathBuf> {
+    rc_files_for(&login_shell(), &user_home())
+}
+
+fn rc_files_for(shell: &str, home: &Path) -> Vec<PathBuf> {
+    if shell.ends_with("bash") {
+        vec![home.join(".bash_profile")]
+    } else {
+        vec![home.join(".zshenv"), home.join(".zshrc")]
+    }
 }
 
 pub fn rc_line(paths: &Paths) -> String {
     format!("export PATH=\"{}:$PATH\" {RC_MARKER}", bin_dir(paths).display())
+}
+
+/// Whether `rc` has this exact PATH line.
+pub fn rc_has_line(rc: &Path, line: &str) -> bool {
+    fs::read_to_string(rc).is_ok_and(|t| t.lines().any(|l| l == line))
+}
+
+/// The commands `~/.devid/bin` holds: devid and its shims (D-053).
+pub fn commands() -> Vec<&'static str> {
+    std::iter::once("devid").chain(SHIMS).collect()
+}
+
+/// Put Devid's bin on PATH in every startup file of the login shell, or take it out of them
+/// (D-053). A terminal that is already open keeps its PATH until a new one opens. Returns the
+/// files that changed.
+pub fn set_on_path(paths: &Paths, on: bool) -> io::Result<Vec<PathBuf>> {
+    let line = rc_line(paths);
+    let mut changed = Vec::new();
+    for rc in rc_files() {
+        let did = if on { ensure_rc_line(&rc, &line) } else { remove_rc_line(&rc) };
+        if did.map_err(|e| err(format!("{}: {e}", rc.display())))? {
+            changed.push(rc);
+        }
+    }
+    Ok(changed)
 }
 
 /// Append the PATH line once. Appending puts Devid's bin in front of earlier PATH entries, so its
@@ -318,6 +377,27 @@ mod tests {
             }
         }
         fs::remove_dir_all(&paths.home).unwrap();
+    }
+
+    #[test]
+    fn every_supported_php_has_a_versioned_command() {
+        for v in crate::php::SUPPORTED {
+            assert!(SHIMS.contains(&format!("php{v}").as_str()), "php{v} is a shim");
+        }
+        assert_eq!(commands()[0], "devid");
+        assert!(commands().contains(&"mailpit"));
+    }
+
+    #[test]
+    fn zsh_gets_zshenv_and_zshrc_bash_gets_bash_profile() {
+        let home = Path::new("/Users/me");
+        assert_eq!(
+            rc_files_for("/bin/zsh", home),
+            [home.join(".zshenv"), home.join(".zshrc")],
+            ".zshenv for every zsh, .zshrc to come before Homebrew after path_helper"
+        );
+        assert_eq!(rc_files_for("", home), [home.join(".zshenv"), home.join(".zshrc")], "zsh is the default");
+        assert_eq!(rc_files_for("/bin/bash", home), [home.join(".bash_profile")]);
     }
 
     #[test]

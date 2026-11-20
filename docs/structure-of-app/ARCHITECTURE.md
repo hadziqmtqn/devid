@@ -63,11 +63,11 @@ Implemented in M6:
 - **Signals.** The daemon blocks SIGTERM/SIGINT/SIGHUP before starting any thread. A `sigwait` thread turns them into the same clean stop as `devid daemon stop`. The supervisor clears the inherited mask in children (`pre_exec`), so nginx still gets SIGHUP for reloads.
 - **No inherited fds.** Services and site commands mark every fd above stderr close-on-exec (`supervisor::keep_no_fds`, 2026-11-16). On macOS, std marks a new pipe or socket close-on-exec only after creating it, so a child forked by another thread in between could keep another spawn's exec-status pipe open for its whole life, and that spawn would never return.
 - **`daemon::install`** (user level, no root):
-  - copies the binary to `~/.devid/bin/devid`, with `php` and `composer` symlinks to it;
-  - adds a marked PATH line to `~/.zshrc` (or `~/.bash_profile`), appended so Devid's `php` wins over Homebrew;
+  - copies the binary to `~/.devid/bin/devid`, with the shims as hard links to it: `php`, `composer`, `php8.3`, `php8.4`, `php8.5`, `nginx`, `caddy`, `mailpit` (D-053);
+  - adds a marked PATH line to `~/.zshenv` and `~/.zshrc` (or `~/.bash_profile`) for the login shell read from the user database (D-053). `~/.zshenv` reaches every zsh, including those that editors and scripts start; the line in `~/.zshrc`, read after macOS's `path_helper`, keeps Devid's `php` ahead of Homebrew's. `devid path on|off`, the daemon's `shell_path` and Settings › Terminal in the app add or remove it; `status` reports it as `terminal`;
   - installs the LaunchAgent `dev.devid.daemon` (`RunAtLoad`, restart only on a crash, log in `~/.devid/log/daemon.log`) through `launchctl bootstrap gui/<uid>`;
   - downloads `composer.phar` with its published sha256.
-- **Shims** (argv[0] dispatch in the CLI): `php` runs the version of the site that contains the current folder (isolated or default), with Devid's `PHPRC`/`PHP_INI_SCAN_DIR`. `composer` runs `composer.phar` with that PHP. Both read `config.toml` directly and work without the daemon.
+- **Shims** (argv[0] dispatch in the CLI): `php` runs the version of the site that contains the current folder (isolated or default), with Devid's `PHPRC`/`PHP_INI_SCAN_DIR`. `composer` runs `composer.phar` with that PHP. `php8.3`/`php8.4`/`php8.5` run that version anywhere, with `argv[0]` kept so `PHP_BINARY` comes back through the same shim. `nginx` runs Devid's nginx on Devid's prefix and config, and only for `-t`, `-T`, `-s`, `-v`, `-V` or `-h`: starting it is the daemon's job. `caddy` runs Devid's Caddy with the daemon's XDG folders. `mailpit` runs Devid's Mailpit, and `mailpit sendmail` delivers to Devid's SMTP port unless given `-S`. All read `config.toml` directly and work without the daemon (D-053).
 - **`devid setup [--dry-run]`** runs the user steps, then `devid helper install` (sudo) only if the system pieces are missing. **`devid doctor`** is a read-only check with a fix per problem, including Homebrew `php` shadowing the shim and Valet still running. **`devid uninstall [--dry-run] [--purge]`** reverses setup and keeps `~/.devid` data unless `--purge`.
 
 Implemented in M7:
@@ -131,7 +131,7 @@ There is exactly one active web server globally.
 - **TLS:** the base ini sets `openssl.cafile` and `curl.cainfo` to a Devid `cacert.pem` (Mozilla bundle plus the Devid CA). The file is regenerated whenever the CA changes.
 - **Xdebug and pcov:** shipped as separate `.so` files per version. They are off by default. Enabling one drops an ini into the scan dir and restarts that version's php-fpm.
 - **OPcache:** on. JIT is off (`opcache.jit = disable` with `opcache.jit_buffer_size = 0`; a bare `off` parses as an empty boolean), so no JIT entitlement is needed under the hardened runtime.
-- **Shims:** `php` and `composer` live in `~/.devid/bin`. A shim resolves the version from the current directory: an isolated site's version if the directory belongs to one, otherwise the global default.
+- **Shims:** `php` and `composer` live in `~/.devid/bin`. A shim resolves the version from the current directory: an isolated site's version if the directory belongs to one, otherwise the global default. `php8.3`, `php8.4` and `php8.5` beside them always run that version (D-053).
 
 ## Client rule (D-012)
 
