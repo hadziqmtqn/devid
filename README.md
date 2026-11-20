@@ -4,7 +4,7 @@ Devid is a local development environment for Laravel, PHP and Node.js on Macs wi
 
 **Website and guide:** [devid.bekenweb.com](https://devid.bekenweb.com), with the user guide at [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs).
 
-> **Status:** v0.15, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
+> **Status:** v0.16, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
 
 ```sh
 devid park ~/Projects                  # every subfolder becomes <folder>.test
@@ -36,7 +36,7 @@ Homebrew moved Intel Macs to Tier 3: there are no more prebuilt packages, so Val
 - **Dev servers:** save a command per site once, such as `npm run dev` or a queue worker, then start and stop it from Devid.
 - **Extensions:** intl, gd, redis and PDO are built in. apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole come prebuilt from Devid's catalog, with nothing to compile.
 - **Web server:** nginx by default, or Caddy or Apache. One runs at a time; switch with `devid server use`.
-- **Share:** `devid share` gives a site a temporary public link through a Cloudflare quick tunnel (it uses your own `cloudflared`). `devid app port` serves a site on a local port for a tunnel of your own.
+- **Share:** `devid share` gives a site a temporary public link through a Cloudflare quick tunnel (it uses your own `cloudflared`, from Homebrew or `~/.local/bin`). `devid app port` serves a site on a local port for a tunnel of your own.
 - **Mail:** `devid mail on` catches the mail your apps send, in an inbox on your Mac that the desktop app shows. Laravel's SMTP mailer and PHP's `mail()` both work, and nothing reaches a real mailbox. Devid runs Mailpit for it.
 - **Terminal commands:** `php`, `composer`, `php8.3` to `php8.5`, `nginx -t`, `caddy` and `mailpit` run Devid's own copies from any terminal, editor or script. Add to PATH in the app's Settings (or `devid path on`) sets this up.
 - **Interfaces:** the CLI, the TUI and the menu-bar app. Every action works the same in all three. `devid doctor` checks the whole setup and tells you how to fix what's wrong.
@@ -55,7 +55,7 @@ The CLI and TUI only:
 curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
 ```
 
-Devid is an open-source personal project, provided as is. The builds are ad-hoc signed and not notarized; the command installs them without a Gatekeeper prompt. Setup asks for your password once for `.test` DNS, Devid's CA and ports 80/443, and `devid uninstall` undoes it. The [guide](https://devid.bekenweb.com/docs) covers the install options, sites, PHP and extensions, web servers, Mail, the desktop app, the TUI, HTTPS, updates, troubleshooting and uninstall.
+Devid is an open-source personal project, provided as is. The builds are ad-hoc signed and not notarized; the command installs them without a Gatekeeper prompt. Setup asks for your password once for `.test` DNS, Devid's CA and ports 80/443, and `devid uninstall` undoes it. The [guide](https://devid.bekenweb.com/docs) covers the install options, sites, PHP and extensions, web servers, Mail, the desktop app, the TUI, terminal commands, HTTPS, updates, troubleshooting and uninstall.
 
 ## Requirements
 
@@ -82,6 +82,7 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 - The CLI, the TUI and the menu-bar app.
 - Apple silicon: Devid, PHP, the extensions and the web servers built for arm64, smoke-tested on GitHub's Apple silicon runners before each release (D-046), and in daily use on an M1 (D-052).
 - Mail: Devid runs Mailpit to catch the mail your apps send, with the inbox in the desktop app (D-049, D-051).
+- Terminal commands: Devid's PHP versions, nginx, Caddy and Mailpit by name from any shell, with Add to PATH in the app (D-053).
 
 **Next**
 
