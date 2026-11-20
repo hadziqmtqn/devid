@@ -8,7 +8,7 @@
 
 Devid serves local PHP sites at `*.test` with HTTPS and per-site PHP versions on macOS, like Laravel Herd. It uses no Homebrew and no VM.
 
-The driver is the owner's hardware: an Intel Mac (i5-8210Y, 2 cores/4 threads, 16 GB RAM, macOS 14.8). Low idle RAM, CPU and battery use is the primary constraint.
+The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-8210Y, 2 cores/4 threads, 16 GB RAM, macOS 14.8). Since then it is an Apple M1 (8 cores, 8 GB RAM, macOS 26.6), see D-052. Low idle RAM, CPU and battery use is the primary constraint. With 8 GB, RAM is the tightest.
 
 ## Alternatives rejected
 
