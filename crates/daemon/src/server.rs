@@ -1088,10 +1088,13 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
         }
         Request::ShareStart { site, cwd } => {
             let (site, dir, _) = site_commands(state, site, &cwd)?;
-            let bin = cloudflared().ok_or(
-                "cloudflared is not installed. Get it from https://developers.cloudflare.com/cloudflare-one/connections/\
-                 connect-networks/downloads/ (Devid uses an existing one and does not download it).",
-            )?;
+            let bin = cloudflared().ok_or_else(|| {
+                format!(
+                    "cloudflared is not in {CLOUDFLARED_PLACES}. Get it from \
+                     https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ \
+                     and put it in one of those folders (Devid uses an existing one and does not download it)."
+                )
+            })?;
             let config = state.config.lock().unwrap().clone();
             if !wait_running(state, &config.server) {
                 return Err(format!("{} is not running; start it first (`devid start all`)", config.server));
@@ -1235,13 +1238,22 @@ fn cloudflared() -> Option<PathBuf> {
         return Some(PathBuf::from(p)).filter(|p| p.is_file());
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
-    ["/usr/local/bin", "/opt/homebrew/bin"]
-        .into_iter()
-        .map(PathBuf::from)
-        .chain(std::env::split_paths(&path))
-        .map(|d| d.join("cloudflared"))
-        .find(|p| p.is_file())
+    cloudflared_dirs(&crate::paths::user_home(), &path).into_iter().map(|d| d.join("cloudflared")).find(|p| p.is_file())
 }
+
+/// Where `cloudflared` is looked for, in order: Homebrew's folders; the user's own bin folders,
+/// where an install without Homebrew puts it (the official macOS download is a bare binary); then
+/// the daemon's PATH. Under launchd that PATH holds only the system folders, so a cloudflared that
+/// a terminal finds in ~/.local/bin was missed before.
+fn cloudflared_dirs(home: &Path, path: &std::ffi::OsStr) -> Vec<PathBuf> {
+    [PathBuf::from("/usr/local/bin"), PathBuf::from("/opt/homebrew/bin"), home.join(".local/bin"), home.join("bin")]
+        .into_iter()
+        .chain(std::env::split_paths(path))
+        .collect()
+}
+
+/// Where Share looked, for its error when cloudflared is missing.
+const CLOUDFLARED_PLACES: &str = "/usr/local/bin, /opt/homebrew/bin, ~/.local/bin, ~/bin or the daemon's PATH";
 
 /// A proxy site's dev server port held by a program Devid did not start (none of the site's
 /// commands runs): a dev server on that port would only fail with EADDRINUSE in its log, so the
@@ -1851,6 +1863,20 @@ fn check_updates(state: &State) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cloudflared_is_also_found_in_the_users_own_bin_folders() {
+        use std::path::{Path, PathBuf};
+        let home = Path::new("/Users/me");
+        let dirs = super::cloudflared_dirs(home, std::ffi::OsStr::new("/usr/bin:/bin"));
+        let at = |d: &str| dirs.iter().position(|x| x == Path::new(d)).unwrap_or_else(|| panic!("{d} in {dirs:?}"));
+        // Homebrew's folders keep their place, the user's own come next, launchd's PATH last.
+        assert!(at("/usr/local/bin") < at("/opt/homebrew/bin"));
+        assert!(at("/opt/homebrew/bin") < at("/Users/me/.local/bin"));
+        assert!(at("/Users/me/.local/bin") < at("/Users/me/bin"));
+        assert!(at("/Users/me/bin") < at("/usr/bin"));
+        assert_eq!(dirs.last(), Some(&PathBuf::from("/bin")));
+    }
+
     #[test]
     fn a_starting_service_is_waited_for() {
         use super::{Duration, Instant, ProcState, settled_running};
