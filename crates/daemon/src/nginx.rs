@@ -122,6 +122,11 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
         "    map $http_upgrade $connection_upgrade { default upgrade; '' close; }\n\
          \x20   map $http_x_forwarded_proto $devid_forwarded_proto { default $http_x_forwarded_proto; '' $scheme; }\n",
     );
+    // D-054: an on-demand site's requests leave a line each, so the daemon sees when it was last
+    // used (the file's modification time).
+    if sites.iter().any(|s| s.on_demand.is_some()) {
+        c.push_str("    log_format devid_last '$msec';\n");
+    }
     for site in sites {
         let (Some(crt), Some(key)) =
             (quotable(&ca::site_cert(paths, &site.host)), quotable(&ca::site_key(paths, &site.host)))
@@ -275,6 +280,42 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
                      \x20           proxy_read_timeout 1h;\n"
                 )
             };
+            let again = proxy(&again_name(site));
+            // D-054: an on-demand site asks the daemon to start its command (`ondemand::wake`)
+            // before it says nothing answers. The daemon answers 418 once the dev server accepts,
+            // and the same request, method and body included, goes to it again (`@devid_retry`,
+            // which has its own `error_page` so a failed retry cannot loop back here). Any other
+            // answer (the Starting page, a failure) goes to the client as it is. 502 means the
+            // daemon is not running.
+            let (log, after_again, wake) = match &site.on_demand {
+                None => (String::new(), "@devid_down", String::new()),
+                Some(_) => {
+                    let own = |p: &Path| quotable(p).expect("Devid's own paths are quotable");
+                    let sock = own(Path::new(&format!("http://unix:{}", paths.wake_socket().display())));
+                    (
+                        format!("        access_log {} devid_last;\n", own(&paths.last_request(&site.name))),
+                        "@devid_wake",
+                        format!(
+                            "        location @devid_wake {{\n\
+                             \x20           if ($upstream_bytes_sent ~ \"[1-9]\") {{ return 502; }}\n\
+                             \x20           proxy_pass {sock};\n\
+                             \x20           proxy_pass_request_body off;\n\
+                             \x20           proxy_set_header Content-Length \"\";\n\
+                             \x20           proxy_set_header X-Devid-Site {name};\n\
+                             \x20           proxy_read_timeout 75s;\n\
+                             \x20           proxy_intercept_errors on;\n\
+                             \x20           error_page 418 = @devid_retry;\n\
+                             \x20           error_page 502 = @devid_down;\n\
+                             \x20       }}\n\
+                             \x20       location @devid_retry {{\n\
+                             {again}\
+                             \x20           error_page 502 504 = @devid_down;\n\
+                             \x20       }}\n",
+                            name = site.name,
+                        ),
+                    )
+                }
+            };
             // `localhost` resolves to 127.0.0.1 and ::1, and nginx tries both: Vite listens on
             // [::1] only by default (A1). A failure tries once more through a group that skips
             // neither address (see `again_upstream`), then says nothing answers; the second
@@ -283,6 +324,7 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
             // POST, and sending it twice would repeat it.
             format!(
                 "        recursive_error_pages on;\n\
+                 {log}\
                  \x20       location / {{\n\
                  {main}\
                  \x20       }}\n\
@@ -290,14 +332,14 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
                  \x20       location @devid_again {{\n\
                  \x20           if ($upstream_bytes_sent ~ \"[1-9]\") {{ return 502; }}\n\
                  {again}\
-                 \x20           error_page 502 504 = @devid_down;\n\
+                 \x20           error_page 502 504 = {after_again};\n\
                  \x20       }}\n\
+                 {wake}\
                  \x20       location @devid_down {{\n\
                  \x20           default_type text/plain;\n\
                  \x20           return 502 \"Nothing answers on localhost:{up} for {name}. Start its dev server (or its command in Devid).\\n\";\n\
                  \x20       }}\n",
                 main = proxy(&format!("localhost:{up}")),
-                again = proxy(&again_name(site)),
                 name = site.host,
             )
         }
@@ -456,6 +498,57 @@ mod tests {
         assert_eq!(conf.matches("map $http_upgrade").count(), 1);
         assert!(conf.contains("proxy_set_header X-Forwarded-Proto $devid_forwarded_proto;"));
         assert!(!conf.contains("default_server;\n        server_name"), "no local port unless set");
+        assert!(!conf.contains("devid_wake") && !conf.contains("log_format"), "nothing on demand unless set");
+    }
+
+    #[test]
+    fn render_on_demand() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let dev = Site {
+            mode: Mode::Proxy,
+            upstream: 4321,
+            port: Some(8001),
+            on_demand: Some("dev".into()),
+            ..site("devid-site", "/p/site", "8.5")
+        };
+        let other = Site { mode: Mode::Proxy, upstream: 3000, ..site("erd", "/p/erd", "8.5") };
+        let conf = render(&paths, &Config::default(), &[dev, other]);
+        assert_eq!(conf.matches("log_format devid_last '$msec';").count(), 1);
+        assert_eq!(
+            conf.matches("access_log \"/h/.devid/run/requests-devid-site\" devid_last;").count(),
+            2,
+            "both server blocks, the local port's too"
+        );
+        assert_eq!(conf.matches("error_page 502 504 = @devid_wake;").count(), 2);
+        assert_eq!(conf.matches("error_page 502 504 = @devid_down;").count(), 2 + 1, "retry twice, erd once");
+
+        let wake = &conf[conf.find("location @devid_wake {").unwrap()..];
+        let wake = &wake[..wake.find("\n        }").unwrap()];
+        assert!(
+            wake.starts_with(
+                "location @devid_wake {\n            if ($upstream_bytes_sent ~ \"[1-9]\") { return 502; }"
+            ),
+            "a request the dev server took is not sent again: {wake}"
+        );
+        for line in [
+            "proxy_pass \"http://unix:/h/.devid/run/wake.sock\";",
+            "proxy_pass_request_body off;",
+            "proxy_set_header X-Devid-Site devid-site;",
+            "proxy_intercept_errors on;",
+            "error_page 418 = @devid_retry;",
+            "error_page 502 = @devid_down;",
+        ] {
+            assert!(wake.contains(line), "{line}: {wake}");
+        }
+        let retry = &conf[conf.find("location @devid_retry {").unwrap()..];
+        let retry = &retry[..retry.find("\n        }").unwrap()];
+        assert!(!retry.contains("if ("), "the wake call itself sent bytes: no guard");
+        assert!(retry.contains("proxy_pass http://devid_again_devid_site;"), "{retry}");
+        assert!(retry.contains("proxy_set_header Origin $devid_origin_devid_site;"), "same headers");
+        assert!(retry.contains("error_page 502 504 = @devid_down;"), "a failed retry cannot loop back");
+
+        let erd = &conf[conf.find("server_name erd.test;").unwrap()..];
+        assert!(!erd.contains("access_log") && !erd.contains("@devid_wake"), "only on-demand sites: {erd}");
     }
 
     #[test]

@@ -91,7 +91,18 @@ pub struct App {
     /// Commands the owner starts and stops from Devid (D-036), in the order they were added.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<AppCommand>,
+    /// Proxy sites (D-054): the saved command a request to the site starts when its dev server is
+    /// not running, and that stops again after `idle_stop` minutes without use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_demand: Option<String>,
+    /// Minutes without requests or open connections before the on-demand command stops; 0 never.
+    /// None is `DEFAULT_IDLE_STOP`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_stop: Option<u32>,
 }
+
+/// D-054: an on-demand command stops after this many idle minutes unless the site says otherwise.
+pub const DEFAULT_IDLE_STOP: u32 = 10;
 
 /// One saved command: `[[apps.<site>.commands]]` with `name` and `run` (a shell line).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -185,6 +196,9 @@ mod tests {
             (erd.commands[0].name.as_str(), erd.commands[0].run.as_str()),
             ("dev:pg:local", "npm run dev:pg:local")
         );
+        fs::write(&path, "[apps.site]\non_demand = \"dev\"\nidle_stop = 5\n").unwrap();
+        let site = &Config::load_or_create(&path).unwrap().apps["site"];
+        assert_eq!((site.on_demand.as_deref(), site.idle_stop), (Some("dev"), Some(5)));
         Config::default().save(&path).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("apps"), "no empty [apps] table");
 

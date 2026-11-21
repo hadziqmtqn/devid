@@ -155,8 +155,15 @@ pub enum Request {
         spa: Option<bool>,
         #[serde(default)]
         pass_host: Option<bool>,
+        /// D-054: the saved command a request to this proxy site starts, or "" to turn it off.
+        #[serde(default)]
+        on_demand: Option<String>,
+        /// D-054: minutes without use before the on-demand command stops; 0 never.
+        #[serde(default)]
+        idle_stop: Option<u32>,
     },
-    /// Forget a site's app overrides: the detected type applies again.
+    /// Forget a site's app overrides: the detected type applies again. The local port, the
+    /// commands and the on-demand setting stay.
     AppReset {
         site: Option<String>,
         cwd: String,

@@ -11,6 +11,7 @@ pub mod install;
 pub mod logs;
 pub mod mail;
 pub mod nginx;
+pub mod ondemand;
 pub mod paths;
 pub mod php;
 pub mod phpext;

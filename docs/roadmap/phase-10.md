@@ -1,8 +1,8 @@
 # Phase 10 Plan: dev servers on demand
 
 > Scope: a proxy site's dev server starts with the first request and stops after it has been idle, so a dev server costs RAM only while it is used (D-054)
-> Verified against: 2026-11-21 (v0.16.0 installed on the owner's M1; nginx 1.30.7)
-> Status: proposed 2026-11-21. O1 (spike) done, see "O1 results". Waiting for the owner's go-ahead.
+> Verified against: 2026-11-21 (v0.16.1 installed on the owner's M1; nginx 1.30.7)
+> Status: accepted 2026-11-21 (D-054). O1 (spike) done; O2 shipped in 0.16.1; O3 built on branch `feat/on-demand-nginx`, see "O3 results".
 
 Today a proxy site's dev server runs from the moment the user presses Start until they press Stop (D-036). Nothing starts at login, so after a login or a crash every proxy site shows "Nothing answers on localhost:<port>" until its command is started by hand. Once started, a dev server keeps its RAM all day, even when nobody has opened the site for hours.
 
@@ -170,8 +170,8 @@ Neither server is installed on the owner's Mac. O4 starts with a spike of each o
 | # | Milestone | Done when |
 |---|---|---|
 | O1 | **Spike** | the numbers and answers are in this doc (done 2026-11-21, see "O1 results") |
-| O2 | **Fix: no stale 502 after a dev server starts.** A failed request tries once more through a `max_fails=0` group (`@devid_again`) before "Nothing answers". A 0.16.x patch, independent of the rest | a dev server that comes up answers through `.test` on the next request, not 10 s later, checked by `scripts/smoke.sh` on both arches (built 2026-11-21, branch `fix/nginx-stale-502`) |
-| O3 | **Daemon and CLI on nginx:** the setting, the wake socket, starting and waiting, the Starting and failure pages, idle stop, status, `devid cmd on-demand` | on the owner's Mac, devid-site with `on_demand = "dev"` opens from sleep at `https://devid-site.test` with one slower load, stops after its idle time with no tab open, and keeps running while a tab is open |
+| O2 | **Fix: no stale 502 after a dev server starts.** A failed request tries once more through a `max_fails=0` group (`@devid_again`) before "Nothing answers". A 0.16.x patch, independent of the rest | a dev server that comes up answers through `.test` on the next request, not 10 s later, checked by `scripts/smoke.sh` on both arches (shipped in 0.16.1, 2026-11-21) |
+| O3 | **Daemon and CLI on nginx:** the setting, the wake socket, starting and waiting, the Starting and failure pages, idle stop, status, `devid cmd on-demand` | on the owner's Mac, devid-site with `on_demand = "dev"` opens from sleep at `https://devid-site.test` with one slower load, stops after its idle time with no tab open, and keeps running while a tab is open (built 2026-11-21, branch `feat/on-demand-nginx`: checked with a test daemon and a copy, see "O3 results"; the check on the owner's own devid-site waits for an install) |
 | O4 | **Caddy and Apache:** spike, then the wake path on each, or "unavailable on this server" | the O3 check passes on both servers with a test daemon, or the docs and the app say why not |
 | O5 | **App and TUI** | the owner turns on-demand on and off for devid-site in Devid.app and sees it sleep and wake |
 | O6 | **Docs and release 0.17.0:** devid-site guide, README, roadmap, timeline record | released and installed on the owner's Mac (the release waits for the owner's go-ahead) |
@@ -228,6 +228,24 @@ nginx 1.30.7 (Devid's build) in front of a Python stand-in for the dev server (i
 - A WebSocket upgrade that arrives while the server is down (the stand-in has no WebSocket). An HMR client reconnects by itself once the page has loaded, so a failed upgrade only delays it.
 - Caddy and Apache (O4).
 - How long erd-builder-pro takes to start on the M1. The Intel Mac's 29–74 s was for a different script with a Vite build.
+
+## O3 results (2026-11-21)
+
+Built on branch `feat/on-demand-nginx`; the record with every check is `docs/implementation-timeline/daemon/2026-11-21-on-demand-nginx.md`.
+
+- **The O3 check, on a clone of devid-site:** a test daemon on spare ports ran a clone of devid-site with `next dev` on demand and `idle_stop = 1`.
+  - It opened from sleep with one slower load: 200 in 4.8 s.
+  - With no tab open, it stopped by itself 70–80 s after the last request.
+  - With a tab open, it kept running for 152 s, and stopped 59–69 s after the tab closed.
+- **Cost of the connection check:** 0.1–0.3 ms per idle check against devid-site's 19 processes.
+- **Differences from the design above:**
+  - The request file is `run/requests-<site>`, not a log.
+  - The wake socket stays bound until the daemon stops.
+  - `idle_stop` is 0–1440 minutes.
+  - A command that exits shows its page after up to 1 s, the command watcher's poll.
+- **Still open:**
+  - **The check on the owner's own devid-site** needs this build installed.
+  - **A stray `detached-flush.js` process:** every stop of devid-site's `next dev` leaves one behind (Next 16.4 with fumadocs-mdx, even with `NEXT_TELEMETRY_DISABLED=1`). With on demand, each sleep adds one, so devid-site needs a fix before it goes on demand.
 
 ## Not in this phase
 
