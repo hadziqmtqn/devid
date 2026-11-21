@@ -22,6 +22,7 @@ echo '<?php echo "smoke ", PHP_VERSION, " ", php_uname("m");' > "$T/shop/public/
 DAEMON=$!
 finish() {
   status=$?
+  [ -n "${SERVER:-}" ] && kill "$SERVER" 2> /dev/null
   "$DEVID" daemon stop > /dev/null 2>&1 || kill "$DAEMON" 2> /dev/null || true
   if [ "$status" -ne 0 ]; then
     echo "--- daemon.log" && cat "$T/daemon.log"
@@ -50,6 +51,29 @@ case "$got" in
   "$want"*" $(uname -m)") echo "smoke test passed on $(uname -m)" ;;
   *) echo "FAIL: expected '$want<patch> $(uname -m)'" >&2; exit 1 ;;
 esac
+
+# A proxy site (D-035) answers as soon as its dev server starts, whether that listens on 127.0.0.1
+# or only on ::1 (as Vite does). nginx skips a localhost address that refused for 10 s, so up to
+# 0.16 the site said "Nothing answers" for that long; the retry group fixes it (Phase 10 O2).
+mkdir -p "$T/front"
+echo "proxy smoke" > "$T/front/index.html"
+"$DEVID" link --path "$T/front" > /dev/null
+"$DEVID" app set front --mode proxy --upstream 28300 > /dev/null
+front() { curl -sk --resolve front.test:28443:127.0.0.1 https://front.test:28443/ 2> /dev/null || true; }
+down="Nothing answers on localhost:28300"
+for _ in $(seq 50); do front | grep -q "$down" && break; sleep 0.2; done
+for addr in 127.0.0.1 ::1; do
+  front | grep -q "$down" || { echo "FAIL: front.test with no dev server: $(front)" >&2; exit 1; }
+  if [ "$addr" = ::1 ]; then url="http://[::1]:28300/"; else url="http://$addr:28300/"; fi
+  python3 -m http.server 28300 --bind "$addr" --directory "$T/front" > /dev/null 2>&1 &
+  SERVER=$!
+  for _ in $(seq 100); do curl -fs -o /dev/null "$url" && break; sleep 0.05; done
+  got="$(front)"
+  [ "$got" = "proxy smoke" ] || { echo "FAIL: front.test right after its dev server started on $addr: $got" >&2; exit 1; }
+  kill "$SERVER" && wait "$SERVER" 2> /dev/null || true
+  SERVER=
+done
+echo "proxy smoke test passed on $(uname -m)"
 
 # Mail (D-049), once the runtime release has Mailpit: the real Mailpit on spare ports catches a test
 # email and one from PHP's mail(), and refuses a foreign Host header (DNS rebinding).

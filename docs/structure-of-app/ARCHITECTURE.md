@@ -208,6 +208,7 @@ Implemented in T5:
   - **proxy:** to `localhost:<upstream>`, so IPv4 or IPv6.
     - `Host: localhost:<upstream>`, and the site's own Origin rewritten, so Vite and Next.js accept `.test`. A foreign Origin is unchanged.
     - WebSocket upgrades, `X-Forwarded-*` headers, and a plain-text error when nothing answers.
+    - **Retry on nginx (Phase 10 O2):** `localhost:<upstream>` is two addresses, and nginx skips one that refused for 10 s. A failed request (502, 504) goes once more through `@devid_again`, to an `upstream devid_again_<site>` with `max_fails=0` on 127.0.0.1 and ::1, so a dev server that has just started answers at once instead of after 10 s. Only a request with no bytes sent upstream goes again (`$upstream_bytes_sent`), so a POST the dev server took and dropped is not repeated. The main path keeps the skipping group, since `max_fails=0` there would log a refusal on every other request to a server on one address. Caddy keeps no failure state unless passive health checks are configured (`fail_duration`), and Apache's proxy line has `retry=0`; neither was tested for this.
     - `pass_host` keeps Host and Origin.
 - **Web servers:** all three render each mode (nginx `map` and `proxy_pass`; Caddy `reverse_proxy`; Apache `mod_proxy_http` with `upgrade=websocket retry=0`). Apache now refuses hidden paths per `<Directory>`.
 - **php-fpm:** only for the PHP versions of PHP-mode sites, plus the default.
