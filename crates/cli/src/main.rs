@@ -277,6 +277,16 @@ enum CmdAction {
         #[arg(num_args = 0..=2, value_name = "SITE NAME")]
         args: Vec<String>,
     },
+    /// Start a proxy site's command with its first request and stop it when the site is idle
+    /// (nginx): `devid cmd on-demand [site] <name>`, or `off`
+    #[command(name = "on-demand")]
+    OnDemand {
+        #[arg(num_args = 1..=2, required = true, value_name = "SITE NAME")]
+        args: Vec<String>,
+        /// Minutes without requests or open connections before it stops (default 10; 0 never)
+        #[arg(long, value_name = "MINUTES")]
+        idle: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -879,7 +889,42 @@ fn cmd(action: CmdAction, paths: &Paths) -> Result<(), String> {
                 (true, Some(n)) => println!("{n} was not running"),
                 (true, None) => println!("nothing was running"),
             }
+            for n in v["sleeping"].as_array().into_iter().flatten().filter_map(|n| n.as_str()) {
+                let site = v["site"].as_str().unwrap_or("?");
+                println!(
+                    "{n} is on demand: the next request starts it again (`devid cmd on-demand {site} off` keeps it off)"
+                );
+            }
             v["site"].as_str().map(String::from)
+        }
+        CmdAction::OnDemand { args, idle } => {
+            let (site, name) = site_and_name(args);
+            let off = name == "off";
+            let v = send(Request::AppSet {
+                site,
+                cwd: cwd.clone(),
+                preset: None,
+                mode: None,
+                root: None,
+                upstream: None,
+                spa: None,
+                pass_host: None,
+                on_demand: Some(if off { String::new() } else { name.clone() }),
+                idle_stop: idle,
+            })?;
+            let site = v["site"].as_str().unwrap_or("?");
+            match (off, v["idle_stop"].as_u64()) {
+                (true, _) => println!("{site} is not on demand; its commands start and stop when you say"),
+                (false, Some(0)) => println!("{name} starts with the first request to {site} and keeps running"),
+                (false, minutes) => println!(
+                    "{name} starts with the first request to {site} and stops after {} min without requests or open tabs",
+                    minutes.unwrap_or(10)
+                ),
+            }
+            if let Some(w) = v["warning"].as_str() {
+                println!("warning: {w}");
+            }
+            Some(site.to_string())
         }
     };
     let sites = send(Request::Sites)?;
@@ -902,6 +947,25 @@ fn site_at<'a>(list: &'a [serde_json::Value], cwd: &str) -> Option<&'a serde_jso
         .max_by_key(|s| s["path"].as_str().map_or(0, |p| Path::new(p).components().count()))
 }
 
+/// D-054: a site's on-demand state, e.g. "on demand: sleeping; the next request starts it".
+fn on_demand_text(od: &serde_json::Value) -> String {
+    let stops = match od["idle_stop"].as_u64() {
+        Some(0) => "it keeps running once started".to_string(),
+        Some(m) => format!("stops after {m} min idle"),
+        None => String::new(),
+    };
+    let idle =
+        od["idle_for"].as_u64().filter(|s| *s >= 60).map(|s| format!(", idle {} min", s / 60)).unwrap_or_default();
+    match od["state"].as_str() {
+        Some("sleeping") => format!("on demand: sleeping; the next request starts it, and it {stops}"),
+        Some("starting") => format!("on demand: starting; it {stops}"),
+        Some("running") => format!("on demand: running{idle}; it {stops}"),
+        Some("failed") => "on demand: it exited by itself; the next request starts it again".into(),
+        Some("unavailable") => "on demand: works with nginx so far; start it yourself on this web server".into(),
+        _ => "on demand".into(),
+    }
+}
+
 fn print_commands(s: &serde_json::Value) {
     let name = s["name"].as_str().unwrap_or("?");
     println!("{}", s["url"].as_str().unwrap_or("?"));
@@ -919,6 +983,10 @@ fn print_commands(s: &serde_json::Value) {
             _ => "stopped".into(),
         };
         println!("  {:<width$}  {:<20} {}", c["name"].as_str().unwrap_or("?"), state, c["run"].as_str().unwrap_or("?"));
+        let od = &s["on_demand"];
+        if od["command"] == c["name"] {
+            println!("  {:<width$}  {}", "", on_demand_text(od));
+        }
     }
     if let Some(c) = saved.first() {
         println!("  logs: `devid logs {} -f` (one per command)", c["log"].as_str().unwrap_or("?"));
@@ -946,6 +1014,8 @@ fn app(action: AppAction, paths: &Paths) -> Result<(), String> {
                 upstream,
                 spa: on(spa),
                 pass_host: on(pass_host),
+                on_demand: None,
+                idle_stop: None,
             };
             Some(send(req)?["site"].as_str().unwrap_or("?").to_string())
         }
@@ -1078,8 +1148,13 @@ fn print_status(v: &serde_json::Value, json: bool) {
             share["url"].as_str().unwrap_or("(connecting)")
         );
     }
-    if v["commands_running"].as_u64().is_some_and(|n| n > 0) {
-        println!("  commands:    {} running (`devid cmd` in a project lists them)", v["commands_running"]);
+    let sleeping = v["sleeping"].as_array().map_or(0, Vec::len);
+    if v["commands_running"].as_u64().is_some_and(|n| n > 0) || sleeping > 0 {
+        let asleep = match sleeping {
+            0 => String::new(),
+            n => format!(", {n} on demand and sleeping"),
+        };
+        println!("  commands:    {} running{asleep} (`devid cmd` in a project lists them)", v["commands_running"]);
     }
     let mail = &v["mail"];
     if let Some(state) = mail["state"].as_str().filter(|s| *s != "off") {
@@ -1131,6 +1206,11 @@ fn print_sites(list: &serde_json::Value, json: bool) {
             (Some(p), false) => format!("{note}, :{p}"),
             (Some(p), true) => format!("{note}, :{p} busy"),
             (None, _) => note,
+        };
+        let note = match s["on_demand"]["state"].as_str() {
+            Some("sleeping") => format!("{note}, on demand (sleeping)"),
+            Some(_) => format!("{note}, on demand"),
+            None => note,
         };
         let typ = s["preset_label"].as_str().unwrap_or("PHP");
         println!(

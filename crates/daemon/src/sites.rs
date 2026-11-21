@@ -101,6 +101,11 @@ pub struct Site {
     /// Also served on http://127.0.0.1:<port> (D-037). The daemon drops it from the web server's
     /// config while another program listens there.
     pub port: Option<u16>,
+    /// D-054: the saved command a request starts, for a proxy site that has one marked; None
+    /// otherwise, also when the marked command is no longer saved.
+    pub on_demand: Option<String>,
+    /// Minutes without use before the on-demand command stops; 0 never.
+    pub idle_stop: u32,
 }
 
 impl Site {
@@ -108,6 +113,25 @@ impl Site {
     pub fn dev_port(&self) -> Option<u16> {
         (self.mode == Mode::Proxy).then_some(self.upstream)
     }
+}
+
+/// D-054: forget `on_demand` (and its `idle_stop`) for sites where it no longer applies: the site
+/// is not a proxy site any more, or the command was removed. Returns the sites it changed.
+pub fn drop_stale_on_demand(config: &mut Config) -> Vec<String> {
+    let stale: Vec<String> = resolve(config)
+        .into_iter()
+        .filter(|s| s.on_demand.is_none() && config.apps.get(&s.name).is_some_and(|a| a.on_demand.is_some()))
+        .map(|s| s.name)
+        .collect();
+    for name in &stale {
+        if let Some(app) = config.apps.get_mut(name) {
+            (app.on_demand, app.idle_stop) = (None, None);
+            if app.is_empty() {
+                config.apps.remove(name);
+            }
+        }
+    }
+    stale
 }
 
 /// Keys of the given top-level objects in a JSON file (dependencies, scripts…); empty if unreadable.
@@ -288,6 +312,10 @@ pub fn resolve(config: &Config) -> Vec<Site> {
                 spa: app.and_then(|a| a.spa).unwrap_or(preset.key == "vite"),
                 pass_host: app.and_then(|a| a.pass_host).unwrap_or(false),
                 port: app.and_then(|a| a.port),
+                on_demand: app
+                    .and_then(|a| a.on_demand.clone())
+                    .filter(|c| mode == Mode::Proxy && app.is_some_and(|a| a.commands.iter().any(|x| x.name == *c))),
+                idle_stop: app.and_then(|a| a.idle_stop).unwrap_or(crate::config::DEFAULT_IDLE_STOP),
                 name,
                 path,
             }
@@ -396,6 +424,47 @@ mod tests {
         assert_eq!(names, ["api", "shop"]);
         assert_eq!(ignored_name(&root.join("parked/My_App").display().to_string()), "my-app");
 
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn on_demand_needs_a_proxy_site_and_its_command() {
+        use crate::config::{App, AppCommand};
+        let root = std::env::temp_dir().join(format!("devid-ondemand-sites-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let dev = AppCommand { name: "dev".into(), run: "npm run dev".into() };
+        let app = |mode: &str, commands: Vec<AppCommand>| App {
+            mode: Some(mode.into()),
+            upstream: Some(4321),
+            commands,
+            on_demand: Some("dev".into()),
+            idle_stop: Some(5),
+            ..App::default()
+        };
+        let mut config = Config {
+            links: ["front", "blog", "gone"].map(|n| (n.to_string(), root.display().to_string())).into(),
+            apps: [
+                ("front".to_string(), app("proxy", vec![dev.clone()])),
+                ("blog".to_string(), app("php", vec![dev.clone()])),
+                ("gone".to_string(), app("proxy", Vec::new())),
+            ]
+            .into(),
+            ..Config::default()
+        };
+        let sites = resolve(&config);
+        let front = sites.iter().find(|s| s.name == "front").unwrap();
+        assert_eq!((front.on_demand.as_deref(), front.idle_stop), (Some("dev"), 5));
+        assert!(sites.iter().filter(|s| s.name != "front").all(|s| s.on_demand.is_none()), "php site, no command");
+
+        assert_eq!(drop_stale_on_demand(&mut config), ["blog", "gone"]);
+        assert_eq!(config.apps["front"].on_demand.as_deref(), Some("dev"));
+        assert_eq!((config.apps["blog"].on_demand.as_ref(), config.apps["blog"].idle_stop), (None, None));
+        assert_eq!(config.apps["blog"].commands, [dev], "the command stays");
+        assert!(drop_stale_on_demand(&mut config).is_empty());
+        let default =
+            Config { apps: [("front".to_string(), App { idle_stop: None, ..app("proxy", vec![]) })].into(), ..config };
+        assert!(resolve(&default).iter().all(|s| s.idle_stop == crate::config::DEFAULT_IDLE_STOP));
         fs::remove_dir_all(&root).unwrap();
     }
 

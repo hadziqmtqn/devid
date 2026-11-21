@@ -1,7 +1,7 @@
 # Architecture
 
 > Scope: planned components, runtime flow and file layout of Devid
-> Verified against: 2026-11-16 (children keep no inherited fds)
+> Verified against: 2026-11-21 (on-demand dev servers on nginx, Phase 10 O3)
 > Status: partial (Phase 2 implemented; the TUI and the GUI are proposed)
 
 ## Components (Rust Cargo workspace)
@@ -240,6 +240,23 @@ Implemented in T5:
 - **Requests and CLI:** `command_add`, `command_remove`, `command_start`, `command_stop`; `devid cmd [list|add|rm|start|stop]`. The `sites` reply carries each command's state and suggestions from `package.json` and Laravel; `status` lists `running_commands` for the menu bar.
 - **Share (A6, D-037):** `share_start` runs an existing `cloudflared`, the first one in `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, `~/bin` or the daemon's PATH (launchd's system folders): `cloudflared tunnel --url http://127.0.0.1:<http_port> --http-host-header <site>.<tld>` as the site's `.share` command entry and reads its `trycloudflare.com` URL from `share-<site>.log`; `share_stop` ends it. `sites` reports `share` per site, `status` the `shares`.
 - **Desktop app (A5):** a site's detail view (type, serving, local port, commands with their log) and the menu bar's running commands with Stop; every action is a daemon request the CLI also sends.
+
+## Dev servers on demand (Phase 10 O3, D-054)
+
+- **Setting:** `[apps.<site>] on_demand = "<command>"` and `idle_stop = <minutes>` (default 10, 0 never, at most 1440). It applies only to a proxy site whose command is saved (`Site.on_demand`); `mutate` drops it when the site stops being a proxy site or loses the command. It works on nginx so far (`ondemand::available`); on Caddy and Apache the setting stays and the site waits for its command as before (O4).
+- **Waking (nginx):** an on-demand site's `@devid_again` hands a failure to `@devid_wake` instead of `@devid_down`.
+  - `@devid_wake` proxies to `~/.devid/run/wake.sock` with `proxy_pass_request_body off` and `X-Devid-Site: <site>`, behind the same `$upstream_bytes_sent` guard.
+  - The daemon (`ondemand::wake`) starts the command once (a lock around `Commands::start`, which also returns a running one) with the log note "started by a request to <host>", then checks the port every 50 ms.
+  - It answers `418` once the port accepts; nginx sends the same request, method and body included, through `@devid_retry` (the retry group, with its own `error_page` to `@devid_down`).
+  - A GET with `text/html` in `Accept` still starting after 5 s gets `503`, the "Starting <host>…" page: the command, the seconds so far and the last 20 log lines, refreshing every second, `Retry-After: 1`, `no-store`. Other requests wait up to 60 s, then `504`. A command that exits gets `500` with its exit code and log. These pass through to the client unchanged.
+  - The daemon never answers `502`: that is nginx's when the wake socket is not there.
+  - The wake socket (mode 0600) is bound from the first on-demand site until the daemon stops: one thread blocked in `accept`, a thread per wake request.
+- **Idle stop:** a thread runs only while an on-demand command runs, every 30 s (`ondemand::tick`).
+  - Requests: nginx writes `$msec` per request of an on-demand site to `run/requests-<site>` (`log_format devid_last`, `access_log` in both of its server blocks); the daemon reads the file's mtime and empties it past 64 KB, keeping the mtime.
+  - Open connections: any ESTABLISHED TCP socket of the command's process group on the upstream port, read through libproc (`proc_listpgrppids`, `PROC_PIDLISTFDS`, `PROC_PIDFDSOCKETINFO`; `socket_fdinfo` fields by offset, checked with clang on both arches). An open tab's HMR WebSocket counts. One check on devid-site's 19-process `next dev` takes 0.1–0.3 ms.
+  - A site with neither for `idle_stop` minutes (counting from the command's start, the last request, wake-up or open connection) is stopped as `command_stop` does, with a line in its log and the daemon's.
+- **Stop and lifetime:** `command_stop` on an on-demand command puts it to sleep (the reply lists it in `sleeping`). `command_start` works as before and the idle stop then applies. The update resume (D-040) skips on-demand commands. Nothing starts at login.
+- **Requests and CLI:** `app_set` gains `on_demand` (a command name, or `""` for off) and `idle_stop`. `sites` gives each site `on_demand`: null or `{command, idle_stop, state, idle_for}`, with `state` sleeping, starting, running, failed or unavailable. `status` lists the `sleeping` sites. CLI: `devid cmd on-demand [site] <name>|off [--idle <minutes>]`; `devid cmd`, `devid sites` and `devid status` show it.
 
 ## Mail (Phase 9 M3, D-049)
 

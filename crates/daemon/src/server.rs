@@ -5,6 +5,7 @@ use crate::{
     commands::{self, Commands},
     config::{App, AppCommand, Config},
     dns, helper, install, logs, mail, nginx,
+    ondemand::{self, OnDemand},
     paths::Paths,
     php, phpext, ports,
     protocol::Request,
@@ -27,7 +28,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 struct State {
@@ -56,6 +57,8 @@ struct State {
     busy_ports: Mutex<BTreeMap<String, String>>,
     /// The owner's commands (D-036) started from Devid.
     commands: Commands,
+    /// D-054: wake-ups and the idle check of on-demand commands.
+    on_demand: OnDemand,
     /// The last check that port 80 reaches the web server (D-047): when, and the answer.
     redirect_check: Mutex<Option<(Instant, bool)>>,
     /// Mailpit's archive while the first `mail on` downloads it, and its size (D-049), for the
@@ -262,6 +265,11 @@ impl State {
         let mut next = current.clone();
         let reply = change(&mut next, &sites::resolve(&current))?;
         log_moved(sites::spread_ports(&current, &mut next, ports::in_use));
+        // D-054: a site that stopped being a proxy site, or lost its on-demand command, is no
+        // longer on demand.
+        for site in sites::drop_stale_on_demand(&mut next) {
+            eprintln!("devid: {site} is no longer on demand: it is not a proxy site, or its command is gone");
+        }
         if let Err(e) = self.apply(&next) {
             // Put services back in line with the config that stays in force.
             let _ = self.apply(&current);
@@ -271,6 +279,136 @@ impl State {
         *current = next;
         Ok(reply)
     }
+}
+
+/// The sites with on-demand on, where the active web server can wake them (D-054).
+fn on_demand_sites(config: &Config) -> Vec<Site> {
+    match ondemand::available(config) {
+        true => sites::resolve(config).into_iter().filter(|s| s.on_demand.is_some()).collect(),
+        false => Vec::new(),
+    }
+}
+
+/// D-054: once a site is on demand, listen for wake-ups; while an on-demand command runs, check
+/// for idle ones. Called when the daemon starts and after anything that can turn either on.
+fn sync_on_demand(state: &Arc<State>) {
+    let config = state.config.lock().unwrap().clone();
+    let sites = on_demand_sites(&config);
+    if sites.is_empty() {
+        return;
+    }
+    listen_wake(state);
+    if on_demand_running(state, &sites) {
+        watch_idle(state);
+    }
+}
+
+fn on_demand_running(state: &State, sites: &[Site]) -> bool {
+    sites.iter().any(|s| s.on_demand.as_ref().is_some_and(|c| state.commands.running_group(&s.name, c).is_some()))
+}
+
+/// Bind the wake socket and serve it, once; it stays until the daemon stops. A thread blocked in
+/// `accept` costs nothing while no request needs it.
+fn listen_wake(state: &Arc<State>) {
+    let mut listening = state.on_demand.listening.lock().unwrap();
+    if *listening {
+        return;
+    }
+    let path = state.paths.wake_socket();
+    // A crashed daemon's socket; the main socket already proved no other daemon runs.
+    let _ = fs::remove_file(&path);
+    let listener = match UnixListener::bind(&path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("devid: could not listen on {}: {e}; on-demand sites cannot wake", path.display());
+            return;
+        }
+    };
+    // Only the owner (and the web server, which runs as the owner) may wake a site.
+    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    *listening = true;
+    let state = Arc::clone(state);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    let state = Arc::clone(&state);
+                    std::thread::spawn(move || serve_wake(stream, &state));
+                }
+                Err(e) => eprintln!("devid: wake accept failed: {e}"),
+            }
+        }
+    });
+}
+
+/// One wake request from the web server: start the site's on-demand command and answer when its
+/// dev server accepts (see `ondemand::wake`).
+fn serve_wake(mut stream: UnixStream, state: &Arc<State>) {
+    let Ok(Some(req)) = ondemand::read_request(&mut stream) else { return };
+    let config = state.config.lock().unwrap().clone();
+    let found = on_demand_sites(&config).into_iter().find(|s| s.name == req.site).and_then(|s| {
+        let name = s.on_demand.clone()?;
+        let command = config.apps.get(&s.name)?.commands.iter().find(|c| c.name == name)?.clone();
+        Some((s, command))
+    });
+    let reply = match found {
+        Some((site, command)) => {
+            ondemand::wake(&state.on_demand, &state.commands, &state.paths, &site, &command, req.page, || {
+                watch_idle(state)
+            })
+        }
+        None => ondemand::Reply::not_on_demand(&req.site),
+    };
+    let _ = stream.write_all(&reply.bytes(req.head));
+}
+
+/// Run the idle check every `ondemand::IDLE_CHECK` while an on-demand command runs; the thread
+/// ends when none does, so a daemon without one has no timer.
+fn watch_idle(state: &Arc<State>) {
+    let mut watching = state.on_demand.watching.lock().unwrap();
+    if *watching {
+        return;
+    }
+    *watching = true;
+    let state = Arc::clone(state);
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(ondemand::IDLE_CHECK);
+            let config = state.config.lock().unwrap().clone();
+            let sites = on_demand_sites(&config);
+            if ondemand::tick(&state.on_demand, &state.commands, &state.paths, &sites, SystemTime::now()) {
+                continue;
+            }
+            let mut watching = state.on_demand.watching.lock().unwrap();
+            // A wake-up may have started one since the check; it calls watch_idle after the
+            // start, which waits for this lock.
+            if !on_demand_running(&state, &sites) {
+                *watching = false;
+                return;
+            }
+        }
+    });
+}
+
+/// D-054: a site's on-demand state for `sites`: null, or {command, idle_stop, state, idle_for}.
+/// `state` is sleeping, starting, running, failed (it exited by itself; the next request starts it
+/// again) or unavailable (the active web server cannot wake it yet).
+fn on_demand_state(state: &State, config: &Config, site: &Site) -> Value {
+    let Some(command) = &site.on_demand else { return Value::Null };
+    let run = state.commands.state(&site.name, command);
+    let mut idle_for = Value::Null;
+    let now = match run["state"].as_str() {
+        _ if !ondemand::available(config) => "unavailable",
+        Some("running") => {
+            let since = run["since"].as_u64().unwrap_or(0);
+            let last = state.on_demand.last_use(&state.paths, &site.name, since);
+            idle_for = SystemTime::now().duration_since(last).unwrap_or_default().as_secs().into();
+            if ports::in_use(site.upstream) { "running" } else { "starting" }
+        }
+        Some("exited") => "failed",
+        _ => "sleeping",
+    };
+    json!({"command": command, "idle_stop": site.idle_stop, "state": now, "idle_for": idle_for})
 }
 
 /// D-042: say in the daemon's log which new sites got their own dev server port.
@@ -360,6 +498,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         own_ports: Mutex::new(BTreeSet::new()),
         busy_ports: Mutex::new(BTreeMap::new()),
         commands,
+        on_demand: OnDemand::default(),
         redirect_check: Mutex::new(None),
         mail_download: Mutex::new(None),
     });
@@ -384,6 +523,8 @@ pub fn run(paths: Paths) -> io::Result<()> {
     // thread, since reading the login shell's environment can take a few seconds.
     let resuming = Arc::clone(&state);
     std::thread::spawn(move || resume_commands(&resuming));
+    // D-054: sites on demand can wake from now on.
+    sync_on_demand(&state);
 
     for stream in listener.incoming() {
         if state.stopping.load(Ordering::SeqCst) {
@@ -404,6 +545,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
     state.commands.stop_all();
     state.supervisor.stop_all();
     let _ = fs::remove_file(state.paths.socket());
+    let _ = fs::remove_file(state.paths.wake_socket());
     Ok(())
 }
 
@@ -429,7 +571,7 @@ fn bind(paths: &Paths) -> io::Result<UnixListener> {
     Ok(listener)
 }
 
-fn handle(stream: UnixStream, state: &State) -> io::Result<()> {
+fn handle(stream: UnixStream, state: &Arc<State>) -> io::Result<()> {
     let mut writer = stream.try_clone()?;
     for line in BufReader::new(stream).lines() {
         let line = line?;
@@ -507,7 +649,7 @@ fn pick_site(sites: &[Site], name: Option<String>, cwd: &str) -> Result<String, 
     }
 }
 
-fn dispatch(req: Request, state: &State) -> Result<Value, String> {
+fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
     match req {
         Request::Status => {
             let config = state.config.lock().unwrap().clone();
@@ -537,6 +679,11 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 "update_check_minutes": config.update_check_minutes,
                 "updates": *state.updates.lock().unwrap(),
                 "commands_running": state.commands.running().iter().filter(|(_, n)| n != commands::SHARE).count(),
+                // D-054: on-demand sites whose command waits for a request.
+                "sleeping": on_demand_sites(&config).iter()
+                    .filter(|s| s.on_demand.as_ref().is_some_and(|c| state.commands.running_group(&s.name, c).is_none()))
+                    .map(|s| s.name.clone())
+                    .collect::<Vec<_>>(),
                 "running_commands": state.commands.running().into_iter()
                     .filter(|(_, n)| n != commands::SHARE)
                     .map(|(site, name)| json!({"site": site, "name": name}))
@@ -837,6 +984,7 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                         "commands": commands,
                         "suggestions": suggestions,
                         "share": share_state(state, &s.name),
+                        "on_demand": on_demand_state(state, &config, &s),
                     })
                 })
                 .collect();
@@ -930,8 +1078,14 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             c.isolated.remove(&name);
             Ok(json!({"ok": true, "site": name}))
         }),
-        Request::AppSet { site, cwd, preset, mode, root, upstream, spa, pass_host } => state.mutate(|c, sites| {
+        Request::AppSet { site, cwd, preset, mode, root, upstream, spa, pass_host, on_demand, idle_stop } => {
+            let reply = state.mutate(|c, sites| {
             let name = pick_site(sites, site, &cwd)?;
+            if let Some(m) = idle_stop
+                && m > 24 * 60
+            {
+                return Err(format!("{m} minutes: stop after 1 to 1440 idle minutes, or 0 for never"));
+            }
             let detected = sites.iter().find(|s| s.name == name).and_then(|s| s.detected);
             if let Some(p) = &preset {
                 sites::find_preset(p).ok_or(format!(
@@ -966,16 +1120,60 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             app.upstream = upstream.or(app.upstream);
             app.spa = spa.or(app.spa);
             app.pass_host = pass_host.or(app.pass_host);
+            // D-054: "" turns on-demand off, with its idle time.
+            match on_demand.as_deref() {
+                Some("") => (app.on_demand, app.idle_stop) = (None, None),
+                Some(command) => app.on_demand = Some(command.to_string()),
+                None => {}
+            }
+            if idle_stop.is_some() {
+                if app.on_demand.is_none() {
+                    return Err(format!("{name} is not on demand; turn it on with `devid cmd on-demand {name} <command>`"));
+                }
+                app.idle_stop = idle_stop;
+            }
             if app.is_empty() {
                 c.apps.remove(&name);
             }
-            Ok(json!({"ok": true, "site": name, "app": c.apps.get(&name)}))
-        }),
+            let resolved = sites::resolve(c).into_iter().find(|s| s.name == name);
+            if let Some(command) = on_demand.as_deref().filter(|n| !n.is_empty())
+                && resolved.as_ref().is_none_or(|s| s.on_demand.is_none())
+            {
+                return Err(match resolved {
+                    Some(s) if s.mode != Mode::Proxy => format!(
+                        "on demand needs a proxy site, one a dev server answers for; {name} is not \
+                         (`devid app set {name} --mode proxy --upstream <port>` makes it one)"
+                    ),
+                    _ => format!("{name} has no command named {command}; add it with `devid cmd add {name} {command} -- <command line>`"),
+                });
+            }
+            let warning = resolved.as_ref().filter(|s| s.on_demand.is_some() && !ondemand::available(c)).map(|_| {
+                format!("on demand works with nginx so far; with {} the site waits for its command as before", c.server)
+            });
+            Ok(json!({
+                "ok": true,
+                "site": name,
+                "app": c.apps.get(&name),
+                "on_demand": resolved.as_ref().and_then(|s| s.on_demand.clone()),
+                "idle_stop": resolved.as_ref().map(|s| s.idle_stop),
+                "warning": warning,
+            }))
+            })?;
+            sync_on_demand(state);
+            Ok(reply)
+        }
         Request::AppReset { site, cwd } => state.mutate(|c, sites| {
             let name = pick_site(sites, site, &cwd)?;
-            // The type goes back to detection; the local port and the commands stay.
+            // The type goes back to detection; the local port, the commands and on-demand stay
+            // (on-demand goes too if the detected type is not a proxy site).
             if let Some(app) = c.apps.get_mut(&name) {
-                *app = App { port: app.port, commands: std::mem::take(&mut app.commands), ..App::default() };
+                *app = App {
+                    port: app.port,
+                    commands: std::mem::take(&mut app.commands),
+                    on_demand: app.on_demand.take(),
+                    idle_stop: app.idle_stop,
+                    ..App::default()
+                };
                 if app.is_empty() {
                     c.apps.remove(&name);
                 }
@@ -1072,6 +1270,8 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
             {
                 return Err(one["error"].as_str().unwrap_or("could not start it").to_string());
             }
+            // D-054: a started on-demand command stops again once idle.
+            sync_on_demand(state);
             Ok(json!({"ok": true, "site": site, "results": results, "warning": warning}))
         }
         Request::CommandStop { site, cwd, name } => {
@@ -1084,7 +1284,11 @@ fn dispatch(req: Request, state: &State) -> Result<Value, String> {
                 },
             };
             let stopped = state.commands.stop(&site, name.as_deref());
-            Ok(json!({"ok": true, "site": site, "stopped": stopped}))
+            // D-054: a stopped on-demand command sleeps; the next request starts it again.
+            let config = state.config.lock().unwrap().clone();
+            let on_demand = on_demand_sites(&config).into_iter().find(|s| s.name == site).and_then(|s| s.on_demand);
+            let sleeping: Vec<&String> = stopped.iter().filter(|n| on_demand.as_ref() == Some(*n)).collect();
+            Ok(json!({"ok": true, "site": site, "stopped": stopped, "sleeping": sleeping}))
         }
         Request::ShareStart { site, cwd } => {
             let (site, dir, _) = site_commands(state, site, &cwd)?;
@@ -1189,8 +1393,13 @@ fn resume_commands(state: &State) {
 fn start_noted(state: &State, note: &Value) {
     let config = state.config.lock().unwrap().clone();
     let sites = sites::resolve(&config);
+    let on_demand = on_demand_sites(&config);
     for c in note["commands"].as_array().into_iter().flatten() {
         let (site, name) = (c["site"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default());
+        // D-054: the next request starts an on-demand command.
+        if on_demand.iter().any(|s| s.name == site && s.on_demand.as_deref() == Some(name)) {
+            continue;
+        }
         let saved = config.apps.get(site).and_then(|a| a.commands.iter().find(|x| x.name == name));
         if let (Some(saved), Some(s)) = (saved, sites.iter().find(|s| s.name == site)) {
             match state.commands.start(

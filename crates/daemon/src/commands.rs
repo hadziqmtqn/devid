@@ -203,6 +203,13 @@ impl Commands {
         runs.iter().filter(|(_, r)| r.exit.lock().unwrap().is_none()).map(|(k, _)| k.clone()).collect()
     }
 
+    /// The process group and start time (Unix seconds) of a running command.
+    pub fn running_group(&self, site: &str, name: &str) -> Option<(i32, u64)> {
+        let runs = self.runs.lock().unwrap();
+        let run = runs.get(&(site.to_string(), name.to_string()))?;
+        run.exit.lock().unwrap().is_none().then_some((run.pgid, run.since))
+    }
+
     /// {"state": "running", "pid", "since"}, {"state": "exited", "code", "signal", "at"} or
     /// {"state": "stopped"}.
     pub fn state(&self, site: &str, name: &str) -> Value {

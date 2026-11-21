@@ -43,6 +43,17 @@ impl Paths {
         self.run_dir().join("devid.sock")
     }
 
+    /// D-054: where the web server asks the daemon to start an on-demand site's command.
+    pub fn wake_socket(&self) -> PathBuf {
+        self.run_dir().join("wake.sock")
+    }
+
+    /// D-054: the web server appends a line here for each request to an on-demand site; only the
+    /// file's modification time is read, as the site's last request.
+    pub fn last_request(&self, site: &str) -> PathBuf {
+        self.run_dir().join(format!("requests-{site}"))
+    }
+
     pub fn log_dir(&self) -> PathBuf {
         self.home.join("log")
     }

@@ -78,6 +78,33 @@ for addr in 127.0.0.1 ::1; do
 done
 echo "proxy smoke test passed on $(uname -m)"
 
+# On demand (D-054): with nothing on port 28300, a request to front.test starts the command marked
+# for it and gets its page; a page load to a command still starting after 5 s gets the Starting
+# page; a command that exits shows its exit code.
+php="$DEVID_HOME/php/8.5/bin/php"
+"$DEVID" cmd add front dev -- "$php" -n -S '127.0.0.1:$PORT' -t . > /dev/null
+"$DEVID" cmd add front slow -- "echo compiling; sleep 8; exec $php -n -S 127.0.0.1:\$PORT -t ." > /dev/null
+"$DEVID" cmd add front broken -- 'echo smoke-broken; exit 3' > /dev/null
+"$DEVID" cmd on-demand front dev > /dev/null
+# nginx takes the new config a moment after the reply.
+for _ in $(seq 50); do [ "$(front)" = "proxy smoke" ] && break; sleep 0.2; done
+[ "$(front)" = "proxy smoke" ] || { echo "FAIL: on-demand front.test: $(front)" >&2; exit 1; }
+"$DEVID" cmd front | grep -q 'on demand: running' || { echo "FAIL: dev is not running on demand" >&2; "$DEVID" cmd front; exit 1; }
+grep -q 'started by a request to front.test' "$DEVID_HOME/log/app-front-dev.log" || { echo "FAIL: dev was not started by the request" >&2; exit 1; }
+page() { curl -sk -H 'Accept: text/html' -w '\n%{http_code}' --resolve front.test:28443:127.0.0.1 https://front.test:28443/ 2> /dev/null || true; }
+"$DEVID" cmd stop front dev > /dev/null
+"$DEVID" cmd on-demand front slow > /dev/null
+got="$(page)"
+case "$got" in *"<title>Starting front.test…</title>"*compiling*$'\n'503) ;; *) echo "FAIL: no Starting page: $got" >&2; exit 1 ;; esac
+for _ in $(seq 60); do [ "$(front)" = "proxy smoke" ] && break; sleep 0.5; done
+[ "$(front)" = "proxy smoke" ] || { echo "FAIL: the slow command never answered: $(front)" >&2; exit 1; }
+"$DEVID" cmd stop front slow > /dev/null
+"$DEVID" cmd on-demand front broken > /dev/null
+got="$(page)"
+case "$got" in *"exited with code 3"*smoke-broken*$'\n'500) ;; *) echo "FAIL: no failure page: $got" >&2; exit 1 ;; esac
+"$DEVID" cmd on-demand front off > /dev/null
+echo "on-demand smoke test passed on $(uname -m)"
+
 # Mail (D-049), once the runtime release has Mailpit: the real Mailpit on spare ports catches a test
 # email and one from PHP's mail(), and refuses a foreign Host header (DNS rebinding).
 "$DEVID" mail port 28525 > /dev/null

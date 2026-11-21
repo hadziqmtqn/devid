@@ -76,7 +76,7 @@ pub fn read(paths: &Paths, name: &str, offset: Option<u64>) -> io::Result<(Strin
 
 /// Text without terminal escape sequences (colors, cursor moves, window titles): cargo, vite and
 /// npm write them even when their output goes to a file.
-fn strip_escapes(text: &str) -> String {
+pub(crate) fn strip_escapes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
     while let Some(c) = chars.next() {

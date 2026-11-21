@@ -245,6 +245,8 @@ fn app_set(site: &str, preset: Option<String>, mode: Option<String>) -> Request 
         upstream: None,
         spa: None,
         pass_host: None,
+        on_demand: None,
+        idle_stop: None,
     }
 }
 
