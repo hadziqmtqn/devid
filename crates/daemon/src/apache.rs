@@ -5,7 +5,7 @@
 use crate::{
     ca,
     config::Config,
-    nginx::quotable,
+    nginx::{quotable, quotable_without},
     paths::Paths,
     php,
     sites::{Mode, Site},
@@ -104,11 +104,15 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
     for (name, file) in MODULES {
         let _ = writeln!(c, "LoadModule {name} libexec/apache2/{file}");
     }
+    // One process serves (MaxRequestWorkers = ThreadsPerChild). ServerLimit leaves room for the old
+    // processes of a graceful reload, which keep serving their open connections (an HMR WebSocket,
+    // a slow response) while a new one takes every new request. With ServerLimit 1 the new process
+    // waited for the old one, so an open tab held every request after a config change.
     let _ = write!(
         c,
         "TypesConfig /private/etc/apache2/mime.types\n\
          StartServers 1\n\
-         ServerLimit 1\n\
+         ServerLimit 16\n\
          ThreadsPerChild 25\n\
          MaxRequestWorkers 25\n\
          Protocols h2 http/1.1\n\
@@ -228,7 +232,21 @@ fn site_body(paths: &Paths, site: &Site, scheme: &str) -> Option<String> {
                 "local" => ("setifempty", "http"),
                 other => ("set", other),
             };
+            let down = format!(
+                "\"Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid).\""
+            );
+            // mod_proxy answers 503 when the dev server refuses, and 502 when it took the request
+            // and failed: only a 503 wakes an on-demand site's command. On demand, no idle
+            // connection stays open to the dev server (`disablereuse`): the idle check would take
+            // it for an open tab, and a dev server that never closes one kept the site awake.
+            let (wake, refused, reuse) = match &site.on_demand {
+                None => (String::new(), down.clone(), ""),
+                Some(_) => (on_demand(paths, site)?, "/.devid-wake".to_string(), " disablereuse=On"),
+            };
             // retry=0: a dev server that was down is tried again on the next request, not after 60 s.
+            // timeout=3600: dev servers stream (SSE, HMR), so a slow response or an idle WebSocket
+            // stays open for an hour, as nginx's `proxy_read_timeout 1h`; Apache's `Timeout` (60 s)
+            // cut them before.
             format!(
                 "\x20   ServerName {host}\n\
                  \x20   ProxyPreserveHost On\n\
@@ -237,13 +255,42 @@ fn site_body(paths: &Paths, site: &Site, scheme: &str) -> Option<String> {
                  \x20   RequestHeader {set} X-Forwarded-Proto \"{proto}\"\n\
                  \x20   RequestHeader {set} X-Forwarded-For \"expr=%{{REMOTE_ADDR}}\"\n\
                  {rewrite}\
-                 \x20   ProxyPass / http://localhost:{up}/ upgrade=websocket retry=0\n\
+                 {wake}\
+                 \x20   ProxyPass / http://localhost:{up}/ upgrade=websocket retry=0 timeout=3600{reuse}\n\
                  \x20   ProxyPassReverse / http://localhost:{up}/\n\
-                 \x20   ErrorDocument 502 \"Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid).\"\n\
-                 \x20   ErrorDocument 503 \"Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid).\"\n"
+                 \x20   ErrorDocument 502 {down}\n\
+                 \x20   ErrorDocument 503 {refused}\n"
             )
         }
     })
+}
+
+/// D-054: an on-demand site's request file and wake-up (see `ondemand`), before its `ProxyPass /`;
+/// None if a path cannot be quoted.
+/// - **Request file:** one `%{msec}t` line per request in `run/requests-<site>`; the idle check
+///   reads its modification time.
+/// - **Wake-up:** `ErrorDocument 503 /.devid-wake` sends a refused request there as a GET, which
+///   goes to the wake socket with the original request line in `X-Devid-Request`. The daemon
+///   answers 307 to the same URL, and the client sends it again, method and body included.
+///   `REDIRECT_STATUS` is set only on that internal redirect, so a client cannot call the path.
+/// - **Limits:** if the wake socket does not answer (the daemon is down), Apache shows its own
+///   "503 Service Unavailable" page.
+fn on_demand(paths: &Paths, site: &Site) -> Option<String> {
+    let requests = quotable(&paths.last_request(&site.name))?;
+    let wake = paths.wake_socket();
+    quotable_without(&wake, &['|'])?;
+    // timeout=75: the daemon waits up to 60 s for a command that starts slowly.
+    Some(format!(
+        "\x20   CustomLog {requests} \"%{{msec}}t\"\n\
+         \x20   ProxyPass /.devid-wake \"unix:{wake}|http://localhost/\" retry=0 timeout=75\n\
+         \x20   <Location /.devid-wake>\n\
+         \x20       Require env REDIRECT_STATUS\n\
+         \x20       RequestHeader set X-Devid-Site \"{name}\"\n\
+         \x20       RequestHeader set X-Devid-Request \"expr=%{{THE_REQUEST}}\"\n\
+         \x20   </Location>\n",
+        wake = wake.display(),
+        name = site.name,
+    ))
 }
 
 /// Write httpd.conf only if `httpd -t` accepts it. Returns whether it changed.
@@ -298,6 +345,8 @@ mod tests {
         let evil = Site { name: "evil".into(), host: "evil.test".into(), docroot: "/p/\"x".into(), ..blog.clone() };
         let conf = render(&paths, &Config::default(), &[blog, evil]);
         assert!(conf.contains("Listen 127.0.0.1:8088\n") && conf.contains("Listen 127.0.0.1:8443 https\n"));
+        // One serving process, and room for old ones that finish open connections after a reload.
+        assert!(conf.contains("StartServers 1\nServerLimit 16\nThreadsPerChild 25\nMaxRequestWorkers 25\n"));
         assert!(conf.contains("ServerName blog.test"));
         assert!(conf.contains("SetHandler \"proxy:unix:/h/.devid/run/php84.sock|fcgi://localhost\""));
         assert!(conf.contains("SSLCertificateFile \"/h/.devid/certs/blog.test.crt\""));
@@ -317,7 +366,7 @@ mod tests {
         assert!(conf.contains("DocumentRoot \"/p/app/dist\"") && conf.contains("FallbackResource /index.html"));
         assert!(!conf.contains("SetHandler"));
         assert!(conf.contains("LoadModule proxy_http_module libexec/apache2/mod_proxy_http.so"));
-        assert!(conf.contains("ProxyPass / http://localhost:5173/ upgrade=websocket retry=0"));
+        assert!(conf.contains("ProxyPass / http://localhost:5173/ upgrade=websocket retry=0 timeout=3600\n"));
         assert!(conf.contains("RequestHeader set Host \"localhost:5173\""));
         assert!(conf.contains("\"expr=%{HTTP:Origin} =~ m#^https?://erd[.]test(:[0-9]+)?$#\""));
         assert!(
@@ -327,6 +376,52 @@ mod tests {
         assert!(conf.contains("RequestHeader set X-Forwarded-For \"expr=%{REMOTE_ADDR}\""));
         let xfh = conf.find("X-Forwarded-Host \"expr=%{HTTP_HOST}\"").unwrap();
         assert!(xfh < conf.find("RequestHeader set Host").unwrap(), "the visitor's Host, before the rewrite");
+        assert!(conf.contains("ErrorDocument 503 \"Nothing answers on localhost:5173"));
+        assert!(!conf.contains("devid-wake") && !conf.contains("CustomLog"), "no on-demand");
+    }
+
+    #[test]
+    fn render_on_demand() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let base = Site { name: "app".into(), host: "app.test".into(), path: "/p/app".into(), ..Site::default() };
+        let dev = Site {
+            name: "devid-site".into(),
+            host: "devid-site.test".into(),
+            mode: Mode::Proxy,
+            upstream: 4321,
+            port: Some(8001),
+            on_demand: Some("dev".into()),
+            ..base.clone()
+        };
+        let other = Site { name: "erd".into(), host: "erd.test".into(), mode: Mode::Proxy, upstream: 3000, ..base };
+        let conf = render(&paths, &Config::default(), &[dev, other]);
+        assert_eq!(conf.matches("CustomLog \"/h/.devid/run/requests-devid-site\" \"%{msec}t\"").count(), 3);
+        assert_eq!(conf.matches("ErrorDocument 503 /.devid-wake\n").count(), 3, "https, http and the local port");
+        assert_eq!(conf.matches("ErrorDocument 502 \"Nothing answers on localhost:4321").count(), 3);
+        assert_eq!(conf.matches("ErrorDocument 503 \"Nothing answers on localhost:3000").count(), 2, "erd as before");
+        // No idle connection is kept open to an on-demand dev server: the idle check would see it.
+        assert_eq!(
+            conf.matches("ProxyPass / http://localhost:4321/ upgrade=websocket retry=0 timeout=3600 disablereuse=On\n")
+                .count(),
+            3
+        );
+        assert_eq!(
+            conf.matches("ProxyPass / http://localhost:3000/ upgrade=websocket retry=0 timeout=3600\n").count(),
+            2
+        );
+
+        let local = &conf[conf.find("<VirtualHost 127.0.0.1:8001>").unwrap()..];
+        let local = &local[..local.find("</VirtualHost>").unwrap()];
+        let wake =
+            local.find("ProxyPass /.devid-wake \"unix:/h/.devid/run/wake.sock|http://localhost/\" retry=0 timeout=75");
+        assert!(wake.unwrap() < local.find("ProxyPass / ").unwrap(), "before the dev server's ProxyPass: {local}");
+        assert!(local.contains(
+            "    <Location /.devid-wake>\n\
+             \x20       Require env REDIRECT_STATUS\n\
+             \x20       RequestHeader set X-Devid-Site \"devid-site\"\n\
+             \x20       RequestHeader set X-Devid-Request \"expr=%{THE_REQUEST}\"\n\
+             \x20   </Location>\n"
+        ));
     }
 
     #[test]

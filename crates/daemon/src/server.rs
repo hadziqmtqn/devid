@@ -281,12 +281,9 @@ impl State {
     }
 }
 
-/// The sites with on-demand on, where the active web server can wake them (D-054).
+/// The sites with on-demand on (D-054); nginx, Caddy and Apache all wake them.
 fn on_demand_sites(config: &Config) -> Vec<Site> {
-    match ondemand::available(config) {
-        true => sites::resolve(config).into_iter().filter(|s| s.on_demand.is_some()).collect(),
-        false => Vec::new(),
-    }
+    sites::resolve(config).into_iter().filter(|s| s.on_demand.is_some()).collect()
 }
 
 /// D-054: once a site is on demand, listen for wake-ups; while an on-demand command runs, check
@@ -353,9 +350,7 @@ fn serve_wake(mut stream: UnixStream, state: &Arc<State>) {
     });
     let reply = match found {
         Some((site, command)) => {
-            ondemand::wake(&state.on_demand, &state.commands, &state.paths, &site, &command, req.page, || {
-                watch_idle(state)
-            })
+            ondemand::wake(&state.on_demand, &state.commands, &state.paths, &site, &command, &req, || watch_idle(state))
         }
         None => ondemand::Reply::not_on_demand(&req.site),
     };
@@ -391,14 +386,13 @@ fn watch_idle(state: &Arc<State>) {
 }
 
 /// D-054: a site's on-demand state for `sites`: null, or {command, idle_stop, state, idle_for}.
-/// `state` is sleeping, starting, running, failed (it exited by itself; the next request starts it
-/// again) or unavailable (the active web server cannot wake it yet).
-fn on_demand_state(state: &State, config: &Config, site: &Site) -> Value {
+/// `state` is sleeping, starting, running or failed (it exited by itself; the next request starts
+/// it again).
+fn on_demand_state(state: &State, site: &Site) -> Value {
     let Some(command) = &site.on_demand else { return Value::Null };
     let run = state.commands.state(&site.name, command);
     let mut idle_for = Value::Null;
     let now = match run["state"].as_str() {
-        _ if !ondemand::available(config) => "unavailable",
         Some("running") => {
             let since = run["since"].as_u64().unwrap_or(0);
             let last = state.on_demand.last_use(&state.paths, &site.name, since);
@@ -984,7 +978,7 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                         "commands": commands,
                         "suggestions": suggestions,
                         "share": share_state(state, &s.name),
-                        "on_demand": on_demand_state(state, &config, &s),
+                        "on_demand": on_demand_state(state, &s),
                     })
                 })
                 .collect();
@@ -1147,16 +1141,12 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                     _ => format!("{name} has no command named {command}; add it with `devid cmd add {name} {command} -- <command line>`"),
                 });
             }
-            let warning = resolved.as_ref().filter(|s| s.on_demand.is_some() && !ondemand::available(c)).map(|_| {
-                format!("on demand works with nginx so far; with {} the site waits for its command as before", c.server)
-            });
             Ok(json!({
                 "ok": true,
                 "site": name,
                 "app": c.apps.get(&name),
                 "on_demand": resolved.as_ref().and_then(|s| s.on_demand.clone()),
                 "idle_stop": resolved.as_ref().map(|s| s.idle_stop),
-                "warning": warning,
             }))
             })?;
             sync_on_demand(state);

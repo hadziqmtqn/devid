@@ -45,7 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
-| D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, nginx first |
+| D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040); amended 2026-11-21 (O4) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, on nginx, Caddy and Apache |
 | D-053 | 2026-11-20 | accepted 2026-11-20 (amends D-014) | Devid's commands on PATH for every shell: `php8.3`–`php8.5`, `nginx`, `caddy` and `mailpit` join `php` and `composer` as shims, the PATH line goes into `~/.zshenv` and `~/.zshrc`, and Settings › Terminal, `devid path on/off` and the TUI add or remove it |
 | D-052 | 2026-11-20 | accepted 2026-11-20 | The target machine is the owner's Apple M1 (8 cores, 8 GB RAM, macOS 26), not the Intel Mac; RAM is the tightest budget; Intel stays supported |
 | D-051 | 2026-11-16 | accepted 2026-11-17 (amends D-049) | The app's inbox shows an email's HTML through its own `mailview:` scheme: its own CSP without scripts, a sandboxed frame, and links that open in the browser |
@@ -916,4 +916,11 @@ See ARCHITECTURE, "PHP runtime".
   - A full HTTP proxy in the daemon.
   - Holding every request until the server answers, which shows a blank tab during a long build.
 - **Plan:** `docs/roadmap/phase-10.md`.
-- **Status:** accepted by the owner on 2026-11-21 ("Ya, mulai O3"). O2 shipped in 0.16.1; O3 (nginx) is the next milestone.
+- **Status:** accepted by the owner on 2026-11-21 ("Ya, mulai O3"). O2 shipped in 0.16.1; O3 (nginx) merged on 2026-11-21 (#110).
+- **Amended 2026-11-21 (O4, Caddy and Apache):** both wake on-demand sites, so on-demand is never "unavailable".
+  - **Apache sends the client back.** Apache reaches the daemon through `ErrorDocument 503`, which loses the method and cannot send the request again itself. So the daemon answers `307` to the same URL, and the browser sends the request again, method and body included.
+  - **No idle connections to an on-demand dev server.** Caddy and Apache would keep idle connections to the dev server open for reuse. The idle check counts an open connection as an open tab, so one held open by a dev server that never closes it kept the site awake. They now close each connection after its request (`keepalive off`, `disablereuse=On`), as nginx does.
+  - **Apache keeps long connections, for all proxy sites.** An open tab's HMR WebSocket must survive, as it does on nginx.
+    - Its proxy line gets `timeout=3600`, nginx's `proxy_read_timeout 1h`. Apache's `Timeout` of 60 s had cut slow responses and idle WebSockets.
+    - `ServerLimit` goes from 1 to 16, so a graceful reload can start its new process while the old one finishes open connections. Before, every request after a config change waited for an open WebSocket to close: 89 s in the check.
+    - Not chosen: a hard restart (SIGHUP), as Caddy does. Apache then needs about 10 s to kill a process with an open WebSocket, and every request waits for that.

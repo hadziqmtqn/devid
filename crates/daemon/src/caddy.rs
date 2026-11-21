@@ -130,26 +130,89 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
         }
         Mode::Proxy => {
             let (host, up) = (&site.host, site.upstream);
-            let down = format!(
-                "\thandle_errors 502 {{\n\
-                 \t\trespond \"Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid).\" 502\n\
-                 \t}}\n"
+            let message = format!(
+                "Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid)."
             );
-            if site.pass_host {
-                return Some(format!("\treverse_proxy localhost:{up}\n{down}"));
-            }
             // As in nginx: Host and the site's own Origin become the dev server's (A1).
-            let own = host.replace('.', "[.]");
-            format!(
-                "\t@devid_own_origin header_regexp Origin \"^https?://{own}(:[0-9]+)?$\"\n\
-                 \trequest_header @devid_own_origin Origin http://localhost:{up}\n\
-                 \treverse_proxy localhost:{up} {{\n\
-                 \t\theader_up Host localhost:{up}\n\
-                 \t}}\n\
-                 {down}"
-            )
+            let origin = match site.pass_host {
+                true => String::new(),
+                false => format!(
+                    "\t@devid_own_origin header_regexp Origin \"^https?://{own}(:[0-9]+)?$\"\n\
+                     \trequest_header @devid_own_origin Origin http://localhost:{up}\n",
+                    own = host.replace('.', "[.]"),
+                ),
+            };
+            let down = match &site.on_demand {
+                None => format!("\thandle_errors 502 {{\n\t\trespond \"{message}\" 502\n\t}}\n"),
+                Some(_) => on_demand(paths, site, &message)?,
+            };
+            format!("{origin}{}{down}", proxy(site, 1))
         }
     })
+}
+
+/// The proxy to a site's dev server, indented by `tabs`.
+fn proxy(site: &Site, tabs: usize) -> String {
+    let (t, up) = ("\t".repeat(tabs), site.upstream);
+    let mut options = String::new();
+    if !site.pass_host {
+        options.push_str(&format!("{t}\theader_up Host localhost:{up}\n"));
+    }
+    // On demand: no idle connections kept open to the dev server, which the idle check would take
+    // for an open tab (a dev server that never closes them kept the site awake), as with nginx.
+    if site.on_demand.is_some() {
+        options.push_str(&format!("{t}\ttransport http {{\n{t}\t\tkeepalive off\n{t}\t}}\n"));
+    }
+    match options.is_empty() {
+        true => format!("{t}reverse_proxy localhost:{up}\n"),
+        false => format!("{t}reverse_proxy localhost:{up} {{\n{options}{t}}}\n"),
+    }
+}
+
+/// D-054: an on-demand site's request file and wake-up (see `ondemand`); None if a path cannot be
+/// quoted.
+/// - **Request file:** short access-log lines in `run/requests-<site>`; the idle check reads its
+///   modification time.
+/// - **Wake-up:** a dial error means the dev server is down and never got the request (a server
+///   that took it and closed gives `EOF` or a write error instead). That request goes to the wake
+///   socket as a GET without its body, its method in `X-Devid-Method`. On the daemon's 418 the
+///   same request, body included, goes to the dev server; any other answer goes to the client.
+/// - **Limits:** an error inside `handle_errors` cannot be handled again, so if the wake socket
+///   does not answer (the daemon is down) or the dev server refuses again after the 418, the
+///   client gets an empty 502.
+fn on_demand(paths: &Paths, site: &Site, message: &str) -> Option<String> {
+    let requests = quote(&paths.last_request(&site.name))?;
+    let wake = quote(Path::new(&format!("unix/{}", paths.wake_socket().display())))?;
+    Some(format!(
+        "\tlog {{\n\
+         \t\toutput file {requests} {{\n\
+         \t\t\troll_disabled\n\
+         \t\t}}\n\
+         \t\tformat filter {{\n\
+         \t\t\trequest delete\n\
+         \t\t\tresp_headers delete\n\
+         \t\t}}\n\
+         \t}}\n\
+         \thandle_errors 502 {{\n\
+         \t\t@devid_refused vars_regexp {{http.error.message}} \"^dial \"\n\
+         \t\thandle @devid_refused {{\n\
+         \t\t\treverse_proxy {wake} {{\n\
+         \t\t\t\tmethod GET\n\
+         \t\t\t\theader_up X-Devid-Site {name}\n\
+         \t\t\t\theader_up X-Devid-Method {{method}}\n\
+         \t\t\t\t@devid_ready status 418\n\
+         \t\t\t\thandle_response @devid_ready {{\n\
+         {retry}\
+         \t\t\t\t}}\n\
+         \t\t\t}}\n\
+         \t\t}}\n\
+         \t\thandle {{\n\
+         \t\t\trespond \"{message}\" 502\n\
+         \t\t}}\n\
+         \t}}\n",
+        name = site.name,
+        retry = proxy(site, 5),
+    ))
 }
 
 /// Write the Caddyfile only if `caddy validate` accepts it. Returns whether it changed.
@@ -240,6 +303,65 @@ mod tests {
         assert!(conf.contains("reverse_proxy localhost:5173 {\n\t\theader_up Host localhost:5173"));
         assert!(conf.contains("\treverse_proxy localhost:3000\n"), "pass_host: no rewrites");
         assert_eq!(conf.matches("handle_errors 502").count(), 4, "https and http block of both proxy sites");
+        assert!(!conf.contains("devid_refused") && !conf.contains("requests-"), "no on-demand");
+    }
+
+    #[test]
+    fn render_on_demand() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let dev = Site {
+            mode: Mode::Proxy,
+            upstream: 4321,
+            port: Some(8001),
+            on_demand: Some("dev".into()),
+            ..site("devid-site", "/p/site", "8.5")
+        };
+        let raw = Site { pass_host: true, name: "raw".into(), host: "raw.test".into(), ..dev.clone() };
+        let other = Site { mode: Mode::Proxy, upstream: 3000, ..site("erd", "/p/erd", "8.5") };
+        let conf = render(&paths, &Config::default(), &[dev, raw, other]);
+        assert_eq!(
+            conf.matches("\toutput file \"/h/.devid/run/requests-devid-site\" {").count(),
+            3,
+            "https, http and the local port"
+        );
+        assert_eq!(conf.matches("@devid_refused vars_regexp {http.error.message} \"^dial \"").count(), 6);
+        assert_eq!(conf.matches("reverse_proxy \"unix//h/.devid/run/wake.sock\" {").count(), 6);
+        assert_eq!(conf.matches("respond \"Nothing answers on localhost:3000").count(), 2, "erd as before");
+
+        let block = &conf[conf.find("https://devid-site.test:8443 {").unwrap()..];
+        let block = &block[..block.find("\n}\n").unwrap()];
+        for line in [
+            "\t\t\t\tmethod GET\n",
+            "\t\t\t\theader_up X-Devid-Site devid-site\n",
+            "\t\t\t\theader_up X-Devid-Method {method}\n",
+            "\t\t\t\t@devid_ready status 418\n",
+            // No idle connection is kept open to the dev server: the idle check would see it.
+            "\treverse_proxy localhost:4321 {\n\
+             \t\theader_up Host localhost:4321\n\
+             \t\ttransport http {\n\
+             \t\t\tkeepalive off\n\
+             \t\t}\n\
+             \t}\n",
+            // The same request, its Host rewritten as on the main path, goes to the dev server.
+            "\t\t\t\thandle_response @devid_ready {\n\
+             \t\t\t\t\treverse_proxy localhost:4321 {\n\
+             \t\t\t\t\t\theader_up Host localhost:4321\n\
+             \t\t\t\t\t\ttransport http {\n\
+             \t\t\t\t\t\t\tkeepalive off\n\
+             \t\t\t\t\t\t}\n\
+             \t\t\t\t\t}\n\
+             \t\t\t\t}\n",
+            "\t\thandle {\n\t\t\trespond \"Nothing answers on localhost:4321 for devid-site.test.",
+            "\t\t\trequest delete\n\t\t\tresp_headers delete\n",
+        ] {
+            assert!(block.contains(line), "missing {line:?} in {block}");
+        }
+        let raw = &conf[conf.find("https://raw.test:8443 {").unwrap()..];
+        assert!(raw.starts_with(
+            "https://raw.test:8443 {\n\tbind 127.0.0.1\n\ttls \"/h/.devid/certs/raw.test.crt\" \"/h/.devid/certs/raw.test.key\"\n\
+             \treverse_proxy localhost:4321 {\n\t\ttransport http {\n\t\t\tkeepalive off\n\t\t}\n\t}\n"
+        ));
+        assert_eq!(conf.matches("keepalive off").count(), 12, "on demand only: 2 sites x 3 blocks x 2 proxies");
     }
 
     #[test]

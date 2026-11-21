@@ -2,7 +2,7 @@
 
 > Scope: a proxy site's dev server starts with the first request and stops after it has been idle, so a dev server costs RAM only while it is used (D-054)
 > Verified against: 2026-11-21 (v0.16.1 installed on the owner's M1; nginx 1.30.7)
-> Status: accepted 2026-11-21 (D-054). O1 (spike) done; O2 shipped in 0.16.1; O3 built on branch `feat/on-demand-nginx`, see "O3 results".
+> Status: accepted 2026-11-21 (D-054). O1 (spike) done; O2 shipped in 0.16.1; O3 merged (#110), see "O3 results"; O4 built on branch `feat/on-demand-caddy-apache`, see "O4 results".
 
 Today a proxy site's dev server runs from the moment the user presses Start until they press Stop (D-036). Nothing starts at login, so after a login or a crash every proxy site shows "Nothing answers on localhost:<port>" until its command is started by hand. Once started, a dev server keeps its RAM all day, even when nobody has opened the site for hours.
 
@@ -109,19 +109,19 @@ server {
   - The daemon proxying the first request itself. That needs a full HTTP proxy in the daemon, with streaming and WebSockets.
   - Holding every request until the server answers. A cold dev server can take a minute (erd-builder-pro took 29–74 s on the Intel Mac in Phase 8 A4), and a blank loading tab says nothing about progress or a broken build.
 
-### Waking on Caddy and Apache (O4, unverified)
+### Waking on Caddy and Apache (O4)
 
-Neither server is installed on the owner's Mac. O4 starts with a spike of each one.
+Planned before O4 with neither server installed; built and checked in O4 (see "O4 results"). Both wake on-demand sites, so on-demand is never shown as unavailable.
 
-- **Caddy:**
-  - Plan: `handle_errors 502` sends the request to the wake socket (`reverse_proxy unix/<sock>`), and `handle_response` on `418` proxies it to the dev server again.
-  - Unknown: whether the request body survives the first proxy attempt.
-  - Fallback: the daemon answers `307` to the same URL, which browsers and `fetch` follow with the same method and body.
-  - Caddy's passive health checks are off unless configured, so it has no 10-second stale window (to confirm in O4).
-- **Apache:**
-  - mod_proxy answers `503` when the dev server refuses. Its proxy line already uses `retry=0`, so Apache has no stale window either.
-  - Plan: `ErrorDocument 503` points at a local path that is `ProxyPass`ed to the wake socket, with the original URL in a header taken from `REDIRECT_URL`. The daemon then answers `307` to it.
-- **If a server cannot do it cleanly,** on-demand shows as unavailable on that server, and the site falls back to today's message with "Start" in the app.
+- **Caddy** (as planned, with the retry inside Caddy):
+  - `handle_errors 502` sends a request that failed with a dial error to the wake socket (`reverse_proxy unix/<sock>`), and `handle_response` on `418` proxies it to the dev server again. A request the dev server took and dropped (`EOF`, a write error) is not sent again.
+  - `method GET` on the wake proxy makes Caddy drop the body there, and the original body still reaches the dev server on the retry. The original method goes along in `X-Devid-Method`.
+  - Caddy has no passive health checks unless configured, so it has no 10-second stale window: the request right after a wake goes straight to the dev server.
+- **Apache** (as planned, with the original request line instead of `REDIRECT_URL`):
+  - mod_proxy answers `503` when the dev server refuses and `502` when it took the request and failed. Its proxy line already uses `retry=0`, so Apache has no stale window either.
+  - `ErrorDocument 503` points at `/.devid-wake`, `ProxyPass`ed to the wake socket. `X-Devid-Request` carries `%{THE_REQUEST}`, the raw request line, which keeps the method and an encoded URL exactly as sent; `REDIRECT_URL` is decoded. The daemon answers `307` to that URL.
+  - The internal redirect is a GET, but mod_proxy_http still passes the body to the socket, so the daemon reads and drops it before answering.
+- **Both:** they keep no idle connection to an on-demand dev server, which the idle check would take for an open tab (see "O4 results").
 
 ### The daemon
 
@@ -171,8 +171,8 @@ Neither server is installed on the owner's Mac. O4 starts with a spike of each o
 |---|---|---|
 | O1 | **Spike** | the numbers and answers are in this doc (done 2026-11-21, see "O1 results") |
 | O2 | **Fix: no stale 502 after a dev server starts.** A failed request tries once more through a `max_fails=0` group (`@devid_again`) before "Nothing answers". A 0.16.x patch, independent of the rest | a dev server that comes up answers through `.test` on the next request, not 10 s later, checked by `scripts/smoke.sh` on both arches (shipped in 0.16.1, 2026-11-21) |
-| O3 | **Daemon and CLI on nginx:** the setting, the wake socket, starting and waiting, the Starting and failure pages, idle stop, status, `devid cmd on-demand` | on the owner's Mac, devid-site with `on_demand = "dev"` opens from sleep at `https://devid-site.test` with one slower load, stops after its idle time with no tab open, and keeps running while a tab is open (built 2026-11-21, branch `feat/on-demand-nginx`: checked with a test daemon and a copy, see "O3 results"; the check on the owner's own devid-site waits for an install) |
-| O4 | **Caddy and Apache:** spike, then the wake path on each, or "unavailable on this server" | the O3 check passes on both servers with a test daemon, or the docs and the app say why not |
+| O3 | **Daemon and CLI on nginx:** the setting, the wake socket, starting and waiting, the Starting and failure pages, idle stop, status, `devid cmd on-demand` | on the owner's Mac, devid-site with `on_demand = "dev"` opens from sleep at `https://devid-site.test` with one slower load, stops after its idle time with no tab open, and keeps running while a tab is open (merged 2026-11-21, #110: checked with a test daemon and a copy, see "O3 results"; the check on the owner's own devid-site waits for an install) |
+| O4 | **Caddy and Apache:** spike, then the wake path on each, or "unavailable on this server" | the O3 check passes on both servers with a test daemon, or the docs and the app say why not (built 2026-11-21, branch `feat/on-demand-caddy-apache`: both wake it, see "O4 results") |
 | O5 | **App and TUI** | the owner turns on-demand on and off for devid-site in Devid.app and sees it sleep and wake |
 | O6 | **Docs and release 0.17.0:** devid-site guide, README, roadmap, timeline record | released and installed on the owner's Mac (the release waits for the owner's go-ahead) |
 
@@ -226,7 +226,7 @@ nginx 1.30.7 (Devid's build) in front of a Python stand-in for the dev server (i
 ### Not covered yet
 
 - A WebSocket upgrade that arrives while the server is down (the stand-in has no WebSocket). An HMR client reconnects by itself once the page has loaded, so a failed upgrade only delays it.
-- Caddy and Apache (O4).
+- Caddy and Apache (O4, done: see "O4 results").
 - How long erd-builder-pro takes to start on the M1. The Intel Mac's 29–74 s was for a different script with a Vite build.
 
 ## O3 results (2026-11-21)
@@ -246,6 +246,28 @@ Built on branch `feat/on-demand-nginx`; the record with every check is `docs/imp
 - **Still open:**
   - **The check on the owner's own devid-site** needs this build installed.
   - **A stray `detached-flush.js` process:** every stop of devid-site's `next dev` leaves one behind (Next 16.4 with fumadocs-mdx, even with `NEXT_TELEMETRY_DISABLED=1`). With on demand, each sleep adds one, so devid-site needs a fix before it goes on demand.
+
+## O4 results (2026-11-21)
+
+Built on branch `feat/on-demand-caddy-apache`; the record with every check is `docs/implementation-timeline/daemon/2026-11-21-on-demand-caddy-apache.md`.
+
+- **The O3 check on both servers:** a new clone of devid-site (`next dev`, `idle_stop = 1`) in a test daemon, with Caddy 2.11.9 and the system Apache 2.4.67.
+
+  | | Caddy | Apache |
+  |---|---|---|
+  | First page load from sleep | 200 in 1.5 s | 307, then 200; 1.5 s in all |
+  | No tab open | stopped 81–91 s after the last request | stopped 70–81 s after the last request |
+  | A browser tab open for 150 s | kept running; the HMR WebSocket showed as an open connection | kept running; the HMR WebSocket showed as an open connection |
+  | Tab closed | stopped 60–70 s later | stopped 85–95 s later |
+
+- **How each server wakes it:** Caddy retries the request itself after the daemon's 418, as nginx does. Apache gets a 307 to the same URL, which browsers follow with the method and body.
+- **A WebSocket that arrives while the dev server is down:** it wakes the command on all three. On nginx and Caddy it then opens. On Apache it fails, because a WebSocket does not follow a 307, and the next attempt opens. An HMR client reconnects by itself.
+- **Fixed on the way:**
+  - **Idle connection pools:** Caddy and Apache kept idle connections to a dev server that never closes them, which the idle check counts as an open tab. On-demand sites now close each connection after its request.
+  - **Apache's 60 s limit:** Apache cut slow responses and idle WebSockets after 60 s. Its proxy line now has nginx's one hour.
+  - **Apache stalled after a config change:** with a WebSocket open, the next request waited 89 s. It now waits 0.99 s (`ServerLimit 16`).
+- **The `detached-flush.js` leak, tested on the clone:** its `next.config.mjs` skips `createMDX()` when Next's telemetry flush loads it (`process.argv` ends with `detached-flush.js`). After every stop in these checks, no `detached-flush.js` was left from the clone. The same three lines would fix devid-site.
+- **Still open:** the check on the owner's own devid-site with an installed build, as for O3.
 
 ## Not in this phase
 
