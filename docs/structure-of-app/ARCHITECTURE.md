@@ -82,6 +82,8 @@ Implemented in M7:
 - **Apache** (`devid server install apache`, by default a symlink to `/usr/sbin/httpd`):
   - its own `httpd.conf` (never `/etc/apache2`) with the module list from the spike, `127.0.0.1` listeners, and a 404 default vhost for HTTP;
   - it is validated with `httpd -t`, reloaded gracefully with SIGUSR1, and stopped with SIGTERM.
+  - **One serving process** (`StartServers 1`, `ThreadsPerChild` = `MaxRequestWorkers` = 25), with `ServerLimit 16`. The extra slots are only for the old processes of a graceful reload, which finish their open connections while the new one takes new requests. Before Phase 10 O4 it was `ServerLimit 1`. The new process then waited for the old one, so an open WebSocket held every request after a config change (89 s in the O4 check, otherwise as long as the tab stayed open).
+  - **Proxy sites:** `ProxyPass … upgrade=websocket retry=0 timeout=3600`. The timeout matches nginx's `proxy_read_timeout 1h`; before O4, Apache's `Timeout` (60 s) cut slow responses and idle WebSockets.
   - `shortcut:` the first HTTPS vhost also answers unknown hosts.
 - **`Spec.stop_signal`:** the supervisor stops each service with its own graceful signal: SIGQUIT for php-fpm and nginx, SIGTERM for Caddy, Apache and Mailpit.
 - **`Spec.write_pid`:** for a service that writes no pid file of its own (Mailpit), the supervisor writes the child's pid to `pid_file`, so the next daemon can stop an orphan. Caddy writes none either and does not use it yet.
@@ -241,9 +243,9 @@ Implemented in T5:
 - **Share (A6, D-037):** `share_start` runs an existing `cloudflared`, the first one in `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, `~/bin` or the daemon's PATH (launchd's system folders): `cloudflared tunnel --url http://127.0.0.1:<http_port> --http-host-header <site>.<tld>` as the site's `.share` command entry and reads its `trycloudflare.com` URL from `share-<site>.log`; `share_stop` ends it. `sites` reports `share` per site, `status` the `shares`.
 - **Desktop app (A5):** a site's detail view (type, serving, local port, commands with their log) and the menu bar's running commands with Stop; every action is a daemon request the CLI also sends.
 
-## Dev servers on demand (Phase 10 O3, D-054)
+## Dev servers on demand (Phase 10 O3 and O4, D-054)
 
-- **Setting:** `[apps.<site>] on_demand = "<command>"` and `idle_stop = <minutes>` (default 10, 0 never, at most 1440). It applies only to a proxy site whose command is saved (`Site.on_demand`); `mutate` drops it when the site stops being a proxy site or loses the command. It works on nginx so far (`ondemand::available`); on Caddy and Apache the setting stays and the site waits for its command as before (O4).
+- **Setting:** `[apps.<site>] on_demand = "<command>"` and `idle_stop = <minutes>` (default 10, 0 never, at most 1440). It applies only to a proxy site whose command is saved (`Site.on_demand`); `mutate` drops it when the site stops being a proxy site or loses the command. nginx, Caddy and Apache all wake it.
 - **Waking (nginx):** an on-demand site's `@devid_again` hands a failure to `@devid_wake` instead of `@devid_down`.
   - `@devid_wake` proxies to `~/.devid/run/wake.sock` with `proxy_pass_request_body off` and `X-Devid-Site: <site>`, behind the same `$upstream_bytes_sent` guard.
   - The daemon (`ondemand::wake`) starts the command once (a lock around `Commands::start`, which also returns a running one) with the log note "started by a request to <host>", then checks the port every 50 ms.
@@ -251,12 +253,21 @@ Implemented in T5:
   - A GET with `text/html` in `Accept` still starting after 5 s gets `503`, the "Starting <host>…" page: the command, the seconds so far and the last 20 log lines, refreshing every second, `Retry-After: 1`, `no-store`. Other requests wait up to 60 s, then `504`. A command that exits gets `500` with its exit code and log. These pass through to the client unchanged.
   - The daemon never answers `502`: that is nginx's when the wake socket is not there.
   - The wake socket (mode 0600) is bound from the first on-demand site until the daemon stops: one thread blocked in `accept`, a thread per wake request.
+- **Waking (Caddy, O4):** an on-demand site's `handle_errors 502` matches a dial error (`vars_regexp {http.error.message} "^dial "`), so only a request that never reached the dev server wakes it; a server that took the request and closed gives `EOF` or a write error and keeps the "Nothing answers" text.
+  - That request goes to the wake socket through `reverse_proxy unix/<wake.sock>` with `method GET`, which makes Caddy drop the body, and `X-Devid-Method: {method}`, which the daemon reads instead of the request line.
+  - On the daemon's `418`, `handle_response` sends the same request, body included, to the dev server with the main path's `header_up Host`; any other answer passes through.
+  - An error inside `handle_errors` cannot be handled again: if the wake socket does not answer, or the dev server refuses again right after the 418, the client gets an empty 502.
+- **Waking (Apache, O4):** mod_proxy answers 503 when the dev server refuses and 502 when it took the request and failed. An on-demand site's `ErrorDocument 503` is `/.devid-wake`, which is `ProxyPass`ed (before `/`) to `unix:<wake.sock>|http://localhost/` with `timeout=75`.
+  - That internal redirect is a GET, but mod_proxy_http still sends the original body to the socket, so the daemon reads and drops any body (`Content-Length` or chunked) before it answers.
+  - `X-Devid-Request: %{THE_REQUEST}` carries the original request line. The daemon takes the method from it and answers `307` with `Location` set to the original target (a path that starts with one `/` and has only visible ASCII, else `/`). The client then sends the request again, method and body included; browsers and `fetch` follow a 307, and curl does with `-L`.
+  - `Require env REDIRECT_STATUS` refuses a client that asks for `/.devid-wake` itself. If the wake socket does not answer, Apache shows its own 503 page.
+- **No idle connections to an on-demand dev server (O4):** Caddy (`transport http { keepalive off }`) and Apache (`disablereuse=On`) close each connection to the dev server after its request, as nginx does by default. Otherwise a dev server that never closes idle connections would keep one open, which the idle check counts as an open tab.
 - **Idle stop:** a thread runs only while an on-demand command runs, every 30 s (`ondemand::tick`).
-  - Requests: nginx writes `$msec` per request of an on-demand site to `run/requests-<site>` (`log_format devid_last`, `access_log` in both of its server blocks); the daemon reads the file's mtime and empties it past 64 KB, keeping the mtime.
+  - Requests: the web server writes a line per request of an on-demand site to `run/requests-<site>` (nginx `$msec` through `log_format devid_last`; Caddy a short JSON line through `log` with `format filter`; Apache `%{msec}t` through `CustomLog`), in every block of the site; the daemon reads the file's mtime and empties it past 64 KB, keeping the mtime. All three open it for appending, so they keep writing at the new end.
   - Open connections: any ESTABLISHED TCP socket of the command's process group on the upstream port, read through libproc (`proc_listpgrppids`, `PROC_PIDLISTFDS`, `PROC_PIDFDSOCKETINFO`; `socket_fdinfo` fields by offset, checked with clang on both arches). An open tab's HMR WebSocket counts. One check on devid-site's 19-process `next dev` takes 0.1–0.3 ms.
   - A site with neither for `idle_stop` minutes (counting from the command's start, the last request, wake-up or open connection) is stopped as `command_stop` does, with a line in its log and the daemon's.
 - **Stop and lifetime:** `command_stop` on an on-demand command puts it to sleep (the reply lists it in `sleeping`). `command_start` works as before and the idle stop then applies. The update resume (D-040) skips on-demand commands. Nothing starts at login.
-- **Requests and CLI:** `app_set` gains `on_demand` (a command name, or `""` for off) and `idle_stop`. `sites` gives each site `on_demand`: null or `{command, idle_stop, state, idle_for}`, with `state` sleeping, starting, running, failed or unavailable. `status` lists the `sleeping` sites. CLI: `devid cmd on-demand [site] <name>|off [--idle <minutes>]`; `devid cmd`, `devid sites` and `devid status` show it.
+- **Requests and CLI:** `app_set` gains `on_demand` (a command name, or `""` for off) and `idle_stop`. `sites` gives each site `on_demand`: null or `{command, idle_stop, state, idle_for}`, with `state` sleeping, starting, running or failed. `status` lists the `sleeping` sites. CLI: `devid cmd on-demand [site] <name>|off [--idle <minutes>]`; `devid cmd`, `devid sites` and `devid status` show it.
 
 ## Mail (Phase 9 M3, D-049)
 

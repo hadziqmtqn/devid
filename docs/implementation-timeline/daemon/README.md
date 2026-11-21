@@ -34,3 +34,4 @@
 | 2026-11-17 | [Fix: Share and the inbox requests wait for a service that is still starting](2026-11-17-wait-for-a-starting-service.md) |
 | 2026-11-21 | [Fix: a proxy site answers as soon as its dev server starts, not 10 s later (Phase 10 O2, v0.16.1)](2026-11-21-nginx-stale-502.md) |
 | 2026-11-21 | [Dev servers on demand on nginx: the daemon and the CLI (Phase 10 O3, D-054)](2026-11-21-on-demand-nginx.md) |
+| 2026-11-21 | [Dev servers on demand on Caddy and Apache (Phase 10 O4, D-054)](2026-11-21-on-demand-caddy-apache.md) |

@@ -277,8 +277,8 @@ enum CmdAction {
         #[arg(num_args = 0..=2, value_name = "SITE NAME")]
         args: Vec<String>,
     },
-    /// Start a proxy site's command with its first request and stop it when the site is idle
-    /// (nginx): `devid cmd on-demand [site] <name>`, or `off`
+    /// Start a proxy site's command with its first request and stop it when the site is idle:
+    /// `devid cmd on-demand [site] <name>`, or `off`
     #[command(name = "on-demand")]
     OnDemand {
         #[arg(num_args = 1..=2, required = true, value_name = "SITE NAME")]
@@ -921,9 +921,6 @@ fn cmd(action: CmdAction, paths: &Paths) -> Result<(), String> {
                     minutes.unwrap_or(10)
                 ),
             }
-            if let Some(w) = v["warning"].as_str() {
-                println!("warning: {w}");
-            }
             Some(site.to_string())
         }
     };
@@ -961,7 +958,6 @@ fn on_demand_text(od: &serde_json::Value) -> String {
         Some("starting") => format!("on demand: starting; it {stops}"),
         Some("running") => format!("on demand: running{idle}; it {stops}"),
         Some("failed") => "on demand: it exited by itself; the next request starts it again".into(),
-        Some("unavailable") => "on demand: works with nginx so far; start it yourself on this web server".into(),
         _ => "on demand".into(),
     }
 }
