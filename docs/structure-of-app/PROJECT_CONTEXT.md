@@ -28,7 +28,8 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 - One global web server: nginx (default, D-015), Caddy or Apache.
 - A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012); the Tauri desktop app came in Phase 7 (D-023) and is opt-in (`devid setup --gui`).
 - Phase 8 (accepted 2026-11-08): Node and static apps at `.test` (D-035), user commands run by the daemon (D-036), a local port per site and Share (D-037).
-- Phase 9 (accepted 2026-11-16): Mail, a mail catcher that runs Mailpit (D-049).
+- Phase 9 (accepted 2026-11-16, done in 0.15.0): Mail, a mail catcher that runs Mailpit (D-049).
+- Phase 10 (proposed 2026-11-21): dev servers on demand, started by a site's first request and stopped when idle (D-054).
 
 **Non-goals:**
 - Databases. The owner uses DBngin for PostgreSQL and MySQL.
@@ -48,7 +49,8 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 | 6 | Extra PHP extensions from a trusted catalog (D-021); plan in `docs/roadmap/phase-6.md` | done (2026-11-05): apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole for 8.3–8.5; Devid v0.4.1 installs them (CLI and TUI); recipe PRs are built, tested and published (E6) |
 | 7 | Desktop app: Tauri v2 menu-bar app on the daemon API (D-023), ported from the revised prototype (D-026); plan in `docs/roadmap/phase-7.md` | done 2026-11-06 (G1–G5): Devid.app ships with v0.7.0, installed with `devid setup --gui` |
 | 8 | Apps, commands and sharing: app types and presets (D-035), user commands (D-036), a local port per site and Share (D-037); plan in `docs/roadmap/phase-8.md` | done 2026-11-09 (v0.12.1 installed): A2 in v0.8.0, A3 in v0.9.0, A4 in v0.10.0, A5 and A6 in v0.12.0, fixes in v0.12.1; one owner check left (both erd-builder-pro commands from Devid.app) |
-| 9 | Mail: Devid runs Mailpit, in two stages (D-049); plan in `docs/roadmap/phase-9.md` | accepted 2026-11-16; M1–M4 and M6 (the inbox in the app, D-051) merged; M5 (docs, release 0.15.0 with both stages) in progress, waiting for a runtime release with Mailpit |
+| 9 | Mail: Devid runs Mailpit, in two stages (D-049); plan in `docs/roadmap/phase-9.md` | done 2026-11-17: both stages, the inbox in the app included (D-051), released in v0.15.0; Mailpit ships in the runtime release since 2026.11.20-12 |
+| 10 | Dev servers on demand: a proxy site's command starts with its first request and stops when idle (D-054); plan in `docs/roadmap/phase-10.md` | proposed 2026-11-21; O1 (spike) done |
 
 ## Open risks (Phase 1 must prove)
 
