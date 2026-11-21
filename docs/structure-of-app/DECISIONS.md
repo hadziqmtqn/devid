@@ -910,7 +910,7 @@ See ARCHITECTURE, "PHP runtime".
   - **D-040:** the update resume skips on-demand commands.
 - **Found on the way:**
   - nginx's implicit upstream for `localhost:<port>` skips a refused address for 10 s. In 0.16 a dev server that has just come up keeps showing "Nothing answers" for up to 10.6 s.
-  - The fix, an `upstream` block with `max_fails=0`, is Phase 10's O2 and can ship on its own.
+  - The fix is Phase 10's O2, which can ship on its own: a failed request tries once more through an `upstream` group with `max_fails=0`, but only if it never reached the dev server. The main path keeps the skipping group, since `max_fails=0` there would log a refusal on every other request.
 - **Not chosen:**
   - `X-Accel-Redirect` back to the dev server, which nginx follows as a GET.
   - A full HTTP proxy in the daemon.
