@@ -46,19 +46,25 @@ idle_stop = 10      # minutes without requests or open connections before it sto
 
 ### Waking: the web server asks the daemon (O1, nginx)
 
-For an on-demand site, nginx gets three named locations instead of today's `@devid_down`:
+It builds on O2's retry (`upstream devid_again_<site>`, `@devid_again`). For an on-demand site, `@devid_again` hands a failure to `@devid_wake` instead of `@devid_down`:
 
 ```nginx
-upstream devid_up_devid_site {
+upstream devid_again_devid_site {                         # O2
     server 127.0.0.1:4321 max_fails=0;
     server [::1]:4321 max_fails=0;
 }
 server {
     ...
     recursive_error_pages on;
-    location / { proxy_pass http://devid_up_devid_site; ... }   # as today
-    error_page 502 504 = @devid_wake;
+    location / { proxy_pass http://localhost:4321; ... }  # as in 0.16: quiet error log
+    error_page 502 504 = @devid_again;
+    location @devid_again {                               # O2
+        if ($upstream_bytes_sent ~ "[1-9]") { return 502; }   # it took the request: never send it twice
+        proxy_pass http://devid_again_devid_site; ...
+        error_page 502 504 = @devid_wake;                  # @devid_down while on-demand is off
+    }
     location @devid_wake {
+        if ($upstream_bytes_sent ~ "[1-9]") { return 502; }   # -> @devid_down
         proxy_pass http://unix:<home>/run/wake.sock;
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
@@ -68,8 +74,8 @@ server {
         error_page 418 = @devid_retry;     # the daemon says: it answers now
         error_page 502 = @devid_down;      # the daemon is not running
     }
-    location @devid_retry {
-        proxy_pass http://devid_up_devid_site; ...   # the same request, method and body included
+    location @devid_retry {                               # no guard: the wake call itself sent bytes
+        proxy_pass http://devid_again_devid_site; ...      # the same request, method and body included
         error_page 502 504 = @devid_down;
     }
     location @devid_down { ... today's message ... }
@@ -77,7 +83,7 @@ server {
 ```
 
 - **Request flow:**
-  - The dev server refuses the connection and nginx goes to `@devid_wake`.
+  - The dev server refuses the connection on both paths, and nginx goes to `@devid_wake`.
   - The daemon starts the command once, however many requests arrive together.
   - The daemon waits until the port accepts, then answers `418`, which nginx turns into the same request to the dev server.
   - The client sees one slower response.
@@ -92,7 +98,11 @@ server {
 
   - Every answer except `418` passes through to the client, because `@devid_wake` has an `error_page` only for `418` and `502`.
   - `502` there means nginx could not reach the wake socket, so the daemon is down. The daemon itself never answers `502`, because nginx could not tell the two apart.
-- **Upstream block with `max_fails=0`:** without it, nginx marks a refused `localhost` address as failed for 10 s and answers "no live upstreams" without trying. This also hits 0.16 with on-demand off: after a dev server comes up, its `.test` address kept answering "Nothing answers" for 10.6 s in O1. O2 fixes that for every proxy site.
+- **The retry group (O2):**
+  - `localhost:<port>` is two addresses, and nginx skips one that refused for 10 s ("no live upstreams"). Retrying through it would fail at once. This also hits 0.16 with on-demand off: after a dev server came up, its `.test` address kept answering "Nothing answers" for 10.6 s in O1.
+  - The retry group has `max_fails=0`, so it always tries both addresses.
+  - It is not the main path. With `max_fails=0` there, nginx would try the unused address on every other request (Vite listens on ::1 only, most servers on 127.0.0.1) and log each refusal: 20 lines per 40 requests, against 1.
+- **No repeated requests:** the guards send on only a request that never reached the dev server (`$upstream_bytes_sent` is 0), so a POST that a restarting server took and dropped is not sent twice. `$upstream_connect_time` cannot tell them apart: a refused loopback connect also records `0.000`.
 - **Local port and Share:** the site's local-port block (D-037) has the same body, so a tunnel's request wakes the site too. A Share visitor can see the "Starting…" page.
 - **Not chosen:**
   - `X-Accel-Redirect` back to the dev server. nginx follows it as a GET, so a POST would lose its body.
@@ -160,7 +170,7 @@ Neither server is installed on the owner's Mac. O4 starts with a spike of each o
 | # | Milestone | Done when |
 |---|---|---|
 | O1 | **Spike** | the numbers and answers are in this doc (done 2026-11-21, see "O1 results") |
-| O2 | **Fix: no stale 502 after a dev server starts.** An `upstream` block with `max_fails=0` for every nginx proxy site. A 0.16.x patch, independent of the rest | a dev server that comes up answers through `.test` on the next request, not 10 s later (integration test with a test daemon) |
+| O2 | **Fix: no stale 502 after a dev server starts.** A failed request tries once more through a `max_fails=0` group (`@devid_again`) before "Nothing answers". A 0.16.x patch, independent of the rest | a dev server that comes up answers through `.test` on the next request, not 10 s later, checked by `scripts/smoke.sh` on both arches (built 2026-11-21, branch `fix/nginx-stale-502`) |
 | O3 | **Daemon and CLI on nginx:** the setting, the wake socket, starting and waiting, the Starting and failure pages, idle stop, status, `devid cmd on-demand` | on the owner's Mac, devid-site with `on_demand = "dev"` opens from sleep at `https://devid-site.test` with one slower load, stops after its idle time with no tab open, and keeps running while a tab is open |
 | O4 | **Caddy and Apache:** spike, then the wake path on each, or "unavailable on this server" | the O3 check passes on both servers with a test daemon, or the docs and the app say why not |
 | O5 | **App and TUI** | the owner turns on-demand on and off for devid-site in Devid.app and sees it sleep and wake |
@@ -204,6 +214,7 @@ nginx 1.30.7 (Devid's build) in front of a Python stand-in for the dev server (i
   - The wake-up then looped through `error_page` until nginx gave up with 500 ("rewrite or internal redirection cycle").
   - With Devid 0.16's exact proxy shape, a server that came up kept getting "Nothing answers" for 10.6 s.
   - An `upstream` block with `max_fails=0` on both addresses fixed both. `@devid_retry` needs its own `error_page`, or a failed retry loops back to `@devid_wake`.
+  - Building O2 showed the cost of `max_fails=0` on the main path: a refused attempt, and an error-log line, on every other request to a server on one address. O2 therefore keeps the main path and retries through the `max_fails=0` group only after a failure, guarded by `$upstream_bytes_sent`. The details and numbers are in `docs/implementation-timeline/daemon/2026-11-21-nginx-stale-502.md`.
 
 ### Idle detection
 
