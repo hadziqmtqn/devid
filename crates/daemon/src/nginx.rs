@@ -133,6 +133,9 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
             let _ = writeln!(c, "\n    # skipped {}: path contains characters nginx cannot quote safely", site.name);
             continue;
         };
+        if site.mode == Mode::Proxy {
+            let _ = write!(c, "{}", again_upstream(site));
+        }
         if site.mode == Mode::Proxy && !site.pass_host {
             let _ = write!(c, "{}", own_origin_map(config, site));
         }
@@ -171,6 +174,31 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
 /// nginx variable holding the Origin a proxy site sends upstream (site names are DNS labels).
 fn origin_var(site: &Site) -> String {
     format!("$devid_origin_{}", site.name.replace('-', "_"))
+}
+
+/// Name of the upstream group a proxy site tries again through (site names are DNS labels).
+fn again_name(site: &Site) -> String {
+    format!("devid_again_{}", site.name.replace('-', "_"))
+}
+
+/// A second way to a proxy site's dev server, used only after `localhost:<up>` failed.
+///
+/// `proxy_pass http://localhost:<up>` is an upstream group of two addresses (127.0.0.1 and ::1),
+/// and nginx skips an address that refused for 10 s (`max_fails=1 fail_timeout=10s`). That keeps
+/// the error log quiet while a dev server listens on one of them (Vite: ::1 only), but once both
+/// have refused, a dev server that has just started got "Nothing answers" for up to 10 s. This
+/// group never skips an address (`max_fails=0`), so the retry in `@devid_again` reaches it at once.
+/// It is not the main path: with `max_fails=0` nginx would try the unused address on every other
+/// request and log each refusal.
+fn again_upstream(site: &Site) -> String {
+    let up = site.upstream;
+    format!(
+        "\n    upstream {name} {{\n\
+         \x20       server 127.0.0.1:{up} max_fails=0;\n\
+         \x20       server [::1]:{up} max_fails=0;\n\
+         \x20   }}\n",
+        name = again_name(site),
+    )
 }
 
 /// The site's own origins (any port) become the dev server's, so Next.js and Vite accept their
@@ -231,28 +259,45 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
                 true => ("$host".to_string(), "$http_origin".to_string()),
                 false => (format!("localhost:{up}"), origin_var(site)),
             };
+            let proxy = |to: &str| {
+                format!(
+                    "\x20           proxy_pass http://{to};\n\
+                     \x20           proxy_http_version 1.1;\n\
+                     \x20           proxy_set_header Host {host};\n\
+                     \x20           proxy_set_header Origin {origin};\n\
+                     \x20           proxy_set_header Upgrade $http_upgrade;\n\
+                     \x20           proxy_set_header Connection $connection_upgrade;\n\
+                     \x20           proxy_set_header X-Forwarded-Host $host;\n\
+                     \x20           proxy_set_header X-Forwarded-Proto $devid_forwarded_proto;\n\
+                     \x20           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
+                     \x20           # Dev servers stream (SSE, HMR); keep idle WebSockets open.\n\
+                     \x20           proxy_buffering off;\n\
+                     \x20           proxy_read_timeout 1h;\n"
+                )
+            };
             // `localhost` resolves to 127.0.0.1 and ::1, and nginx tries both: Vite listens on
-            // [::1] only by default (A1).
+            // [::1] only by default (A1). A failure tries once more through a group that skips
+            // neither address (see `again_upstream`), then says nothing answers; the second
+            // `error_page` needs `recursive_error_pages`. Only a request that never reached the
+            // dev server goes again: one it took and dropped (a restart mid-request) could be a
+            // POST, and sending it twice would repeat it.
             format!(
-                "        location / {{\n\
-                 \x20           proxy_pass http://localhost:{up};\n\
-                 \x20           proxy_http_version 1.1;\n\
-                 \x20           proxy_set_header Host {host};\n\
-                 \x20           proxy_set_header Origin {origin};\n\
-                 \x20           proxy_set_header Upgrade $http_upgrade;\n\
-                 \x20           proxy_set_header Connection $connection_upgrade;\n\
-                 \x20           proxy_set_header X-Forwarded-Host $host;\n\
-                 \x20           proxy_set_header X-Forwarded-Proto $devid_forwarded_proto;\n\
-                 \x20           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
-                 \x20           # Dev servers stream (SSE, HMR); keep idle WebSockets open.\n\
-                 \x20           proxy_buffering off;\n\
-                 \x20           proxy_read_timeout 1h;\n\
+                "        recursive_error_pages on;\n\
+                 \x20       location / {{\n\
+                 {main}\
                  \x20       }}\n\
-                 \x20       error_page 502 504 = @devid_down;\n\
+                 \x20       error_page 502 504 = @devid_again;\n\
+                 \x20       location @devid_again {{\n\
+                 \x20           if ($upstream_bytes_sent ~ \"[1-9]\") {{ return 502; }}\n\
+                 {again}\
+                 \x20           error_page 502 504 = @devid_down;\n\
+                 \x20       }}\n\
                  \x20       location @devid_down {{\n\
                  \x20           default_type text/plain;\n\
                  \x20           return 502 \"Nothing answers on localhost:{up} for {name}. Start its dev server (or its command in Devid).\\n\";\n\
                  \x20       }}\n",
+                main = proxy(&format!("localhost:{up}")),
+                again = proxy(&again_name(site)),
                 name = site.host,
             )
         }
@@ -379,6 +424,31 @@ mod tests {
         assert!(conf.contains("proxy_set_header Connection $connection_upgrade;"));
         assert!(conf.contains("return 502 \"Nothing answers on localhost:5173 for erd-pro.test."));
 
+        // A failed request tries once more through a group that never skips an address, so a dev
+        // server that has just started answers at once instead of 10 s later.
+        assert!(conf.contains(
+            "upstream devid_again_erd_pro {\n        server 127.0.0.1:5173 max_fails=0;\n        server [::1]:5173 max_fails=0;\n    }"
+        ));
+        assert!(conf.contains("upstream devid_again_raw {"), "pass_host sites too");
+        assert_eq!(conf.matches("recursive_error_pages on;").count(), 2);
+        assert_eq!(conf.matches("error_page 502 504 = @devid_again;").count(), 2);
+        let again = &conf[conf.find("location @devid_again {").unwrap()..];
+        let again = &again[..again.find("\n        }").unwrap()];
+        assert!(
+            again.starts_with(
+                "location @devid_again {\n            if ($upstream_bytes_sent ~ \"[1-9]\") { return 502; }"
+            ),
+            "a request the dev server already took is not sent twice: {again}"
+        );
+        assert!(again.contains("proxy_pass http://devid_again_erd_pro;"), "{again}");
+        assert!(again.contains("proxy_set_header Origin $devid_origin_erd_pro;"), "same headers as the main path");
+        assert!(again.contains("error_page 502 504 = @devid_down;"), "{again}");
+        let main = &conf[conf.find("server_name erd-pro.test;").unwrap()..];
+        assert!(
+            main.contains("location / {\n            proxy_pass http://localhost:5173;"),
+            "the quiet path stays first"
+        );
+
         assert!(
             conf.contains("proxy_set_header Host $host;") && conf.contains("proxy_set_header Origin $http_origin;")
         );
@@ -399,5 +469,11 @@ mod tests {
         assert!(local.contains("fastcgi_pass \"unix:/h/.devid/run/php85.sock\";"), "same body as the .test block");
         assert!(!local.contains("ssl"), "plain HTTP: the tunnel's edge does TLS");
         assert_eq!(conf.matches("listen 127.0.0.1:8000").count(), 1);
+
+        // A proxy site on a local port: one retry group, used by both of its server blocks.
+        let dev = Site { mode: Mode::Proxy, upstream: 3000, port: Some(8001), ..site("dev", "/p/dev", "8.4") };
+        let conf = render(&paths, &Config::default(), &[dev]);
+        assert_eq!(conf.matches("upstream devid_again_dev {").count(), 1);
+        assert_eq!(conf.matches("proxy_pass http://devid_again_dev;").count(), 2);
     }
 }
