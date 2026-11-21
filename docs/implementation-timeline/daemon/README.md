@@ -32,4 +32,4 @@
 | 2026-11-16 | [Mail in the daemon and the CLI: Devid runs Mailpit (Phase 9 M3, D-049)](2026-11-16-mail-service.md) |
 | 2026-11-16 | [The inbox in the daemon and the CLI: list, show, delete, save (Phase 9 M6a)](2026-11-16-mail-inbox-requests.md) |
 | 2026-11-17 | [Fix: Share and the inbox requests wait for a service that is still starting](2026-11-17-wait-for-a-starting-service.md) |
-| 2026-11-21 | [Fix: a proxy site answers as soon as its dev server starts, not 10 s later (Phase 10 O2)](2026-11-21-nginx-stale-502.md) |
+| 2026-11-21 | [Fix: a proxy site answers as soon as its dev server starts, not 10 s later (Phase 10 O2, v0.16.1)](2026-11-21-nginx-stale-502.md) |
