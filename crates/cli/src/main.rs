@@ -1,5 +1,50 @@
 //! `devid`: thin client of the daemon (D-012). `devid daemon run` is the daemon itself.
 
+// These replace std's `println!` and `print!` in the whole crate (they are defined before the
+// modules). Rust ignores SIGPIPE, so std's macros panic when stdout's reader has gone away
+// (`devid sites | head -1`); these end the process quietly with success instead, see
+// `stdout_failed`. SIGPIPE itself stays ignored: `devid daemon run` is the daemon, and a client
+// that disconnects from its socket must not end it.
+macro_rules! println {
+    () => {
+        $crate::out(format_args!("\n"))
+    };
+    ($($arg:tt)*) => {
+        $crate::out(format_args!("{}\n", format_args!($($arg)*)))
+    };
+}
+
+macro_rules! print {
+    ($($arg:tt)*) => {
+        $crate::out(format_args!($($arg)*))
+    };
+}
+
+/// Write to stdout for `println!` and `print!`.
+fn out(args: std::fmt::Arguments) {
+    if let Err(e) = std::io::Write::write_fmt(&mut std::io::stdout(), args) {
+        stdout_failed(e);
+    }
+}
+
+/// Flush what `print!` left in stdout's buffer, like `out` on failure.
+fn flush_stdout() {
+    if let Err(e) = std::io::Write::flush(&mut std::io::stdout()) {
+        stdout_failed(e);
+    }
+}
+
+/// A broken pipe means the reader stopped reading (`head`, `grep -q`), which is not a failure of
+/// devid: exit 0, so `devid cmd front | grep -q x` holds under `set -o pipefail`. Any other
+/// write error (a full disk) is reported and fails.
+fn stdout_failed(e: std::io::Error) -> ! {
+    if e.kind() == std::io::ErrorKind::BrokenPipe {
+        std::process::exit(0);
+    }
+    eprintln!("devid: cannot write to stdout: {e}");
+    std::process::exit(1);
+}
+
 mod setup;
 mod shim;
 mod tui;
@@ -490,7 +535,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 let next = send(Request::LogRead { name: name.clone(), offset })?;
                 print!("{}", next["text"].as_str().unwrap_or_default());
-                std::io::Write::flush(&mut std::io::stdout()).map_err(|e| e.to_string())?;
+                flush_stdout();
                 offset = next["offset"].as_u64();
             }
         }
