@@ -64,8 +64,11 @@ down="Nothing answers on localhost:28300"
 for _ in $(seq 50); do front | grep -q "$down" && break; sleep 0.2; done
 for addr in 127.0.0.1 ::1; do
   front | grep -q "$down" || { echo "FAIL: front.test with no dev server: $(front)" >&2; exit 1; }
-  if [ "$addr" = ::1 ]; then url="http://[::1]:28300/"; else url="http://$addr:28300/"; fi
-  python3 -m http.server 28300 --bind "$addr" --directory "$T/front" > /dev/null 2>&1 &
+  if [ "$addr" = ::1 ]; then listen="[::1]:28300"; else listen="$addr:28300"; fi
+  url="http://$listen/"
+  # The dev server is PHP's built-in one, from the PHP installed above. `python3 -m http.server`
+  # looks up its own name (getfqdn) before it listens, which took about 35 s on the Intel runner.
+  "$DEVID_HOME/php/8.5/bin/php" -n -S "$listen" -t "$T/front" > /dev/null 2>&1 &
   SERVER=$!
   for _ in $(seq 100); do curl -fs -o /dev/null "$url" && break; sleep 0.05; done
   got="$(front)"
