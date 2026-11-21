@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-20
+> Verified against: 2026-11-21
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-054 | 2026-11-21 | proposed 2026-11-21 (Phase 10; amends D-036, D-040) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, nginx first |
 | D-053 | 2026-11-20 | accepted 2026-11-20 (amends D-014) | Devid's commands on PATH for every shell: `php8.3`–`php8.5`, `nginx`, `caddy` and `mailpit` join `php` and `composer` as shims, the PATH line goes into `~/.zshenv` and `~/.zshrc`, and Settings › Terminal, `devid path on/off` and the TUI add or remove it |
 | D-052 | 2026-11-20 | accepted 2026-11-20 | The target machine is the owner's Apple M1 (8 cores, 8 GB RAM, macOS 26), not the Intel Mac; RAM is the tightest budget; Intel stays supported |
 | D-051 | 2026-11-16 | accepted 2026-11-17 (amends D-049) | The app's inbox shows an email's HTML through its own `mailview:` scheme: its own CSP without scripts, a sandboxed frame, and links that open in the browser |
@@ -888,3 +889,31 @@ See ARCHITECTURE, "PHP runtime".
   - Existing installs get the shims and the `~/.zshenv` line with the next `devid self-update`, which runs setup.
 - **Not chosen:** symlinks for the new commands (PHP resolves them for `PHP_BINARY`, and nginx would run without Devid's config); a PATH line in `~/.zshenv` only (Homebrew's `php` would win in a terminal); adding any folder the user picks, such as `~/.local/bin` (outside Devid's job).
 - **Accepted:** by the owner, who merged #103 on 2026-11-20.
+
+## D-054: dev servers on demand (proposed 2026-11-21, Phase 10, amends D-036 and D-040)
+
+- **Context:**
+  - A proxy site's dev server runs from Start to Stop (D-036). Nothing starts at login, so after a login or a crash every proxy site shows "Nothing answers" until its command is started by hand.
+  - Once started, a dev server keeps its RAM all day. On the owner's M1 with 8 GB (D-052), three idle proxy sites held about 1.1 GB on 2026-11-21 (devid-site's `next dev` alone 777 MB), with 2.6 GB of swap in use.
+  - A warm Next.js dev server answers its first page about 2 s after it starts.
+  - Herd 2 starts dev servers on the first request and stops them after 5 minutes idle, behind Herd Studio.
+  - On 2026-11-21 the owner picked this as the next feature.
+- **Proposal:**
+  - **Opt-in:** a proxy site can name one of its saved commands as `on_demand`, with `idle_stop` in minutes (10 by default, 0 for never).
+  - **Waking:** when the dev server refuses a request, the web server asks the daemon over a unix socket (`~/.devid/run/wake.sock`). The daemon starts the command once and waits until its port accepts, then the web server sends the same request again (method and body included).
+  - **Slow starts:** a page load still starting after 5 s gets a "Starting…" page that refreshes itself. Other requests wait up to 60 s. A command that exits shows its exit code and log.
+  - **Idle:** while an on-demand command runs, the daemon checks every 30 s for requests (the site's access log, written only for on-demand sites) and open connections (the command's own sockets). An open tab keeps its HMR WebSocket and so counts as use. After `idle_stop` minutes of neither, the command is stopped and shown as sleeping.
+  - **nginx first.** Caddy and Apache follow after a spike, or show on-demand as unavailable.
+- **What it changes:**
+  - **D-036:** a request, not only the user, can start the one command the user marked. It still never starts at login or by itself, and a repository cannot mark a command.
+  - **Stop:** on an on-demand command, Stop means sleep until the next request.
+  - **D-040:** the update resume skips on-demand commands.
+- **Found on the way:**
+  - nginx's implicit upstream for `localhost:<port>` skips a refused address for 10 s. In 0.16 a dev server that has just come up keeps showing "Nothing answers" for up to 10.6 s.
+  - The fix, an `upstream` block with `max_fails=0`, is Phase 10's O2 and can ship on its own.
+- **Not chosen:**
+  - `X-Accel-Redirect` back to the dev server, which nginx follows as a GET.
+  - A full HTTP proxy in the daemon.
+  - Holding every request until the server answers, which shows a blank tab during a long build.
+- **Plan:** `docs/roadmap/phase-10.md`.
+- **Status:** proposed; waiting for the owner.
