@@ -45,7 +45,8 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
-| D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040); amended 2026-11-21 (O4) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, on nginx, Caddy and Apache |
+| D-055 | 2026-11-22 | accepted 2026-11-22 (the owner's request) | The app's site detail puts explanations in tooltips: an (i) after each title, the notes under the cards in their headings' tooltips; what needs action stays on the page, and a status is said once |
+| D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040); amended 2026-11-21 (O4) and 2026-11-22 (O5) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, on nginx, Caddy and Apache |
 | D-053 | 2026-11-20 | accepted 2026-11-20 (amends D-014) | Devid's commands on PATH for every shell: `php8.3`–`php8.5`, `nginx`, `caddy` and `mailpit` join `php` and `composer` as shims, the PATH line goes into `~/.zshenv` and `~/.zshrc`, and Settings › Terminal, `devid path on/off` and the TUI add or remove it |
 | D-052 | 2026-11-20 | accepted 2026-11-20 | The target machine is the owner's Apple M1 (8 cores, 8 GB RAM, macOS 26), not the Intel Mac; RAM is the tightest budget; Intel stays supported |
 | D-051 | 2026-11-16 | accepted 2026-11-17 (amends D-049) | The app's inbox shows an email's HTML through its own `mailview:` scheme: its own CSP without scripts, a sandboxed frame, and links that open in the browser |
@@ -916,7 +917,7 @@ See ARCHITECTURE, "PHP runtime".
   - A full HTTP proxy in the daemon.
   - Holding every request until the server answers, which shows a blank tab during a long build.
 - **Plan:** `docs/roadmap/phase-10.md`.
-- **Status:** accepted by the owner on 2026-11-21 ("Ya, mulai O3"). O2 shipped in 0.16.1; O3 (nginx) merged on 2026-11-21 (#110).
+- **Status:** accepted by the owner on 2026-11-21 ("Ya, mulai O3"). O2 shipped in 0.16.1; O3 (nginx) merged on 2026-11-21 (#110); O4 (Caddy and Apache) merged on 2026-11-21 (#111).
 - **Amended 2026-11-21 (O4, Caddy and Apache):** both wake on-demand sites, so on-demand is never "unavailable".
   - **Apache sends the client back.** Apache reaches the daemon through `ErrorDocument 503`, which loses the method and cannot send the request again itself. So the daemon answers `307` to the same URL, and the browser sends the request again, method and body included.
   - **No idle connections to an on-demand dev server.** Caddy and Apache would keep idle connections to the dev server open for reuse. The idle check counts an open connection as an open tab, so one held open by a dev server that never closes it kept the site awake. They now close each connection after its request (`keepalive off`, `disablereuse=On`), as nginx does.
@@ -924,3 +925,20 @@ See ARCHITECTURE, "PHP runtime".
     - Its proxy line gets `timeout=3600`, nginx's `proxy_read_timeout 1h`. Apache's `Timeout` of 60 s had cut slow responses and idle WebSockets.
     - `ServerLimit` goes from 1 to 16, so a graceful reload can start its new process while the old one finishes open connections. Before, every request after a config change waited for an open WebSocket to close: 89 s in the check.
     - Not chosen: a hard restart (SIGHUP), as Caddy does. Apache then needs about 10 s to kill a process with an open WebSocket, and every request waits for that.
+- **Amended 2026-11-22 (O5, the app and the TUI):** the owner approved the board "Devid — Dev servers on demand (Phase 10 O5)" on 2026-11-22 ("Sudah, bangun app"). Two points differ from the plan's wording:
+  - **One On demand card per site.** The card holds the switch, the command and the idle time, instead of a switch on a command row: only one command per site can be on demand.
+  - **TUI key `z`.** `o` already opens the site.
+
+## D-055: explanations in tooltips on the site detail (accepted 2026-11-22)
+
+- **Context:** the site detail had grown with Phase 8 and Phase 10. Every row carried a line of explanation, three cards had a note under them, and an on-demand command's state showed in its row and again in the On demand card. On 2026-11-22 the owner asked: "pada halaman detail site untuk teks-teks keterangan dipindahkan ke tooltip agar lebih ringkas dan bersih, dan kurangi narasi perulangan".
+- **Decision:**
+  - **Explanations move into tooltips.** Each row's title has an (i) that shows its explanation on hover or keyboard focus.
+  - **Notes move to their headings.** The notes under App, Commands, On demand and Share are now the tooltips of those headings.
+  - **What needs action stays on the page:** a PHP version that is not installed, a busy local port, a cloudflared that stopped, and why the on-demand switch is disabled.
+  - **A status is said once.** The On demand card no longer repeats the command's state, which its row shows. That row says "Sleeping", and its chip's tooltip says when the command starts and stops.
+- **How the tooltip works:**
+  - It is fixed on the page body, as the menus are, so no card or scroll area clips it.
+  - The (i) can be focused, and its label is the same text for screen readers.
+  - Esc closes it. A redraw from polling waits until it closes.
+- **Scope:** the site detail. Other pages keep their texts until there is a reason to change them.

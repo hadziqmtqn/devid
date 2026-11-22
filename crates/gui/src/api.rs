@@ -374,7 +374,7 @@ fn items(list: &Value) -> impl Iterator<Item = &Value> {
     list.as_array().into_iter().flatten()
 }
 
-fn site_url(paths: &Paths, name: &str) -> Result<String, String> {
+pub(crate) fn site_url(paths: &Paths, name: &str) -> Result<String, String> {
     let sites = request(paths, &Request::Sites)?;
     items(&sites["sites"])
         .find(|s| s["name"] == name)

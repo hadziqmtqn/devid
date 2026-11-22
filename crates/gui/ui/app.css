@@ -162,6 +162,12 @@ p.dv-note { margin: 10px 4px 0; }
 .dv-mi.danger:hover, .dv-mi.danger:focus-visible { color: #fff; }
 .dv-mark { width: 12px; flex: none; margin-left: -4px; }
 .dv-kbd { margin-left: auto; padding-left: 12px; color: var(--text-3); font-size: 12px; }
+
+/* Tooltips: an (i) after a title; the text floats above it (tip() in app.js). */
+.dv-tip { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 3px; border-radius: 50%; color: var(--text-3); vertical-align: -4px; cursor: help; }
+.dv-tip .dv-ico { width: 13px; height: 13px; }
+.dv-tip:hover, .dv-tip:focus-visible { color: var(--text); }
+.dv-tooltip { position: fixed; z-index: 40; max-width: 300px; padding: 6px 9px; border-radius: 7px; background: var(--menu-bg); color: var(--text); font-size: 12px; font-weight: 400; line-height: 1.4; box-shadow: 0 8px 24px rgba(0,0,0,.22), 0 0 0 .5px rgba(0,0,0,.18); pointer-events: none; }
 .dv-mi:hover .dv-kbd, .dv-mi:focus-visible .dv-kbd { color: rgba(255,255,255,.85); }
 .dv-sep { height: 1px; margin: 5px 4px; border: 0; background: var(--border); }
 .dv-menu-h { display: flex; align-items: center; gap: 8px; padding: 6px 10px 3px; font-size: 12px; font-weight: 600; color: var(--text-2); }

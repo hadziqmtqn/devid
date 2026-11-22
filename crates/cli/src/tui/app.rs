@@ -163,7 +163,29 @@ pub enum PickFor {
         site: String,
         names: Vec<String>,
     },
+    /// D-054: the command that starts with the site's first visit, or Off (the last option);
+    /// `idle` is the current `idle_stop`, the next pick's default.
+    OnDemand {
+        site: String,
+        names: Vec<String>,
+        idle: Option<u64>,
+    },
+    /// D-054: how long that command may be idle before it stops, `ON_DEMAND_IDLE` in order.
+    OnDemandIdle {
+        site: String,
+        command: String,
+    },
 }
+
+/// The idle times the TUI offers for an on-demand command (minutes, label); 0 never stops it.
+const ON_DEMAND_IDLE: [(u32, &str); 6] = [
+    (5, "After 5 min idle"),
+    (10, "After 10 min idle"),
+    (15, "After 15 min idle"),
+    (30, "After 30 min idle"),
+    (60, "After 1 hour idle"),
+    (0, "Never"),
+];
 
 /// An overlay that takes the keys until it closes.
 #[derive(Debug, Clone, PartialEq)]
@@ -247,6 +269,31 @@ fn app_set(site: &str, preset: Option<String>, mode: Option<String>) -> Request 
         pass_host: None,
         on_demand: None,
         idle_stop: None,
+    }
+}
+
+/// `AppSet` changing only on-demand (D-054): a command name, or "" for off.
+fn on_demand_set(site: &str, command: &str, idle_stop: Option<u32>) -> Request {
+    Request::AppSet {
+        site: Some(site.to_string()),
+        cwd: String::new(),
+        preset: None,
+        mode: None,
+        root: None,
+        upstream: None,
+        spa: None,
+        pass_host: None,
+        on_demand: Some(command.to_string()),
+        idle_stop,
+    }
+}
+
+/// "stops after 10 min idle", or "keeps running" for 0.
+fn idle_text(minutes: Option<u64>) -> String {
+    match minutes {
+        Some(0) => "keeps running".to_string(),
+        Some(m) => format!("stops after {m} min idle"),
+        None => String::new(),
     }
 }
 
@@ -488,6 +535,14 @@ impl App {
                 items.push(('s', "Stop all commands".to_string()));
             }
             items.push(('x', "Remove a command…".to_string()));
+        }
+        // D-054: one command of a proxy site can start with the site's first visit.
+        if site["mode"] == "proxy" && !cmds.is_empty() {
+            let now = match site["on_demand"]["command"].as_str() {
+                Some(c) => format!("{c}, {}", idle_text(site["on_demand"]["idle_stop"].as_u64())),
+                None => "off".to_string(),
+            };
+            items.push(('z', format!("On demand… ({now})")));
         }
         items.push(('n', "Add a command…".to_string()));
         match site["share"]["url"].as_str() {
@@ -779,10 +834,19 @@ impl App {
                 let cmds = site["commands"].as_array().cloned().unwrap_or_default();
                 let names: Vec<String> = cmds.iter().map(|c| s(&c["name"])).collect();
                 let running: Vec<bool> = cmds.iter().map(|c| c["state"] == "running").collect();
+                let on_demand = site["on_demand"]["command"].as_str();
                 let options = cmds
                     .iter()
                     .map(|c| match choice {
-                        'g' => format!("{}  ·  {}", s(&c["name"]), s(&c["state"])),
+                        'g' => {
+                            let state = s(&c["state"]);
+                            let state = match (on_demand == c["name"].as_str(), state.as_str()) {
+                                (true, "stopped") => "sleeping, on demand".to_string(),
+                                (true, _) => format!("{state}, on demand"),
+                                (false, _) => state,
+                            };
+                            format!("{}  ·  {state}", s(&c["name"]))
+                        }
                         _ => s(&c["name"]),
                     })
                     .collect();
@@ -791,6 +855,19 @@ impl App {
                     _ => PickFor::RemoveCommand { site: name, names },
                 };
                 self.mode = Mode::Pick { purpose, options, index: 0 };
+                Action::None
+            }
+            'z' => {
+                let names: Vec<String> =
+                    site["commands"].as_array().into_iter().flatten().map(|c| s(&c["name"])).collect();
+                let current = site["on_demand"]["command"].as_str();
+                let mark = |on: bool| if on { "  ✓" } else { "" };
+                let mut options: Vec<String> =
+                    names.iter().map(|n| format!("{n}{}", mark(Some(n.as_str()) == current))).collect();
+                options.push(format!("Off{}", mark(current.is_none())));
+                let index = current.and_then(|c| names.iter().position(|n| n == c)).unwrap_or(names.len());
+                let idle = site["on_demand"]["idle_stop"].as_u64();
+                self.mode = Mode::Pick { purpose: PickFor::OnDemand { site: name, names, idle }, options, index };
                 Action::None
             }
             'h' if site["share"].is_object() && site["share"]["state"] != "exited" => Action::Do(Effect::Daemon {
@@ -1074,6 +1151,31 @@ impl App {
                         };
                         return Action::None;
                     }
+                    PickFor::OnDemand { site, names, idle } => match names.get(index) {
+                        Some(command) => {
+                            let options = ON_DEMAND_IDLE.iter().map(|(_, label)| label.to_string()).collect();
+                            let index = idle
+                                .and_then(|m| ON_DEMAND_IDLE.iter().position(|(v, _)| u64::from(*v) == m))
+                                .unwrap_or(1);
+                            let purpose = PickFor::OnDemandIdle { site, command: command.clone() };
+                            self.mode = Mode::Pick { purpose, options, index };
+                            return Action::None;
+                        }
+                        None => Effect::Daemon {
+                            request: on_demand_set(&site, "", None),
+                            done: format!("{site} is not on demand; its commands start when you say"),
+                        },
+                    },
+                    PickFor::OnDemandIdle { site, command } => {
+                        let minutes = ON_DEMAND_IDLE[index.min(ON_DEMAND_IDLE.len() - 1)].0;
+                        let done = match minutes {
+                            0 => format!("{command} starts with the first visit to {site} and keeps running"),
+                            m => {
+                                format!("{command} starts with the first visit to {site} and stops after {m} min idle")
+                            }
+                        };
+                        Effect::Daemon { request: on_demand_set(&site, &command, Some(minutes)), done }
+                    }
                 })
             }
             _ => {
@@ -1282,6 +1384,74 @@ mod tests {
             App::site_menu(&app.sites[0]).iter().any(|(k, l)| *k == 'h' && l.contains("https://a-b.trycloudflare.com"))
         );
         assert_eq!(daemon_json(menu(&mut app, 'h'))["cmd"], "share_stop", "a shared site stops sharing");
+    }
+
+    /// D-054: a proxy site's command starts with its first visit; `z` picks it, then the idle time.
+    #[test]
+    fn on_demand_from_the_site_menu() {
+        let mut app = with_sites();
+        let blog = &mut app.sites[0];
+        blog["mode"] = json!("proxy");
+        blog["commands"] = json!([{"name": "dev", "state": "stopped"}, {"name": "queue", "state": "running"}]);
+        let entry = |app: &App| App::site_menu(&app.sites[0]).into_iter().find(|(k, _)| *k == 'z').map(|(_, l)| l);
+        assert_eq!(entry(&app).as_deref(), Some("On demand… (off)"));
+        let menu = |app: &mut App| {
+            app.handle_key(key(KeyCode::Enter));
+            app.handle_key(ch('z'))
+        };
+
+        menu(&mut app);
+        assert!(
+            matches!(&app.mode, Mode::Pick { purpose: PickFor::OnDemand { .. }, options, index: 2 }
+            if options == &["dev", "queue", "Off  ✓"]),
+            "Off is current: {:?}",
+            app.mode
+        );
+        app.handle_key(key(KeyCode::Up));
+        app.handle_key(key(KeyCode::Up));
+        app.handle_key(key(KeyCode::Enter));
+        assert!(
+            matches!(&app.mode, Mode::Pick { purpose: PickFor::OnDemandIdle { command, .. }, options, index: 1 }
+                if command == "dev" && options[1] == "After 10 min idle" && options[5] == "Never"),
+            "10 min by default: {:?}",
+            app.mode
+        );
+        app.handle_key(key(KeyCode::Down));
+        let v = daemon_json(app.handle_key(key(KeyCode::Enter)));
+        assert_eq!(
+            (v["cmd"].as_str(), v["site"].as_str(), v["on_demand"].as_str(), v["idle_stop"].as_u64()),
+            (Some("app_set"), Some("blog"), Some("dev"), Some(15))
+        );
+        assert_eq!(v["preset"], Value::Null, "nothing else changes");
+
+        // The daemon now reports it on demand and sleeping.
+        app.sites[0]["on_demand"] = json!({"command": "dev", "idle_stop": 15, "state": "sleeping"});
+        assert_eq!(entry(&app).as_deref(), Some("On demand… (dev, stops after 15 min idle)"));
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ch('g'));
+        assert!(matches!(&app.mode, Mode::Pick { options, .. }
+            if options == &["dev  ·  sleeping, on demand", "queue  ·  running"]));
+        app.mode = Mode::Normal;
+        menu(&mut app);
+        assert!(matches!(&app.mode, Mode::Pick { options, index: 0, .. } if options[0] == "dev  ✓"));
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(&app.mode, Mode::Pick { index: 2, .. }), "the current idle time is the default");
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(daemon_json(app.handle_key(key(KeyCode::Enter)))["idle_stop"], 0, "Never");
+
+        menu(&mut app);
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Down));
+        let v = daemon_json(app.handle_key(key(KeyCode::Enter)));
+        assert_eq!((v["on_demand"].as_str(), v["idle_stop"].as_u64()), (Some(""), None), "Off");
+
+        app.sites[0]["mode"] = json!("php");
+        assert_eq!(entry(&app), None, "only proxy sites");
+        app.sites[0]["mode"] = json!("proxy");
+        app.sites[0]["commands"] = json!([]);
+        assert_eq!(entry(&app), None, "and only with a command");
     }
 
     #[test]

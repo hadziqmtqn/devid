@@ -2,7 +2,7 @@
 
 > Scope: a proxy site's dev server starts with the first request and stops after it has been idle, so a dev server costs RAM only while it is used (D-054)
 > Verified against: 2026-11-21 (v0.16.1 installed on the owner's M1; nginx 1.30.7)
-> Status: accepted 2026-11-21 (D-054). O1 (spike) done; O2 shipped in 0.16.1; O3 merged (#110), see "O3 results"; O4 built on branch `feat/on-demand-caddy-apache`, see "O4 results".
+> Status: accepted 2026-11-21 (D-054). O1 (spike) done; O2 shipped in 0.16.1; O3 merged (#110), see "O3 results"; O4 merged (#111), see "O4 results"; O5 built on branch `feat/on-demand-clients`, see "O5 results".
 
 Today a proxy site's dev server runs from the moment the user presses Start until they press Stop (D-036). Nothing starts at login, so after a login or a crash every proxy site shows "Nothing answers on localhost:<port>" until its command is started by hand. Once started, a dev server keeps its RAM all day, even when nobody has opened the site for hours.
 
@@ -164,6 +164,9 @@ Planned before O4 with neither server installed; built and checked in O4 (see "O
   - The site row shows "Sleeping" or "On demand".
   - The menu bar counts sleeping sites apart from running commands.
 - **TUI:** the site menu gains `o` On demand… (pick the command or off, then the minutes).
+- **As built (O5):** the CLI was already done in O3. The app follows the board, with two changes from these lines:
+  - **One On demand card per site,** under Commands, instead of a switch on a command row: only one command per site can be on demand.
+  - **The TUI key is `z`,** since `o` already opens the site.
 
 ## Milestones
 
@@ -172,8 +175,8 @@ Planned before O4 with neither server installed; built and checked in O4 (see "O
 | O1 | **Spike** | the numbers and answers are in this doc (done 2026-11-21, see "O1 results") |
 | O2 | **Fix: no stale 502 after a dev server starts.** A failed request tries once more through a `max_fails=0` group (`@devid_again`) before "Nothing answers". A 0.16.x patch, independent of the rest | a dev server that comes up answers through `.test` on the next request, not 10 s later, checked by `scripts/smoke.sh` on both arches (shipped in 0.16.1, 2026-11-21) |
 | O3 | **Daemon and CLI on nginx:** the setting, the wake socket, starting and waiting, the Starting and failure pages, idle stop, status, `devid cmd on-demand` | on the owner's Mac, devid-site with `on_demand = "dev"` opens from sleep at `https://devid-site.test` with one slower load, stops after its idle time with no tab open, and keeps running while a tab is open (merged 2026-11-21, #110: checked with a test daemon and a copy, see "O3 results"; the check on the owner's own devid-site waits for an install) |
-| O4 | **Caddy and Apache:** spike, then the wake path on each, or "unavailable on this server" | the O3 check passes on both servers with a test daemon, or the docs and the app say why not (built 2026-11-21, branch `feat/on-demand-caddy-apache`: both wake it, see "O4 results") |
-| O5 | **App and TUI** | the owner turns on-demand on and off for devid-site in Devid.app and sees it sleep and wake |
+| O4 | **Caddy and Apache:** spike, then the wake path on each, or "unavailable on this server" | the O3 check passes on both servers with a test daemon, or the docs and the app say why not (merged 2026-11-21, #111: both wake it, see "O4 results") |
+| O5 | **App and TUI** | the owner turns on-demand on and off for devid-site in Devid.app and sees it sleep and wake (built 2026-11-22, branch `feat/on-demand-clients`: checked in the app's UI with a fake daemon, see "O5 results"; the owner's check needs an installed build, O6) |
 | O6 | **Docs and release 0.17.0:** devid-site guide, README, roadmap, timeline record | released and installed on the owner's Mac (the release waits for the owner's go-ahead) |
 
 Each milestone is one worktree and one PR. O2 can ship before the plan is accepted, since it fixes 0.16 behaviour on its own.
@@ -268,6 +271,24 @@ Built on branch `feat/on-demand-caddy-apache`; the record with every check is `d
   - **Apache stalled after a config change:** with a WebSocket open, the next request waited 89 s. It now waits 0.99 s (`ServerLimit 16`).
 - **The `detached-flush.js` leak, tested on the clone:** its `next.config.mjs` skips `createMDX()` when Next's telemetry flush loads it (`process.argv` ends with `detached-flush.js`). After every stop in these checks, no `detached-flush.js` was left from the clone. The same three lines would fix devid-site.
 - **Still open:** the check on the owner's own devid-site with an installed build, as for O3.
+
+## O5 results (2026-11-22)
+
+Built on branch `feat/on-demand-clients`; the record is `docs/implementation-timeline/gui/2026-11-22-on-demand-app-tui.md`.
+
+- **The board first:** "Devid — Dev servers on demand (Phase 10 O5)", an interactive copy of the Phase 8 board on the Devid Redesign canvas (page "Fase 10: on demand"). The owner approved it on 2026-11-22.
+- **App:**
+  - the On demand card (switch, command, idle time), with the site detail's explanations in tooltips (D-055);
+  - the "On demand" chip and sleeping state on command rows;
+  - the Sites table's "Sleeping" and "On demand";
+  - Open in browser in the site detail's toolbar.
+- **Menu bar:** "Commands · N running · M sleeping", and each sleeping site as "Open <site> (sleeping)", which opens it and so wakes it.
+- **TUI:** `z` On demand… in a proxy site's menu, "sleeping" in the Sites table and in Commands….
+- **Checked:** the real `app.js` and `app.css` in the app's browser, light and dark, with a fake `invoke` that answered with the owner's live `status` and `sites` replies plus on-demand states.
+  - **What happened:** opening a sleeping site woke it; the idle time, the switch (off and on), the command pick and Stop each sent the right `app_set` or `command_stop` and showed the right text.
+  - **What showed no card:** a PHP site. A proxy site without commands showed the switch disabled with a hint.
+  - **Tests:** unit tests for the TUI keys and rendering and for the menu bar's view.
+- **Not checked:** the real Devid.app against a daemon, and the menu bar's Open item by a click. Both come with the installed build in O6, where the owner checks devid-site.
 
 ## Not in this phase
 

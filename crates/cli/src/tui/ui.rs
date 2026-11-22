@@ -172,8 +172,18 @@ fn draw_sites(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
         let running = site["commands"].as_array().into_iter().flatten().filter(|c| c["state"] == "running").count();
-        if running > 0 {
-            serving.push(Span::styled(format!(" · ● {running} running"), ok(app)));
+        // D-054: an on-demand site sleeps until its next visit. The column is narrow: "on demand"
+        // shows when that command is the only one running (the commands pick marks it otherwise).
+        let on_demand = site["on_demand"]["state"].as_str();
+        match (running, on_demand) {
+            (0, _) => {}
+            (1, Some("running" | "starting")) => serving.push(Span::styled(" · ● on demand", ok(app))),
+            _ => serving.push(Span::styled(format!(" · ● {running} running"), ok(app))),
+        }
+        match on_demand {
+            Some("sleeping") => serving.push(Span::raw(" · sleeping")),
+            Some("failed") => serving.push(Span::styled(" · on demand, exited", warn(app))),
+            _ => {}
         }
         if site["share"]["url"].is_string() {
             serving.push(Span::styled(" · shared", ok(app)));
@@ -492,6 +502,8 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
                 PickFor::Command { site, .. } => format!("Start or stop a command of {site}"),
                 PickFor::Suggest { site, .. } => format!("Add a command to {site}"),
                 PickFor::RemoveCommand { site, .. } => format!("Remove which command of {site}?"),
+                PickFor::OnDemand { site, .. } => format!("Start which command with the first visit to {site}?"),
+                PickFor::OnDemandIdle { command, .. } => format!("Stop {command} when the site is idle"),
             };
             let mut lines: Vec<Line> = options
                 .iter()
