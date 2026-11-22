@@ -1,8 +1,8 @@
 # Phase 10 Plan: dev servers on demand
 
 > Scope: a proxy site's dev server starts with the first request and stops after it has been idle, so a dev server costs RAM only while it is used (D-054)
-> Verified against: 2026-11-21 (v0.16.1 installed on the owner's M1; nginx 1.30.7)
-> Status: accepted 2026-11-21 (D-054). O1 (spike) done; O2 shipped in 0.16.1; O3 merged (#110), see "O3 results"; O4 merged (#111), see "O4 results"; O5 merged (#113), see "O5 results"; O6: 0.17.0 prepared on branch `release/v0.17.0`, with the devid-site guide; the release waits for the owner.
+> Verified against: 2026-11-22 (v0.17.0 installed on the owner's M1; nginx 1.30.7)
+> Status: accepted 2026-11-21 (D-054). O1 (spike) done; O2 shipped in 0.16.1; O3 to O5 shipped in 0.17.0, released 2026-11-22 (see "O6 results"). O3 is checked on the owner's own devid-site; the owner's check in Devid.app (O5) is still open.
 
 Today a proxy site's dev server runs from the moment the user presses Start until they press Stop (D-036). Nothing starts at login, so after a login or a crash every proxy site shows "Nothing answers on localhost:<port>" until its command is started by hand. Once started, a dev server keeps its RAM all day, even when nobody has opened the site for hours.
 
@@ -174,10 +174,10 @@ Planned before O4 with neither server installed; built and checked in O4 (see "O
 |---|---|---|
 | O1 | **Spike** | the numbers and answers are in this doc (done 2026-11-21, see "O1 results") |
 | O2 | **Fix: no stale 502 after a dev server starts.** A failed request tries once more through a `max_fails=0` group (`@devid_again`) before "Nothing answers". A 0.16.x patch, independent of the rest | a dev server that comes up answers through `.test` on the next request, not 10 s later, checked by `scripts/smoke.sh` on both arches (shipped in 0.16.1, 2026-11-21) |
-| O3 | **Daemon and CLI on nginx:** the setting, the wake socket, starting and waiting, the Starting and failure pages, idle stop, status, `devid cmd on-demand` | on the owner's Mac, devid-site with `on_demand = "dev"` opens from sleep at `https://devid-site.test` with one slower load, stops after its idle time with no tab open, and keeps running while a tab is open (merged 2026-11-21, #110: checked with a test daemon and a copy, see "O3 results"; the check on the owner's own devid-site waits for an install) |
+| O3 | **Daemon and CLI on nginx:** the setting, the wake socket, starting and waiting, the Starting and failure pages, idle stop, status, `devid cmd on-demand` | on the owner's Mac, devid-site with `on_demand = "dev"` opens from sleep at `https://devid-site.test` with one slower load, stops after its idle time with no tab open, and keeps running while a tab is open (merged 2026-11-21, #110: checked with a test daemon and a copy, see "O3 results"; done 2026-11-22 on the owner's own devid-site with 0.17.0 installed, see "O6 results") |
 | O4 | **Caddy and Apache:** spike, then the wake path on each, or "unavailable on this server" | the O3 check passes on both servers with a test daemon, or the docs and the app say why not (merged 2026-11-21, #111: both wake it, see "O4 results") |
-| O5 | **App and TUI** | the owner turns on-demand on and off for devid-site in Devid.app and sees it sleep and wake (merged 2026-11-22, #113: checked in the app's UI with a fake daemon, see "O5 results"; the owner's check needs an installed build, O6) |
-| O6 | **Docs and release 0.17.0:** devid-site guide, README, roadmap, timeline record | released and installed on the owner's Mac (the release waits for the owner's go-ahead; prepared 2026-11-22: the version bump, README and roadmap on `release/v0.17.0`, the guide page on devid-site) |
+| O5 | **App and TUI** | the owner turns on-demand on and off for devid-site in Devid.app and sees it sleep and wake (merged 2026-11-22, #113: checked in the app's UI with a fake daemon, see "O5 results"; 0.17.0 is installed, and the owner's own check in Devid.app is still open) |
+| O6 | **Docs and release 0.17.0:** devid-site guide, README, roadmap, timeline record | released and installed on the owner's Mac (done 2026-11-22: #114 and devid-site#17, see "O6 results") |
 
 Each milestone is one worktree and one PR. O2 can ship before the plan is accepted, since it fixes 0.16 behaviour on its own.
 
@@ -289,6 +289,35 @@ Built on branch `feat/on-demand-clients`; the record is `docs/implementation-tim
   - **What showed no card:** a PHP site. A proxy site without commands showed the switch disabled with a hint.
   - **Tests:** unit tests for the TUI keys and rendering and for the menu bar's view.
 - **Not checked:** the real Devid.app against a daemon, and the menu bar's Open item by a click. Both come with the installed build in O6, where the owner checks devid-site.
+
+## O6 results (2026-11-22)
+
+- **Released:**
+  - #114 bumped the version (tag `v0.17.0` = fd0c4f9).
+  - Release run 44970753853 built and smoke-tested both arches, including the on-demand check on nginx, Caddy and Apache on x86_64.
+  - devid-binaries `devid-v0.17.0` is Latest, and its `checksums.txt` matches GitHub's digests.
+- **devid-site#17:**
+  - added the guide page "Dev servers on demand" and the roadmap entry for 0.17;
+  - added the `next.config.mjs` guard against the `detached-flush.js` leak (see "O4 results").
+- **Installed on the owner's M1:**
+  - The owner self-updated to 0.17.0. The CLI, the daemon and Devid.app report 0.17.0.
+  - `devid doctor` is all good.
+  - The 5 running commands started again after the update, and the 4 sites answered 200 on :443.
+  - The update's restart stopped devid-site's `next dev` without the guard and left one more `detached-flush.js`.
+- **The O3 check on the owner's own devid-site:**
+  - **Setup:** the checkout was pulled to the guard, then `devid cmd on-demand devid-site dev` was turned on, with the default idle time of 10 min.
+
+  | Step | Result |
+  |---|---|
+  | `devid cmd stop` | sleeping at once; no `next dev` and no new `detached-flush.js` left |
+  | First request from sleep (curl) | 200 in 1.6 s |
+  | First page load from sleep (browser) | first byte in 2.1 s, loaded in 2.3 s; under 5 s, so no Starting page |
+  | A browser tab open for 690 s | kept running; the tab's HMR WebSocket was one open connection to :4321 |
+  | Tab closed | stopped 621 s later (10 min plus up to one 30 s check), with no `detached-flush.js` left |
+
+  - The guard works: no stop or restart in these checks left a `detached-flush.js`.
+  - The five that earlier stops had left were killed.
+- **Still open:** the owner's own O5 check in Devid.app (turn on-demand off and on for devid-site, see it sleep and wake), and the menu bar's "Open devid-site (sleeping)" by a click.
 
 ## Not in this phase
 
