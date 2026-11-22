@@ -230,7 +230,7 @@ See ARCHITECTURE, "PHP runtime".
   - PHP and Composer use Devid's `cacert.pem` (system bundle plus the Devid CA).
   The user does nothing by hand.
 - **Known gaps on macOS (to document for users):**
-  - Firefox has its own store; on macOS it usually reads the keychain (`security.enterprise_roots.enabled`), not yet tested;
+  - Firefox has its own store; on macOS it usually reads the keychain (`security.enterprise_roots.enabled`), not yet tested; *(2026-11-22: Firefox 160 on macOS 26 trusts the Devid CA with default settings, checked with a fresh profile in Phase 11.)*
   - Node and Python use their own bundles and need `NODE_EXTRA_CA_CERTS` (or the Python equivalent) pointing at the Devid CA.
 - **Proposal for other OSes:** the CA and certificate code (rcgen) is portable and stays as is. The helper becomes one interface with one implementation per OS, the way mkcert does it:
 

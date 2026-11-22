@@ -38,10 +38,11 @@ On 2026-11-22 the owner picked this over Linux and Windows as the next work (the
 |---|---|---|
 | Chrome 158 | works: scripts, CSS, the HMR WebSocket; Fast Refresh keeps state (2 clicks stayed after an edit) | works, with HMR |
 | Safari 26.6 | blank page: all 4 requests to `http://[::1]:5190` blocked, with no script and no CSS | works: page, CSS, and HMR (`hot updated`, no reload) |
+| Firefox 160 (checked later the same day, on V2's build) | works, with HMR | works, with HMR |
 
 ### Findings
 
-- **Chrome and Safari differ:** Chrome counts loopback (`[::1]`, `127.0.0.1`, `localhost`) as trustworthy, so an HTTPS page may load scripts and a WebSocket from it. Safari blocks them as mixed content.
+- **Safari is the odd one:** Chrome and Firefox count loopback (`[::1]`, `127.0.0.1`, `localhost`) as trustworthy, so an HTTPS page may load scripts and a WebSocket from it. Safari blocks them as mixed content.
 - **CORS is already fine:** the plugin allows `*.test` origins and `APP_URL`.
 - **Two ways the plugin turns HTTPS on:**
   - **`detectTls`** looks only in Herd's and Valet's config folders (`~/Library/Application Support/Herd/config/valet`, `~/.config/valet`). Neither exists with Devid.
@@ -50,9 +51,7 @@ On 2026-11-22 the owner picked this over Linux and Windows as the next work (the
 - **APP_URL decides whether it works:**
   - With `APP_URL=https://vitespike.test` in `.env`, the two variables alone were enough. erdbpro-saas's `.env` already names `https://erdbpro-saas.test`.
   - With `APP_URL=http://localhost:8000` and the two variables, Vite does not start: `getaddrinfo ENOTFOUND localhost:8000`. So Devid must not set them when `APP_URL` names another host.
-- **Not checked:**
-  - Firefox, which is not installed on the owner's Mac.
-  - The app's built-in browser pane, which blocks `[::1]` requests itself (`ERR_BLOCKED_BY_CLIENT`) and so cannot stand in for a browser here.
+- **Not usable for this check:** the app's built-in browser pane, which blocks `[::1]` requests itself (`ERR_BLOCKED_BY_CLIENT`) and so cannot stand in for a browser.
 
 ## Design (D-056)
 
@@ -111,6 +110,9 @@ Built on branch `feat/vite-https`; the record is `docs/implementation-timeline/d
   - The note sits under the command in the Commands card.
   - With `tls: devid` there is no note, and the tooltip carries the sentence.
 - **Tests:** `vite_tls_from_env` (11 `.env` cases), `site_vars_port_and_vite_certificate` and the TUI's `vite_note_in_the_site_menu`. `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (132 tests) pass.
+- **Firefox 160:** installed by the owner afterwards and checked headless with a throwaway profile.
+  - With the default settings it trusts the Devid CA; devid-site, erd-builder-pro and erdbpro-saas load over HTTPS.
+  - The fixture worked in both modes, plain HTTP and HTTPS, with HMR. Only Safari needs Vite over HTTPS.
 - **Spike gotcha:** Safari pauses timers in a hidden tab, for example when the screen is locked. The fixture's probe now reports on events (Vite's socket, HMR, `load`) instead.
 
 ## Not in this phase
@@ -118,4 +120,3 @@ Built on branch `feat/vite-https`; the record is `docs/implementation-timeline/d
 - **Waking Vite on demand.** Phase 10's reason still holds: the browser talks to Vite directly, not through the site's web server.
 - **Sharing a site while Vite runs.** A visitor's page still points at the local Vite. Building the assets (`npm run build`) before sharing stays the way. A warning when `public/hot` exists is a possible follow-up.
 - **Vite without laravel-vite-plugin** (Symfony, WordPress), whose tools read their own settings.
-- **Firefox,** until it is checked.

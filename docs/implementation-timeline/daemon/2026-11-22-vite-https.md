@@ -40,4 +40,4 @@ laravel-vite-plugin writes Vite's address to `public/hot`, and with Devid that w
   - **`APP_URL=http://localhost:8000`, and an empty one:** Vite started on `http://[::1]:5190` as before, and `devid cmd` showed the note.
 - **The app's note and tooltip:** checked in the app's browser with the real `app.js`/`app.css` against the test daemon's replies.
 - **Tests:** `vite_tls_from_env`, `site_vars_port_and_vite_certificate` and `vite_note_in_the_site_menu`. `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (132 tests) pass.
-- **Firefox:** not checked; it is not installed.
+- **Firefox 160:** checked headless with a throwaway profile. It trusts the Devid CA with default settings, and the fixture worked with plain HTTP and with HTTPS, HMR included.
