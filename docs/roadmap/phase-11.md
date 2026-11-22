@@ -1,8 +1,8 @@
 # Phase 11 Plan: Laravel + Vite over HTTPS
 
 > Scope: a Laravel site's Vite dev server works over Devid's HTTPS in every browser, Safari included, without config (D-056)
-> Verified against: 2026-11-22 (v0.17.0 on the owner's M1; Vite 8.3.5, laravel-vite-plugin 3.1.3, Chrome 158, Safari 26.6)
-> Status: accepted 2026-11-22 (D-056). V1 (spike) done; V2 merged (#117), see "V2 results"; V3: 0.18.0 prepared on branch `release/v0.18.0`, with the devid-site guide page; the release waits for the owner.
+> Verified against: 2026-11-23 (v0.18.0 installed on the owner's M1; Vite 8.3.5, laravel-vite-plugin 3.1.3, Chrome 158, Firefox 160, Safari 26.6)
+> Status: done. Accepted 2026-11-22 (D-056); V1 (spike) done; V2 merged (#117), see "V2 results"; V2 shipped in 0.18.0, released 2026-11-22 and installed on the owner's M1 (V3, see "V3 results").
 
 A Laravel site runs `npm run dev` (Vite) next to its PHP. laravel-vite-plugin writes Vite's address to `public/hot`, for example `http://[::1]:5173`, and Laravel's `@vite` tags load the page's scripts and CSS from there. The page itself comes from `https://<site>.test`.
 
@@ -78,7 +78,7 @@ On 2026-11-22 the owner picked this over Linux and Windows as the next work (the
 |---|---|---|
 | V1 | **Spike** | the answers are in this doc (done 2026-11-22, see "V1 results") |
 | V2 | **Daemon and clients:** the two variables on a PHP site's commands; the `APP_URL` note in the CLI, the TUI and the app | the fixture's Vite, started from Devid, works in Safari and Chrome with HMR; a project whose `APP_URL` names another host starts Vite as before and shows the note; unit tests cover the `.env` cases (merged 2026-11-22, #117, see "V2 results") |
-| V3 | **Docs and release 0.18.0:** the guide's Laravel page, README, timeline record | released and installed on the owner's Mac (the release waits for the owner's go-ahead; prepared 2026-11-22: the version bump, README and roadmap on `release/v0.18.0`, the guide page `/docs/laravel-vite` on devid-site) |
+| V3 | **Docs and release 0.18.0:** the guide's Laravel page, README, timeline record | released and installed on the owner's Mac (done 2026-11-23: #118, #120 and devid-site#18, see "V3 results") |
 
 V2 is one PR. The note is a single line in the style of D-055, so no design board comes first unless the owner asks for one.
 
@@ -114,6 +114,22 @@ Merged on 2026-11-22 as #117 (7e86d25, and 101f4f5 for Firefox); the record is `
   - With the default settings it trusts the Devid CA; devid-site, erd-builder-pro and erdbpro-saas load over HTTPS.
   - The fixture worked in both modes, plain HTTP and HTTPS, with HMR. Only Safari needs Vite over HTTPS.
 - **Spike gotcha:** Safari pauses timers in a hidden tab, for example when the screen is locked. The fixture's probe now reports on events (Vite's socket, HMR, `load`) instead.
+
+## V3 results (2026-11-23)
+
+- **Released:**
+  - #118 bumped the version (tag `v0.18.0` = beef2ae).
+  - Release run 45028705253's first attempt failed on arm64 at the smoke check "front.test with no dev server", and x86_64 was cancelled, so nothing was published. Its FAIL line's own request showed the expected page.
+  - **Cause:** Devid reloads nginx with SIGHUP and replies at once. Until the old worker takes its signal, it still accepts requests with the previous config, which served the site as a static folder. The script had stopped waiting at the first matching answer. Nothing in 0.18.0's code touches this path.
+  - The second attempt (the failed jobs rerun, on the owner's go-ahead) passed every smoke section on both arches.
+  - devid-binaries `devid-v0.18.0` is Latest (published 2026-11-22 23:06 UTC), and its `checksums.txt` matches GitHub's digests.
+- **#120:** `scripts/smoke.sh` waits with `settle` until front.test gives the same kind of answer three times in a row, after `app set`, `cmd on-demand` and `server use`. A release dry run on the branch (45083158634) passed on both arches.
+- **devid-site#18:** the guide page "Laravel and Vite" (`/docs/laravel-vite`), links from Apps, Commands, Share and Troubleshooting, and the roadmap entry for 0.18.
+- **Installed on the owner's M1:**
+  - The owner upgraded to 0.18.0. The CLI, the daemon and Devid.app report 0.18.0, and `devid doctor` is all good.
+  - The 4 running commands started again after the update. erdbpro-saas, erd-builder-pro and erd-selfhost-local answered 200 on :443; devid-site was left asleep (on demand).
+  - The sites reply gives erdbpro-saas `{"tls": "devid"}`, and `devid cmd erdbpro-saas` prints `vite: started from Devid, it serves HTTPS with this site's certificate`, since its `.env` names `https://erdbpro-saas.test`.
+  - Vite was not started there: erdbpro-saas's `public/hot` would reach the owner's tunnel visitors. The browser checks of Safari, Chrome and Firefox stand from V2's fixture.
 
 ## Not in this phase
 

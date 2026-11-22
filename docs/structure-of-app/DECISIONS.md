@@ -963,4 +963,4 @@ See ARCHITECTURE, "PHP runtime".
   - **Certificates in `~/.config/valet`.** Other tools read that folder as "Valet is installed".
   - **Proxying Vite through the site's web server.** Vite's module paths and CSS URLs still point at Vite's own address, so the project's `base` would have to change.
 - **Plan:** `docs/roadmap/phase-11.md`.
-- **Status:** accepted by the owner on 2026-11-22 ("Ya, mulai V2"). V2 (the daemon and the clients) merged on 2026-11-22 (#117). It ships in 0.18.0.
+- **Status:** accepted by the owner on 2026-11-22 ("Ya, mulai V2"). V2 (the daemon and the clients) merged on 2026-11-22 (#117) and shipped in 0.18.0, released on 2026-11-22.
