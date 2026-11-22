@@ -2,7 +2,7 @@
 
 > Scope: a Laravel site's Vite dev server works over Devid's HTTPS in every browser, Safari included, without config (D-056)
 > Verified against: 2026-11-22 (v0.17.0 on the owner's M1; Vite 8.3.5, laravel-vite-plugin 3.1.3, Chrome 158, Safari 26.6)
-> Status: accepted 2026-11-22 (D-056). V1 (spike) done; V2 built on branch `feat/vite-https`, see "V2 results".
+> Status: accepted 2026-11-22 (D-056). V1 (spike) done; V2 merged (#117), see "V2 results"; V3: 0.18.0 prepared on branch `release/v0.18.0`, with the devid-site guide page; the release waits for the owner.
 
 A Laravel site runs `npm run dev` (Vite) next to its PHP. laravel-vite-plugin writes Vite's address to `public/hot`, for example `http://[::1]:5173`, and Laravel's `@vite` tags load the page's scripts and CSS from there. The page itself comes from `https://<site>.test`.
 
@@ -77,14 +77,14 @@ On 2026-11-22 the owner picked this over Linux and Windows as the next work (the
 | # | Milestone | Done when |
 |---|---|---|
 | V1 | **Spike** | the answers are in this doc (done 2026-11-22, see "V1 results") |
-| V2 | **Daemon and clients:** the two variables on a PHP site's commands; the `APP_URL` note in the CLI, the TUI and the app | the fixture's Vite, started from Devid, works in Safari and Chrome with HMR; a project whose `APP_URL` names another host starts Vite as before and shows the note; unit tests cover the `.env` cases (built 2026-11-22, see "V2 results") |
-| V3 | **Docs and release 0.18.0:** the guide's Laravel page, README, timeline record | released and installed on the owner's Mac |
+| V2 | **Daemon and clients:** the two variables on a PHP site's commands; the `APP_URL` note in the CLI, the TUI and the app | the fixture's Vite, started from Devid, works in Safari and Chrome with HMR; a project whose `APP_URL` names another host starts Vite as before and shows the note; unit tests cover the `.env` cases (merged 2026-11-22, #117, see "V2 results") |
+| V3 | **Docs and release 0.18.0:** the guide's Laravel page, README, timeline record | released and installed on the owner's Mac (the release waits for the owner's go-ahead; prepared 2026-11-22: the version bump, README and roadmap on `release/v0.18.0`, the guide page `/docs/laravel-vite` on devid-site) |
 
 V2 is one PR. The note is a single line in the style of D-055, so no design board comes first unless the owner asks for one.
 
 ## V2 results (2026-11-22)
 
-Built on branch `feat/vite-https`; the record is `docs/implementation-timeline/daemon/2026-11-22-vite-https.md`.
+Merged on 2026-11-22 as #117 (7e86d25, and 101f4f5 for Firefox); the record is `docs/implementation-timeline/daemon/2026-11-22-vite-https.md`.
 
 - **Daemon:**
   - `sites::vite_tls` reads `APP_URL`, `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` from `.env`, `.env.local`, `.env.development` and `.env.development.local`, later files winning, as Vite does. It does this only for a PHP site whose `package.json` lists laravel-vite-plugin.

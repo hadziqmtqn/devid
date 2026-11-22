@@ -4,7 +4,7 @@ Devid is a local development environment for Laravel, PHP and Node.js on Macs wi
 
 **Website and guide:** [devid.bekenweb.com](https://devid.bekenweb.com), with the user guide at [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs).
 
-> **Status:** v0.17, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
+> **Status:** v0.18, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
 
 ```sh
 devid park ~/Projects                  # every subfolder becomes <folder>.test
@@ -33,7 +33,7 @@ Homebrew moved Intel Macs to Tier 3: there are no more prebuilt packages, so Val
 - **Sites:** park `~/Projects` or link one folder. Laravel, WordPress, Symfony, CodeIgniter, Vite, Next.js and other projects are detected per folder and served to match, over HTTPS from a local CA limited to `.test`.
 - **PHP:** 8.3, 8.4 and 8.5 side by side, with a version pinned per site. Xdebug and pcov are included, off by default.
 - **Node.js:** Vite, Next.js, Nuxt and Node servers are proxied to your dev server, hot reload included. Node is yours, for example from nvm.
-- **Dev servers:** save a command per site once, such as `npm run dev` or a queue worker, then start and stop it from Devid. On demand, a site's first visit starts its dev server, and Devid stops it once the site has been idle, so it uses memory only while you work on it (`devid cmd on-demand`).
+- **Dev servers:** save a command per site once, such as `npm run dev` or a queue worker, then start and stop it from Devid. On demand, a site's first visit starts its dev server, and Devid stops it once the site has been idle, so it uses memory only while you work on it (`devid cmd on-demand`). A Laravel site's Vite, started from Devid, serves HTTPS with the site's certificate, so Safari loads its scripts and CSS too.
 - **Extensions:** intl, gd, redis and PDO are built in. apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole come prebuilt from Devid's catalog, with nothing to compile.
 - **Web server:** nginx by default, or Caddy or Apache. One runs at a time; switch with `devid server use`.
 - **Share:** `devid share` gives a site a temporary public link through a Cloudflare quick tunnel (it uses your own `cloudflared`, from Homebrew or `~/.local/bin`). `devid app port` serves a site on a local port for a tunnel of your own.
@@ -55,7 +55,7 @@ The CLI and TUI only:
 curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
 ```
 
-Devid is an open-source personal project, provided as is. The builds are ad-hoc signed and not notarized; the command installs them without a Gatekeeper prompt. Setup asks for your password once for `.test` DNS, Devid's CA and ports 80/443, and `devid uninstall` undoes it. The [guide](https://devid.bekenweb.com/docs) covers the install options, sites, dev servers on demand, PHP and extensions, web servers, Mail, the desktop app, the TUI, terminal commands, HTTPS, updates, troubleshooting and uninstall.
+Devid is an open-source personal project, provided as is. The builds are ad-hoc signed and not notarized; the command installs them without a Gatekeeper prompt. Setup asks for your password once for `.test` DNS, Devid's CA and ports 80/443, and `devid uninstall` undoes it. The [guide](https://devid.bekenweb.com/docs) covers the install options, sites, dev servers on demand, Laravel and Vite, PHP and extensions, web servers, Mail, the desktop app, the TUI, terminal commands, HTTPS, updates, troubleshooting and uninstall.
 
 ## Requirements
 
@@ -84,6 +84,7 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 - Mail: Devid runs Mailpit to catch the mail your apps send, with the inbox in the desktop app (D-049, D-051).
 - Terminal commands: Devid's PHP versions, nginx, Caddy and Mailpit by name from any shell, with Add to PATH in the app (D-053).
 - Dev servers on demand: a site's first visit starts its dev server, and Devid stops it when the site has been idle, on nginx, Caddy and Apache (D-054).
+- Laravel and Vite: Vite started from Devid serves HTTPS with the site's certificate, so a Laravel page works in Safari too, hot reload included (D-056).
 
 **Next**
 
