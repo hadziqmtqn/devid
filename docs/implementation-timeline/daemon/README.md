@@ -36,4 +36,4 @@
 | 2026-11-21 | [Dev servers on demand on nginx: the daemon and the CLI (Phase 10 O3, D-054, v0.17.0)](2026-11-21-on-demand-nginx.md) |
 | 2026-11-21 | [Dev servers on demand on Caddy and Apache (Phase 10 O4, D-054, v0.17.0)](2026-11-21-on-demand-caddy-apache.md) |
 | 2026-11-22 | [Fix: `devid … \| head -1` no longer panics on the broken pipe (v0.17.0)](2026-11-22-cli-broken-pipe.md) |
-| 2026-11-22 | [Vite over HTTPS for Laravel sites (Phase 11 V2, D-056)](2026-11-22-vite-https.md) |
+| 2026-11-22 | [Vite over HTTPS for Laravel sites (Phase 11 V2, D-056, v0.18.0)](2026-11-22-vite-https.md) |
