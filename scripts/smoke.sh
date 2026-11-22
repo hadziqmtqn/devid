@@ -61,8 +61,23 @@ echo "proxy smoke" > "$T/front/index.html"
 "$DEVID" link --path "$T/front" > /dev/null
 "$DEVID" app set front --mode proxy --upstream 28300 > /dev/null
 front() { curl -sk "$@" --resolve front.test:28443:127.0.0.1 https://front.test:28443/ 2> /dev/null || true; }
+# settle <glob> [curl args]: wait until front.test answers with a match three times in a row. Devid
+# reloads nginx with SIGHUP and replies at once, and until the old worker takes its signal it still
+# accepts requests with the previous config. One match is not enough: 0.18.0's first release run
+# failed when the next request got the old answer.
+settle() {
+  local pattern="$1" n=0
+  shift
+  for _ in $(seq 100); do
+    # shellcheck disable=SC2254 # the pattern is a glob on purpose
+    case "$(front "$@")" in $pattern) n=$((n + 1)) ;; *) n=0 ;; esac
+    [ "$n" -ge 3 ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
 down="Nothing answers on localhost:28300"
-for _ in $(seq 50); do front | grep -q "$down" && break; sleep 0.2; done
+settle "*$down*" || { echo "FAIL: front.test with no dev server: $(front)" >&2; exit 1; }
 for addr in 127.0.0.1 ::1; do
   front | grep -q "$down" || { echo "FAIL: front.test with no dev server: $(front)" >&2; exit 1; }
   if [ "$addr" = ::1 ]; then listen="[::1]:28300"; else listen="$addr:28300"; fi
@@ -87,9 +102,8 @@ php="$DEVID_HOME/php/8.5/bin/php"
 "$DEVID" cmd add front slow -- "echo compiling; sleep 8; exec $php -n -S 127.0.0.1:\$PORT -t ." > /dev/null
 "$DEVID" cmd add front broken -- 'echo smoke-broken; exit 3' > /dev/null
 "$DEVID" cmd on-demand front dev > /dev/null
-# nginx takes the new config a moment after the reply.
-for _ in $(seq 50); do [ "$(front)" = "proxy smoke" ] && break; sleep 0.2; done
-[ "$(front)" = "proxy smoke" ] || { echo "FAIL: on-demand front.test: $(front)" >&2; exit 1; }
+# nginx takes the new config a moment after the reply (see settle).
+settle "proxy smoke" || { echo "FAIL: on-demand front.test: $(front)" >&2; exit 1; }
 "$DEVID" cmd front | grep 'on demand: running' > /dev/null || { echo "FAIL: dev is not running on demand" >&2; "$DEVID" cmd front; exit 1; }
 grep -q 'started by a request to front.test' "$DEVID_HOME/log/app-front-dev.log" || { echo "FAIL: dev was not started by the request" >&2; exit 1; }
 page() { curl -sk -H 'Accept: text/html' -w '\n%{http_code}' --resolve front.test:28443:127.0.0.1 https://front.test:28443/ 2> /dev/null || true; }
@@ -111,8 +125,7 @@ case "$got" in *"exited with code 3"*smoke-broken*$'\n'500) ;; *) echo "FAIL: no
 for server in caddy apache; do
   "$DEVID" cmd stop front dev > /dev/null 2>&1 || true
   "$DEVID" server use "$server" > /dev/null
-  for _ in $(seq 50); do [ "$(front -L)" = "proxy smoke" ] && break; sleep 0.2; done
-  [ "$(front -L)" = "proxy smoke" ] || { echo "FAIL: on-demand front.test on $server: $(front -L)" >&2; exit 1; }
+  settle "proxy smoke" -L || { echo "FAIL: on-demand front.test on $server: $(front -L)" >&2; exit 1; }
   "$DEVID" cmd front | grep 'on demand: running' > /dev/null || { echo "FAIL: $server did not wake dev" >&2; "$DEVID" cmd front; exit 1; }
 done
 "$DEVID" server use nginx > /dev/null
