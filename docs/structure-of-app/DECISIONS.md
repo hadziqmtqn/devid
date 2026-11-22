@@ -917,7 +917,7 @@ See ARCHITECTURE, "PHP runtime".
   - A full HTTP proxy in the daemon.
   - Holding every request until the server answers, which shows a blank tab during a long build.
 - **Plan:** `docs/roadmap/phase-10.md`.
-- **Status:** accepted by the owner on 2026-11-21 ("Ya, mulai O3"). O2 shipped in 0.16.1; O3 (nginx) merged on 2026-11-21 (#110); O4 (Caddy and Apache) merged on 2026-11-21 (#111).
+- **Status:** accepted by the owner on 2026-11-21 ("Ya, mulai O3"). O2 shipped in 0.16.1; O3 (nginx) merged on 2026-11-21 (#110); O4 (Caddy and Apache) merged on 2026-11-21 (#111); O5 (the app and the TUI) merged on 2026-11-22 (#113). They ship in 0.17.0.
 - **Amended 2026-11-21 (O4, Caddy and Apache):** both wake on-demand sites, so on-demand is never "unavailable".
   - **Apache sends the client back.** Apache reaches the daemon through `ErrorDocument 503`, which loses the method and cannot send the request again itself. So the daemon answers `307` to the same URL, and the browser sends the request again, method and body included.
   - **No idle connections to an on-demand dev server.** Caddy and Apache would keep idle connections to the dev server open for reuse. The idle check counts an open connection as an open tab, so one held open by a dev server that never closes it kept the site awake. They now close each connection after its request (`keepalive off`, `disablereuse=On`), as nginx does.

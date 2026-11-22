@@ -33,6 +33,6 @@
 | 2026-11-16 | [The inbox in the daemon and the CLI: list, show, delete, save (Phase 9 M6a)](2026-11-16-mail-inbox-requests.md) |
 | 2026-11-17 | [Fix: Share and the inbox requests wait for a service that is still starting](2026-11-17-wait-for-a-starting-service.md) |
 | 2026-11-21 | [Fix: a proxy site answers as soon as its dev server starts, not 10 s later (Phase 10 O2, v0.16.1)](2026-11-21-nginx-stale-502.md) |
-| 2026-11-21 | [Dev servers on demand on nginx: the daemon and the CLI (Phase 10 O3, D-054)](2026-11-21-on-demand-nginx.md) |
-| 2026-11-21 | [Dev servers on demand on Caddy and Apache (Phase 10 O4, D-054)](2026-11-21-on-demand-caddy-apache.md) |
-| 2026-11-22 | [Fix: `devid … \| head -1` no longer panics on the broken pipe](2026-11-22-cli-broken-pipe.md) |
+| 2026-11-21 | [Dev servers on demand on nginx: the daemon and the CLI (Phase 10 O3, D-054, v0.17.0)](2026-11-21-on-demand-nginx.md) |
+| 2026-11-21 | [Dev servers on demand on Caddy and Apache (Phase 10 O4, D-054, v0.17.0)](2026-11-21-on-demand-caddy-apache.md) |
+| 2026-11-22 | [Fix: `devid … \| head -1` no longer panics on the broken pipe (v0.17.0)](2026-11-22-cli-broken-pipe.md) |
