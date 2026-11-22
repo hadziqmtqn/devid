@@ -199,6 +199,64 @@ fn env_port(dir: &Path) -> Option<u16> {
     })
 }
 
+/// D-056: how a Laravel site's Vite dev server gets HTTPS.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "tls", rename_all = "snake_case")]
+pub enum ViteTls {
+    /// Devid sets `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` on the site's commands.
+    Devid,
+    /// The project sets them itself.
+    Own,
+    /// `APP_URL` is missing or names another host, so Vite stays on plain HTTP, which Safari
+    /// blocks on an HTTPS page. `want` is the value that would fix it.
+    AppUrl { app_url: Option<String>, want: String },
+}
+
+/// The `.env` files Vite reads for `vite` (development mode), later ones winning.
+const VITE_ENV_FILES: [&str; 4] = [".env", ".env.local", ".env.development", ".env.development.local"];
+
+/// D-056: None unless `site` is a PHP site whose package.json uses laravel-vite-plugin. Reads
+/// only `APP_URL`, `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` from the files Vite reads.
+pub fn vite_tls(site: &Site) -> Option<ViteTls> {
+    if site.mode != Mode::Php
+        || !json_keys(&site.path.join("package.json"), &["dependencies", "devDependencies"])
+            .contains("laravel-vite-plugin")
+    {
+        return None;
+    }
+    let mut vars: BTreeMap<&str, String> = BTreeMap::new();
+    for file in VITE_ENV_FILES {
+        let Ok(text) = fs::read_to_string(site.path.join(file)) else { continue };
+        for line in text.lines() {
+            let line = line.trim();
+            let line = line.strip_prefix("export ").unwrap_or(line);
+            for key in ["APP_URL", "VITE_DEV_SERVER_KEY", "VITE_DEV_SERVER_CERT"] {
+                if let Some(value) = line.strip_prefix(key).and_then(|r| r.strip_prefix('=')) {
+                    vars.insert(key, value.trim().trim_matches(|c| c == '"' || c == '\'').to_string());
+                }
+            }
+        }
+    }
+    let set = |key: &str| vars.get(key).is_some_and(|v| !v.is_empty());
+    if set("VITE_DEV_SERVER_KEY") || set("VITE_DEV_SERVER_CERT") {
+        return Some(ViteTls::Own);
+    }
+    let app_url = vars.remove("APP_URL").filter(|v| !v.is_empty());
+    match app_url.as_deref().and_then(url_host) {
+        Some(host) if host.eq_ignore_ascii_case(&site.host) => Some(ViteTls::Devid),
+        _ => Some(ViteTls::AppUrl { app_url, want: format!("https://{}", site.host) }),
+    }
+}
+
+/// The host of an http(s) URL, port included, as JavaScript's `URL.host` gives it (the plugin
+/// listens on that host, so a port there makes Vite fail to start).
+fn url_host(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority.rsplit('@').next()?;
+    (!host.is_empty()).then_some(host)
+}
+
 /// A web root override must stay inside the project: relative, without `..`.
 /// Commands a site could run (D-036), as (name, shell line): package.json scripts named dev*,
 /// start* or watch*, with the package manager its lockfile shows, and Laravel's workers. Only
@@ -293,7 +351,8 @@ pub fn resolve(config: &Config) -> Vec<Site> {
                 (Mode::Php, None) if public.is_dir() => public,
                 (Mode::Php, None) => path.clone(),
             };
-            // `.env` is read only for proxy sites, and only its PORT line.
+            // Here `.env` is read only for proxy sites, and only its PORT line (`vite_tls` reads
+            // APP_URL for a PHP site's commands, D-056).
             let upstream = match mode {
                 Mode::Proxy => app.and_then(|a| a.upstream).or_else(|| env_port(&path)).unwrap_or(preset.upstream),
                 _ => app.and_then(|a| a.upstream).unwrap_or(preset.upstream),
@@ -588,6 +647,51 @@ mod tests {
         let lara: Vec<String> = suggest_commands(&root.join("p/lara"), "laravel").into_iter().map(|(n, _)| n).collect();
         assert_eq!(lara, ["queue", "schedule"], "reverb only when the app requires laravel/reverb");
         assert!(suggest_commands(&root.join("p/rust"), "php").is_empty());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn vite_tls_from_env() {
+        let root = std::env::temp_dir().join(format!("devid-vite-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let site = Site {
+            name: "shop".into(),
+            host: "shop.test".into(),
+            path: root.clone(),
+            mode: Mode::Php,
+            ..Site::default()
+        };
+        let write = |file: &str, text: &str| fs::write(root.join(file), text).unwrap();
+        let fix = |app_url: Option<&str>| ViteTls::AppUrl {
+            app_url: app_url.map(String::from),
+            want: "https://shop.test".into(),
+        };
+
+        write(".env", "APP_URL=https://shop.test\n");
+        assert_eq!(vite_tls(&site), None, "no package.json");
+        write("package.json", r#"{"devDependencies": {"vite": "^8"}}"#);
+        assert_eq!(vite_tls(&site), None, "Vite without laravel-vite-plugin");
+        write("package.json", r#"{"devDependencies": {"vite": "^8", "laravel-vite-plugin": "^3"}}"#);
+        assert_eq!(vite_tls(&site), Some(ViteTls::Devid));
+        assert_eq!(vite_tls(&Site { mode: Mode::Proxy, ..site.clone() }), None, "only PHP sites");
+
+        write(".env", "APP_NAME=Shop\nexport APP_URL=\"http://SHOP.test/\"\n");
+        assert_eq!(vite_tls(&site), Some(ViteTls::Devid), "quoted, export, http and case are fine");
+        write(".env", "APP_URL=http://localhost:8000\n");
+        assert_eq!(vite_tls(&site), Some(fix(Some("http://localhost:8000"))), "another host");
+        write(".env", "APP_URL=https://shop.test:8443\n");
+        assert_eq!(vite_tls(&site), Some(fix(Some("https://shop.test:8443"))), "a port: Vite would listen on it");
+        write(".env", "APP_NAME=Shop\nAPP_URL=\n");
+        assert_eq!(vite_tls(&site), Some(fix(None)), "empty");
+        fs::remove_file(root.join(".env")).unwrap();
+        assert_eq!(vite_tls(&site), Some(fix(None)), "no .env yet");
+
+        write(".env", "APP_URL=http://localhost\n");
+        write(".env.development", "APP_URL=https://shop.test\n");
+        assert_eq!(vite_tls(&site), Some(ViteTls::Devid), "a later file wins, as in Vite");
+        write(".env.local", "VITE_DEV_SERVER_CERT=/certs/shop.crt\n");
+        assert_eq!(vite_tls(&site), Some(ViteTls::Own), "the project's own certificate");
         fs::remove_dir_all(&root).unwrap();
     }
 }

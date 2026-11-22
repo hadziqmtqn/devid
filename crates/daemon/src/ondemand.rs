@@ -283,7 +283,14 @@ pub fn wake(
     };
     let result = {
         let _one = od.start.lock().unwrap();
-        commands.start(&site.name, &command.name, &command.run, &site.path, site.dev_port(), Some(&note))
+        commands.start(
+            &site.name,
+            &command.name,
+            &command.run,
+            &site.path,
+            &commands::site_vars(paths, site),
+            Some(&note),
+        )
     };
     if let Err(e) = result {
         return failed(site, command, &format!("could not start: {e}"), "", page);

@@ -1024,13 +1024,14 @@ function siteDetail(s) {
     h('h2.dv-h2', {}, 'Local port'), local,
     h('div.dv-head', {}, h('h2.dv-h2', {}, 'Commands ', h('span.dv-light', {}, '(' + cmds.length + ')'),
       tip('Commands run in ' + s.path + ' with your login shell\'s PATH (nvm, ~/.cargo/bin). They start when you press Start' +
-        (s.on_demand ? ', or with a visit when on demand,' : '') + ' and never at login. A command that asks a question stops with an error; its log says why.')),
+        (s.on_demand ? ', or with a visit when on demand,' : '') + ' and never at login. A command that asks a question stops with an error; its log says why.' +
+        (s.vite?.tls === 'devid' ? ' Vite started here gets this site\'s certificate, so it serves HTTPS and Safari loads it.' : ''))),
       h('div.dv-tools', {},
         cmds.length ? btn([icon('play'), 'Start all'], () => act('Starting…', () => req('command_start'), started), '', { disabled: !!S.busy || running === cmds.length }) : null,
         cmds.length ? btn([icon('stop'), 'Stop all'], () => act('Stopping…', () => req('command_stop'),
           (r) => r.stopped.length ? 'Stopped ' + andList(r.stopped) + sleepsNote(r, host) : 'Nothing was running'), '', { disabled: !!S.busy || !running }) : null,
         btn([icon('plus'), 'Add command'], () => addCommand(s), 'primary'))),
-    card(cmds.length ? cmds.map((c) => commandRow(c, req, s.on_demand, host)) : h('div.dv-empty', {}, h('div.dv-strong', {}, 'No commands yet'),
+    card(cmds.length ? [...cmds.map((c) => commandRow(c, req, s.on_demand, host)), viteNote(s)] : h('div.dv-empty', {}, h('div.dv-strong', {}, 'No commands yet'),
       h('div.dv-sub', {}, 'Add the commands you run in Terminal for this project, such as a dev server or a queue worker.'))),
     panel && h('div.dv-logbar', {}, h('span.dv-strong', {}, 'Log'),
       h('span.dv-sub.dv-mono.dv-grow.dv-ellipsis', {}, (st.home || '~/.devid') + '/log/' + panel.log),
@@ -1045,6 +1046,15 @@ function siteDetail(s) {
       'Links the app builds from APP_URL still point at ' + host + '.')),
     shareCard(s, host),
   ];
+}
+
+/** D-056: a Laravel site's Vite stays on plain HTTP, which Safari blocks, until APP_URL names the site.
+ *  It needs action, so it stays on the page (D-055). */
+function viteNote(s) {
+  if (s.vite?.tls !== 'app_url') return null;
+  const now = s.vite.app_url ? 'it is ' + s.vite.app_url : 'it is not set';
+  return row(h('div.dv-grow.dv-sub', { role: 'status' }, 'Vite runs on plain HTTP, which Safari blocks. Set ',
+    h('span.dv-mono', {}, 'APP_URL=' + s.vite.want), ' in .env (' + now + '), then restart Vite.'));
 }
 
 // ---------- dev servers on demand (Phase 10 O5, D-054) ----------

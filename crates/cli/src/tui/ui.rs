@@ -457,17 +457,23 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
                 Page::Php => format!("PHP {}", devid_daemon::php::SUPPORTED[(*row).min(2)]),
                 _ => app.sites.get(*row).map(|s| s["name"].as_str().unwrap_or("?").to_string()).unwrap_or_default(),
             };
-            let mut lines: Vec<Line> = items
-                .iter()
-                .enumerate()
-                .map(|(i, (k, label))| {
-                    let line = format!(" {k}  {label}");
-                    if i == *index { Line::styled(line, selected()) } else { Line::raw(line) }
-                })
-                .collect();
+            // D-056: a Laravel site whose Vite stays on plain HTTP says what to fix, first, so a
+            // short terminal cuts the hint rather than this.
+            let vite = (app.page == Page::Sites)
+                .then(|| app.sites.get(*row))
+                .flatten()
+                .filter(|site| site["vite"]["tls"] == "app_url")
+                .map(|site| format!(" Vite (Safari): set APP_URL={} in .env", s(&site["vite"]["want"])));
+            let width = vite.as_ref().map_or(52, |v| (v.chars().count() as u16 + 4).max(52));
+            let mut lines: Vec<Line> = vite.map(|v| Line::styled(v, warn(app))).into_iter().collect();
+            lines.extend(items.iter().enumerate().map(|(i, (k, label))| {
+                let line = format!(" {k}  {label}");
+                if i == *index { Line::styled(line, selected()) } else { Line::raw(line) }
+            }));
             lines.push(Line::raw(""));
             lines.push(hint(" ↑↓ enter, or the letter · esc close"));
-            popup(frame, 52, items.len() as u16 + 4, &name, lines);
+            let height = lines.len() as u16 + 2;
+            popup(frame, width, height, &name, lines);
         }
         Mode::Input { purpose, text } => {
             let (title, label, help) = match purpose {

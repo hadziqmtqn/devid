@@ -45,7 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
-| D-056 | 2026-11-22 | proposed (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
+| D-056 | 2026-11-22 | accepted 2026-11-22 (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
 | D-055 | 2026-11-22 | accepted 2026-11-22 (the owner's request) | The app's site detail puts explanations in tooltips: an (i) after each title, the notes under the cards in their headings' tooltips; what needs action stays on the page, and a status is said once |
 | D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040); amended 2026-11-21 (O4) and 2026-11-22 (O5) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, on nginx, Caddy and Apache |
 | D-053 | 2026-11-20 | accepted 2026-11-20 (amends D-014) | Devid's commands on PATH for every shell: `php8.3`–`php8.5`, `nginx`, `caddy` and `mailpit` join `php` and `composer` as shims, the PATH line goes into `~/.zshenv` and `~/.zshrc`, and Settings › Terminal, `devid path on/off` and the TUI add or remove it |
@@ -944,7 +944,7 @@ See ARCHITECTURE, "PHP runtime".
   - Esc closes it. A redraw from polling waits until it closes.
 - **Scope:** the site detail. Other pages keep their texts until there is a reason to change them.
 
-## D-056: Vite over HTTPS for Laravel sites (proposed 2026-11-22, Phase 11)
+## D-056: Vite over HTTPS for Laravel sites (proposed and accepted 2026-11-22, Phase 11)
 
 - **Context:**
   - laravel-vite-plugin writes Vite's address to `public/hot` (for example `http://[::1]:5173`), and Laravel's `@vite` tags load a page's scripts and CSS from it.
@@ -963,4 +963,4 @@ See ARCHITECTURE, "PHP runtime".
   - **Certificates in `~/.config/valet`.** Other tools read that folder as "Valet is installed".
   - **Proxying Vite through the site's web server.** Vite's module paths and CSS URLs still point at Vite's own address, so the project's `base` would have to change.
 - **Plan:** `docs/roadmap/phase-11.md`.
-- **Status:** proposed; waits for the owner.
+- **Status:** accepted by the owner on 2026-11-22 ("Ya, mulai V2"). V2 (the daemon and the clients) is built on branch `feat/vite-https`.
