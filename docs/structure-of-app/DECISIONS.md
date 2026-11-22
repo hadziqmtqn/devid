@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-21
+> Verified against: 2026-11-22
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-056 | 2026-11-22 | proposed (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
 | D-055 | 2026-11-22 | accepted 2026-11-22 (the owner's request) | The app's site detail puts explanations in tooltips: an (i) after each title, the notes under the cards in their headings' tooltips; what needs action stays on the page, and a status is said once |
 | D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040); amended 2026-11-21 (O4) and 2026-11-22 (O5) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, on nginx, Caddy and Apache |
 | D-053 | 2026-11-20 | accepted 2026-11-20 (amends D-014) | Devid's commands on PATH for every shell: `php8.3`–`php8.5`, `nginx`, `caddy` and `mailpit` join `php` and `composer` as shims, the PATH line goes into `~/.zshenv` and `~/.zshrc`, and Settings › Terminal, `devid path on/off` and the TUI add or remove it |
@@ -942,3 +943,24 @@ See ARCHITECTURE, "PHP runtime".
   - The (i) can be focused, and its label is the same text for screen readers.
   - Esc closes it. A redraw from polling waits until it closes.
 - **Scope:** the site detail. Other pages keep their texts until there is a reason to change them.
+
+## D-056: Vite over HTTPS for Laravel sites (proposed 2026-11-22, Phase 11)
+
+- **Context:**
+  - laravel-vite-plugin writes Vite's address to `public/hot` (for example `http://[::1]:5173`), and Laravel's `@vite` tags load a page's scripts and CSS from it.
+  - The plugin makes Vite serve HTTPS only with Herd's or Valet's certificates, found in their config folders, or with `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` plus `APP_URL`'s host.
+  - With Devid, Vite stays on plain HTTP. In the Phase 11 spike on 2026-11-22, Chrome 158 loaded it from `https://<site>.test`, since it trusts loopback. Safari 26.6 blocked all of it, so the page stayed blank.
+  - With the two variables set to the site's Devid certificate, both browsers worked, HMR included.
+  - With an `APP_URL` on another host, Vite did not start at all (`ENOTFOUND localhost:8000`).
+- **Proposal:**
+  - When a PHP site's command starts, the daemon reads the project's `.env` for the host of `APP_URL` and for `VITE_DEV_SERVER_KEY`/`VITE_DEV_SERVER_CERT`.
+  - If `APP_URL`'s host is the site's host, with no port, and the project sets neither variable, the command gets both. They point at the site's key and certificate in `~/.devid/certs`. Vite's `loadEnv` lets the process environment win over `.env`.
+  - If the project uses laravel-vite-plugin and `APP_URL` names another host, nothing is set. `devid cmd`, the TUI and the app show one note that says how to fix `APP_URL`; it stays on the page, since it needs action (D-055).
+  - Vite started in the user's own terminal is covered by the guide: two `.env` lines with absolute paths.
+- **What it changes:** a PHP site's command now reads its project's `.env`, but only for `APP_URL` and those two names. Before, `.env` was read only for proxy sites, and only for `PORT`.
+- **Not chosen:**
+  - **Setting `APP_URL` on the command too.** Laravel keeps an environment `APP_URL` over `.env`, so queue workers, and Vite plugins that call `artisan`, would see another `APP_URL` than the app.
+  - **Certificates in `~/.config/valet`.** Other tools read that folder as "Valet is installed".
+  - **Proxying Vite through the site's web server.** Vite's module paths and CSS URLs still point at Vite's own address, so the project's `base` would have to change.
+- **Plan:** `docs/roadmap/phase-11.md`.
+- **Status:** proposed; waits for the owner.
