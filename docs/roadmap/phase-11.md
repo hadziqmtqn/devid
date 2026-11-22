@@ -2,7 +2,7 @@
 
 > Scope: a Laravel site's Vite dev server works over Devid's HTTPS in every browser, Safari included, without config (D-056)
 > Verified against: 2026-11-22 (v0.17.0 on the owner's M1; Vite 8.3.5, laravel-vite-plugin 3.1.3, Chrome 158, Safari 26.6)
-> Status: proposed 2026-11-22. V1 (spike) done; the rest waits for the owner's go-ahead.
+> Status: accepted 2026-11-22 (D-056). V1 (spike) done; V2 built on branch `feat/vite-https`, see "V2 results".
 
 A Laravel site runs `npm run dev` (Vite) next to its PHP. laravel-vite-plugin writes Vite's address to `public/hot`, for example `http://[::1]:5173`, and Laravel's `@vite` tags load the page's scripts and CSS from there. The page itself comes from `https://<site>.test`.
 
@@ -78,10 +78,40 @@ On 2026-11-22 the owner picked this over Linux and Windows as the next work (the
 | # | Milestone | Done when |
 |---|---|---|
 | V1 | **Spike** | the answers are in this doc (done 2026-11-22, see "V1 results") |
-| V2 | **Daemon and clients:** the two variables on a PHP site's commands; the `APP_URL` note in the CLI, the TUI and the app | the fixture's Vite, started from Devid, works in Safari and Chrome with HMR; a project whose `APP_URL` names another host starts Vite as before and shows the note; unit tests cover the `.env` cases |
+| V2 | **Daemon and clients:** the two variables on a PHP site's commands; the `APP_URL` note in the CLI, the TUI and the app | the fixture's Vite, started from Devid, works in Safari and Chrome with HMR; a project whose `APP_URL` names another host starts Vite as before and shows the note; unit tests cover the `.env` cases (built 2026-11-22, see "V2 results") |
 | V3 | **Docs and release 0.18.0:** the guide's Laravel page, README, timeline record | released and installed on the owner's Mac |
 
 V2 is one PR. The note is a single line in the style of D-055, so no design board comes first unless the owner asks for one.
+
+## V2 results (2026-11-22)
+
+Built on branch `feat/vite-https`; the record is `docs/implementation-timeline/daemon/2026-11-22-vite-https.md`.
+
+- **Daemon:**
+  - `sites::vite_tls` reads `APP_URL`, `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` from `.env`, `.env.local`, `.env.development` and `.env.development.local`, later files winning, as Vite does. It does this only for a PHP site whose `package.json` lists laravel-vite-plugin.
+  - `commands::site_vars` gives every start path (Start, the update resume, on-demand) the same variables: `PORT` for a proxy site, and the two certificate variables when `vite_tls` says `devid` and both files exist.
+- **The sites reply:** each site has `vite` with one of these values:
+  - `null`;
+  - `{"tls": "devid"}`;
+  - `{"tls": "own"}`;
+  - `{"tls": "app_url", "app_url", "want"}`.
+- **Clients:**
+  - `devid cmd` prints `vite: started from Devid, it serves HTTPS with this site's certificate`, or the note `vite: plain HTTP, which Safari blocks; set APP_URL=https://<site>.test in .env (now …) and restart Vite`.
+  - The TUI's site menu shows the note on its first line, so a short terminal cuts the key hint first.
+  - The app's Commands card shows the note under the commands; with `devid`, the heading's tooltip mentions the certificate (D-055).
+- **Checks with the V1 fixture,** whose `npm run dev -- --port 5190 --strictPort` has no variables of its own, on the branch's daemon:
+
+  | `.env` | `public/hot` | Result |
+  |---|---|---|
+  | `APP_URL=https://vitespike.test` | `https://vitespike.test:5190` | Vite's process has both variables. Safari 26.6 loads the page and Vite connects, and an edit gives `hot updated: /resources/js/Counter.tsx`. Chrome 158 does the same, keeping state (1 click) |
+  | `APP_URL=http://localhost:8000` | `http://[::1]:5190` | Vite starts as before, with no variables. `devid cmd` shows the note with `(now http://localhost:8000)` |
+  | `APP_URL=` | `http://[::1]:5190` | the same, with `(not set)` |
+
+- **The app:** checked in the app's browser with the real `app.js` and `app.css` and the test daemon's `status` and `sites` replies.
+  - The note sits under the command in the Commands card.
+  - With `tls: devid` there is no note, and the tooltip carries the sentence.
+- **Tests:** `vite_tls_from_env` (11 `.env` cases), `site_vars_port_and_vite_certificate` and the TUI's `vite_note_in_the_site_menu`. `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` (132 tests) pass.
+- **Spike gotcha:** Safari pauses timers in a hidden tab, for example when the screen is locked. The fixture's probe now reports on events (Vite's socket, HMR, `load`) instead.
 
 ## Not in this phase
 

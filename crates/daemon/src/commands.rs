@@ -3,7 +3,11 @@
 //! environment, nvm's Node and Devid's `php` first on PATH, and its output goes straight to its
 //! log file. Nothing starts at login and nothing restarts by itself.
 
-use crate::{install, paths::Paths};
+use crate::{
+    ca, install,
+    paths::Paths,
+    sites::{self, Site, ViteTls},
+};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -57,6 +61,21 @@ pub fn valid_name(name: &str) -> bool {
 /// The daemon's own entry for a site's Share (D-037): a name no user command can have.
 pub const SHARE: &str = ".share";
 
+/// What Devid sets on a site's commands: `PORT` for a proxy site (D-041), and for a Laravel site
+/// whose `APP_URL` is on its host, Vite's certificate variables with the site's own (D-056).
+pub fn site_vars(paths: &Paths, site: &Site) -> Vec<(String, String)> {
+    let mut vars = Vec::new();
+    if let Some(port) = site.dev_port() {
+        vars.push(("PORT".to_string(), port.to_string()));
+    }
+    let (key, cert) = (ca::site_key(paths, &site.host), ca::site_cert(paths, &site.host));
+    if sites::vite_tls(site) == Some(ViteTls::Devid) && key.is_file() && cert.is_file() {
+        vars.push(("VITE_DEV_SERVER_KEY".to_string(), key.display().to_string()));
+        vars.push(("VITE_DEV_SERVER_CERT".to_string(), cert.display().to_string()));
+    }
+    vars
+}
+
 pub fn log_name(site: &str, name: &str) -> String {
     match name {
         SHARE => format!("share-{site}.log"),
@@ -87,16 +106,16 @@ impl Commands {
         self.paths.run_dir().join(format!("app-{site}-{name}.pid"))
     }
 
-    /// Start `run` in `dir` unless it is running already; returns its pid. `port` is set as `PORT`
-    /// (D-041; the command line's own `PORT=` still wins). `note` heads the log ("started again
-    /// after an update").
+    /// Start `run` in `dir` unless it is running already; returns its pid. `vars` are set on top
+    /// of the login environment (`site_vars`; the command line's own `PORT=` still wins). `note`
+    /// heads the log ("started again after an update").
     pub fn start(
         &self,
         site: &str,
         name: &str,
         run: &str,
         dir: &Path,
-        port: Option<u16>,
+        vars: &[(String, String)],
         note: Option<&str>,
     ) -> Result<u32, String> {
         let key = (site.to_string(), name.to_string());
@@ -132,10 +151,7 @@ impl Commands {
         }
         let shell = env.iter().find(|(k, _)| k == "SHELL").map_or_else(|| "/bin/zsh".into(), |(_, v)| v.clone());
         let mut cmd = Command::new(shell);
-        cmd.arg("-c").arg(run).current_dir(dir).env_clear().envs(env).stdin(Stdio::null());
-        if let Some(port) = port {
-            cmd.env("PORT", port.to_string());
-        }
+        cmd.arg("-c").arg(run).current_dir(dir).env_clear().envs(env).envs(vars.iter().cloned()).stdin(Stdio::null());
         cmd.stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log);
         // SAFETY: runs between fork and exec; setsid, sigemptyset and pthread_sigmask are
         // async-signal-safe.
@@ -499,5 +515,32 @@ mod tests {
         cap_log(&log).unwrap();
         assert_eq!(fs::read_to_string(&log).unwrap(), kept, "a small log stays");
         fs::remove_file(&log).unwrap();
+    }
+
+    #[test]
+    fn site_vars_port_and_vite_certificate() {
+        let root = std::env::temp_dir().join(format!("devid-site-vars-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (home, app) = (root.join("home"), root.join("app"));
+        fs::create_dir_all(home.join("certs")).unwrap();
+        fs::create_dir_all(&app).unwrap();
+        let paths = Paths { home: home.clone() };
+        let site = Site { name: "shop".into(), host: "shop.test".into(), path: app.clone(), ..Site::default() };
+        fs::write(app.join("package.json"), r#"{"devDependencies": {"laravel-vite-plugin": "^3"}}"#).unwrap();
+        fs::write(app.join(".env"), "APP_URL=https://shop.test\n").unwrap();
+        let names = |vars: Vec<(String, String)>| vars.into_iter().map(|(k, _)| k).collect::<Vec<_>>();
+
+        assert!(site_vars(&paths, &site).is_empty(), "no certificate yet");
+        fs::write(home.join("certs/shop.test.key"), "k").unwrap();
+        fs::write(home.join("certs/shop.test.crt"), "c").unwrap();
+        let vars = site_vars(&paths, &site);
+        assert_eq!(names(vars.clone()), ["VITE_DEV_SERVER_KEY", "VITE_DEV_SERVER_CERT"]);
+        assert_eq!(vars[1].1, home.join("certs/shop.test.crt").display().to_string());
+
+        let proxy = Site { mode: sites::Mode::Proxy, upstream: 4321, ..site.clone() };
+        assert_eq!(site_vars(&paths, &proxy), [("PORT".to_string(), "4321".to_string())]);
+        fs::write(app.join(".env"), "APP_URL=http://localhost:8000\n").unwrap();
+        assert!(site_vars(&paths, &site).is_empty(), "APP_URL on another host");
+        fs::remove_dir_all(&root).unwrap();
     }
 }

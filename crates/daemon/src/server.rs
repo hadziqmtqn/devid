@@ -979,6 +979,7 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                         "suggestions": suggestions,
                         "share": share_state(state, &s.name),
                         "on_demand": on_demand_state(state, &s),
+                        "vite": sites::vite_tls(&s),
                     })
                 })
                 .collect();
@@ -1244,10 +1245,14 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
             };
             let warning = port_warning(state, &site);
             let config = state.config.lock().unwrap().clone();
-            let port = sites::resolve(&config).into_iter().find(|s| s.name == site).and_then(|s| s.dev_port());
+            let vars = sites::resolve(&config)
+                .into_iter()
+                .find(|s| s.name == site)
+                .map(|s| commands::site_vars(&state.paths, &s))
+                .unwrap_or_default();
             let results: Vec<Value> = chosen
                 .iter()
-                .map(|c| match state.commands.start(&site, &c.name, &c.run, &dir, port, None) {
+                .map(|c| match state.commands.start(&site, &c.name, &c.run, &dir, &vars, None) {
                     Ok(pid) => {
                         json!({"name": c.name, "ok": true, "pid": pid, "log": commands::log_name(&site, &c.name)})
                     }
@@ -1302,7 +1307,7 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                 share_origin(local, standard_ports(&config, &state.paths), config.http_port),
                 config.tld
             );
-            state.commands.start(&site, commands::SHARE, &run, &dir, None, None)?;
+            state.commands.start(&site, commands::SHARE, &run, &dir, &[], None)?;
             // The URL shows in cloudflared's log a few seconds after it starts.
             let deadline = Instant::now() + std::time::Duration::from_secs(30);
             loop {
@@ -1397,7 +1402,7 @@ fn start_noted(state: &State, note: &Value) {
                 name,
                 &saved.run,
                 &s.path,
-                s.dev_port(),
+                &commands::site_vars(&state.paths, s),
                 Some("started again after Devid restarted for an update"),
             ) {
                 Ok(_) => eprintln!("devid: started {site} · {name} again after the restart"),

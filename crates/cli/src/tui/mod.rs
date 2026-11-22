@@ -345,6 +345,21 @@ mod tests {
         assert!(render(&a).0.contains("proxy :4321 · ● 2 running"));
     }
 
+    /// D-056: the site menu of a Laravel site whose Vite stays on plain HTTP says what to fix.
+    #[test]
+    fn vite_note_in_the_site_menu() {
+        use super::app::Mode;
+        let mut a = app(false);
+        a.focus = Focus::Page;
+        a.mode = Mode::Menu { row: 0, items: App::site_menu(&a.sites[0]), index: 0 };
+        assert!(!render(&a).0.contains("Vite"), "nothing for a site without the note");
+        a.sites[0]["vite"] =
+            json!({"tls": "app_url", "app_url": "http://localhost:8000", "want": "https://erdbpro-saas.test"});
+        assert!(render(&a).0.contains("Vite (Safari): set APP_URL=https://erdbpro-saas.test in .env"));
+        a.sites[0]["vite"] = json!({"tls": "devid"});
+        assert!(!render(&a).0.contains("Vite"), "nothing when Devid gives Vite its certificate");
+    }
+
     #[test]
     fn mail_page() {
         let mut a = app(false);

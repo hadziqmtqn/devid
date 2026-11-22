@@ -1007,6 +1007,17 @@ fn on_demand_text(od: &serde_json::Value) -> String {
     }
 }
 
+/// D-056: what to fix when a Laravel site's Vite stays on plain HTTP; None when nothing needs doing.
+pub(crate) fn vite_note(vite: &serde_json::Value) -> Option<String> {
+    (vite["tls"] == "app_url").then(|| {
+        let now = vite["app_url"].as_str().map_or_else(|| "not set".to_string(), |u| format!("now {u}"));
+        format!(
+            "plain HTTP, which Safari blocks; set APP_URL={} in .env ({now}) and restart Vite",
+            vite["want"].as_str().unwrap_or("https://<site>")
+        )
+    })
+}
+
 fn print_commands(s: &serde_json::Value) {
     let name = s["name"].as_str().unwrap_or("?");
     println!("{}", s["url"].as_str().unwrap_or("?"));
@@ -1031,6 +1042,11 @@ fn print_commands(s: &serde_json::Value) {
     }
     if let Some(c) = saved.first() {
         println!("  logs: `devid logs {} -f` (one per command)", c["log"].as_str().unwrap_or("?"));
+    }
+    match (s["vite"]["tls"].as_str(), vite_note(&s["vite"])) {
+        (_, Some(note)) => println!("  vite: {note}"),
+        (Some("devid"), None) => println!("  vite: started from Devid, it serves HTTPS with this site's certificate"),
+        _ => {}
     }
     if !suggestions.is_empty() {
         println!("  suggestions (`devid cmd add {name} <name> -- <command>`):");
