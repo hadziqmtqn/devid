@@ -49,6 +49,7 @@ const ICONS = {
   clip: '<svg viewBox="0 0 16 16"><path d="M10.5 5.5 6 10a1.4 1.4 0 0 0 2 2l5-5a2.8 2.8 0 0 0-4-4L4 8a4.2 4.2 0 0 0 6 6l3.5-3.5"/></svg>',
   file: '<svg viewBox="0 0 16 16"><path d="M4 1.8h5.2L12.5 5v9.2H4z"/><path d="M9 1.8V5h3.5"/></svg>',
   download: '<svg viewBox="0 0 16 16"><path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13.5h10"/></svg>',
+  info: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.3v4"/><circle class="f" cx="8" cy="5" r=".85"/></svg>',
 };
 
 const S = {
@@ -112,6 +113,39 @@ const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
 const card = (...rows) => h('div.dv-card', {}, rows);
 const row = (...kids) => h('div.dv-row', {}, kids);
 const text = (title, sub) => h('div.dv-grow', {}, h('div', {}, title), sub ? h('div.dv-sub', {}, sub) : null);
+
+// ---------- tooltips ----------
+
+/** An (i) that shows `about` on hover or keyboard focus. Fixed on the body, as the menus are, so no
+ *  card or scroll area clips it; screen readers read the same text from its label. */
+function tip(about) {
+  return h('span.dv-tip', { tabindex: '0', role: 'img', 'aria-label': about, 'data-tip': about,
+    onmouseenter: showTip, onmouseleave: hideTip, onfocus: showTip, onblur: hideTip,
+    onkeydown: (e) => { if (e.key === 'Escape') hideTip(); } }, icon('info'));
+}
+
+let tipOpen = null;
+function showTip(e) {
+  hideTip();
+  const a = e.currentTarget;
+  const t = h('div.dv-tooltip', { role: 'tooltip' }, a.dataset.tip);
+  document.body.append(t);
+  const r = a.getBoundingClientRect(), w = t.offsetWidth, ht = t.offsetHeight;
+  t.style.left = Math.round(Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8)) + 'px';
+  t.style.top = Math.round(r.top - ht - 6 >= 8 ? r.top - ht - 6 : r.bottom + 6) + 'px';
+  tipOpen = t;
+}
+/** Like closeMenu: a redraw that waited for the tooltip runs now. */
+function hideTip() {
+  if (!tipOpen) return;
+  tipOpen.remove();
+  tipOpen = null;
+  if (S.dirty) renderPage();
+}
+
+/** A row's title with its explanation in a tooltip; with `id`, the title labels that control. */
+const titled = (title, about, id) => h('div.dv-grow', {},
+  id ? h('label', { for: id }, title) : h('span', {}, title), about ? tip(about) : null);
 
 const portsText = (st) => st.standard_ports
   ? 'HTTP 80 → ' + st.http_port + ' · HTTPS 443 → ' + st.https_port + (st.standard_ports_ok === false ? ' · not working' : '')
@@ -253,7 +287,9 @@ const PAGES = {
   sites: { title: 'Sites', heading: () => openedSite() && siteHost(openedSite()),
     sub: () => openedSite() ? openedSite().path + ' · ' + openedSite().preset_label
       : 'Every site is served at https://name.' + (S.status?.tld || 'test') + ' with a local certificate.',
-    load: () => daemon({ cmd: 'sites' }), render: (d) => (openedSite() ? siteDetail(openedSite()) : sitesPage(d)), tools: () => S.site ? [] : [
+    load: () => daemon({ cmd: 'sites' }), render: (d) => (openedSite() ? siteDetail(openedSite()) : sitesPage(d)),
+    // A site's detail opens it, which is also what wakes an on-demand site (D-054).
+    tools: () => S.site ? [btn('Open in browser', () => openTarget({ what: 'site', name: S.site }), '', { title: 'Open ' + (openedSite()?.url || '') })] : [
       h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Link a site', title: 'Link a site', onclick: linkSite, disabled: !!S.busy }, icon('plus'))] },
   php: { title: 'PHP', sub: () => 'PHP 8.3, 8.4 and 8.5 side by side; pick one per site.',
     load: () => daemon({ cmd: 'php_list' }), render: phpPage },
@@ -398,11 +434,13 @@ function siteRow(s, installed, parked) {
         h('span.dv-chip.muted', {}, s.preset_label),
         s.mode === 'php' && s.isolated ? h('span.dv-chip.accent', { title: 'This site uses its own PHP version' }, 'Isolated') : null,
         s.mode !== 'php' || s.php_installed ? null : h('span.dv-chip.warn', {}, 'PHP ' + s.php + ' not installed'),
-        s.share?.url ? h('span.dv-chip.accent', { title: 'Shared at ' + s.share.url }, 'Shared') : null),
+        s.share?.url ? h('span.dv-chip.accent', { title: 'Shared at ' + s.share.url }, 'Shared') : null,
+        onDemandChip(s)),
       h('div.dv-sub.st-path', { title: s.path }, h('span.dv-mono.dv-ellipsis', {}, s.path), s.linked ? h('span.dv-nowrap', {}, ' · Linked') : null)),
     h('div.st-serve', {}, s.mode === 'php' ? php : h('span.st-label', {}, s.mode === 'proxy' ? ['Proxy ', h('span.dv-mono', {}, ':' + s.upstream)] : 'Static')),
     h('div.st-proc', {},
-      running ? h('span.st-run', {}, h('i', { 'aria-hidden': 'true' }), running + ' running') : h('span.dv-sub', {}, 'Not running'),
+      running ? h('span.st-run', {}, h('i', { 'aria-hidden': 'true' }), running + ' running')
+        : h('span.dv-sub', {}, s.on_demand?.state === 'sleeping' ? 'Sleeping' : 'Not running'),
       s.port ? h('span.dv-sub.dv-mono' + (s.port_busy ? '.st-busy' : ''), { title: s.port_busy ? 'Port ' + s.port + ' is in use by ' + s.port_busy
         : 'Also served on http://127.0.0.1:' + s.port }, 'on :' + s.port + (s.port_busy ? ' · busy' : '')) : null),
     h('div.st-acts', {},
@@ -925,42 +963,44 @@ function siteDetail(s) {
   const versions = installed.includes(s.php) ? installed : [...installed, s.php];
   const port = (p, busy, done) => act(busy, () => daemon({ cmd: 'app_port', ...site, port: p }), done);
 
+  // Explanations sit in tooltips (the owner, 2026-11-22); what needs action, such as a missing PHP
+  // or a busy port, stays on the page.
   const app = card(
-    row(text('Type', typeSet ? 'Set by you' + (s.detected ? '; detected: ' + presetLabel(s.detected) : '; nothing detected')
-      : s.detected ? 'Detected from the project files' : 'Nothing detected; served as PHP, as before'),
+    row(titled('Type', typeSet ? 'Set by you' + (s.detected ? '; detected: ' + presetLabel(s.detected) + '.' : '; nothing detected.')
+      : s.detected ? 'Detected from the project files.' : 'Nothing detected; served as PHP, as before.'),
     typeSet ? btn('Use detected', () => act('Saving…', () => daemon({ cmd: 'app_reset', ...site }), host + ' follows detection again'), 'ghost') : null,
     dropdown('Type', s.preset, PRESETS.map(([key, name]) => ({ value: key, label: name + (key === s.detected ? ' (detected)' : '') })),
       (v) => set({ preset: v }, host + ' is now ' + presetLabel(v)))),
-    row(text('Serve as', { php: '.php files go to php-fpm; other files are served as they are.',
+    row(titled('Serve as', { php: '.php files go to php-fpm; other files are served as they are.',
       static: 'Files only, from the web root; no PHP runs.',
-      proxy: 'Every request goes to the dev server on localhost:' + s.upstream + ', WebSockets included.' }[s.mode]),
+      proxy: 'Every request goes to the dev server, WebSockets included.' }[s.mode] +
+      ' In every mode, https://' + host + ' keeps its certificate from the Devid CA.'),
     h('div.dv-seg', { role: 'group', 'aria-label': 'Serve as' }, Object.entries(MODES).map(([m, name]) =>
       h('button', { type: 'button', 'aria-pressed': String(s.mode === m), disabled: !!S.busy,
         onclick: () => { if (s.mode !== m) set({ mode: m }, host + ' is served as ' + name); } }, name)))),
-    s.mode === 'php' && row(text('PHP version', !s.php_installed ? 'PHP ' + s.php + ' is not installed; install it on the PHP page.'
-      : s.isolated ? 'This site\'s own version' : 'The default version'),
+    s.mode === 'php' && row(s.php_installed ? titled('PHP version', s.isolated ? 'This site\'s own version.' : 'The default version.')
+      : text('PHP version', 'PHP ' + s.php + ' is not installed; install it on the PHP page.'),
       dropdown('PHP version for ' + host, s.php, versions.map((v) => ({ value: v, label: 'PHP ' + v + (v === st.default_php ? ' (default)' : '') })),
         (version) => act('Switching…', () => daemon({ cmd: 'isolate', version, ...site }), host + ' now uses PHP ' + version))),
-    s.mode !== 'proxy' && row(label('app-root', 'Web root', 'Inside the project folder; "." is the folder itself.'),
+    s.mode !== 'proxy' && row(titled('Web root', 'Inside the project folder; "." is the folder itself.', 'app-root'),
       field('app-root', rel, (v) => { if (v && v !== rel) set({ root: v }, 'Web root: ' + v); }, 'dv-mono')),
-    s.mode === 'static' && row(label('app-spa', 'Single-page app', 'Paths with no file load index.html, for client-side routing.'),
+    s.mode === 'static' && row(titled('Single-page app', 'Paths with no file load index.html, for client-side routing.', 'app-spa'),
       h('input.dv-switch', { id: 'app-spa', type: 'checkbox', role: 'switch', checked: !!s.spa, disabled: !!S.busy,
         onchange: (e) => set({ spa: e.target.checked }, e.target.checked ? 'Single-page app on' : 'Single-page app off') })),
-    s.mode === 'proxy' && row(label('app-up', 'Forward to', 'The port the dev server listens on. Commands get it as PORT.'), h('span.dv-sub.dv-mono', {}, 'localhost:'),
+    s.mode === 'proxy' && row(titled('Forward to', 'The port the dev server listens on. Commands get it as PORT.', 'app-up'), h('span.dv-sub.dv-mono', {}, 'localhost:'),
       field('app-up', String(s.upstream), (v) => asPort(v, (n) => { if (n !== s.upstream) set({ upstream: n }, 'Forwarding to localhost:' + n); }),
         'dv-mono.port', { inputmode: 'numeric' })));
 
   const local = card(
-    row(label('app-porton', 'Also serve on a local port', 'Plain HTTP on 127.0.0.1, for a tunnel or a tool that needs a fixed port.'),
+    row(titled('Also serve on a local port', 'Plain HTTP on 127.0.0.1, for a tunnel or a tool that needs a fixed port.', 'app-porton'),
       h('input.dv-switch', { id: 'app-porton', type: 'checkbox', role: 'switch', checked: !!s.port, disabled: !!S.busy,
         onchange: (e) => port(e.target.checked ? null : 0, 'Saving…', (r) => r.port ? host + ' is also served on 127.0.0.1:' + r.port : 'Local port off') })),
-    s.port && row(label('app-port', 'Port', 'http://127.0.0.1:' + s.port),
+    s.port && row(titled('Port', 'http://127.0.0.1:' + s.port, 'app-port'),
       s.port_busy ? h('span.dv-chip.warn', {}, 'In use') : h('span.dv-chip.ok', {}, 'Serving'),
       field('app-port', String(s.port), (v) => asPort(v, (n) => { if (n !== s.port) port(n, 'Saving…', host + ' is also served on 127.0.0.1:' + n); }),
         'dv-mono.port', { inputmode: 'numeric' })),
-    s.port_busy && row(h('div.dv-grow.dv-sub', { role: 'status' }, s.port_busy + ' is listening on ' + s.port +
-      '. Devid leaves the port out until it is free; your other sites are not affected.'),
-    btn('Check again', () => port(null, 'Checking…', 'Checked port ' + s.port))));
+    s.port_busy && row(h('div.dv-grow.dv-sub', { role: 'status' }, 'In use by ' + s.port_busy + '. Devid serves it once the port is free.'),
+      btn('Check again', () => port(null, 'Checking…', 'Checked port ' + s.port))));
 
   const cmds = s.commands || [];
   const running = cmds.filter((c) => c.state === 'running').length;
@@ -981,26 +1021,77 @@ function siteDetail(s) {
   }
   return [
     h('h2.dv-h2', {}, 'App'), app,
-    h('p.dv-sub.dv-note', {}, 'https://' + host + ' keeps its certificate from the Devid CA in every mode.'),
     h('h2.dv-h2', {}, 'Local port'), local,
-    h('div.dv-head', {}, h('h2.dv-h2', {}, 'Commands ', h('span.dv-light', {}, '(' + cmds.length + ')')),
+    h('div.dv-head', {}, h('h2.dv-h2', {}, 'Commands ', h('span.dv-light', {}, '(' + cmds.length + ')'),
+      tip('Commands run in ' + s.path + ' with your login shell\'s PATH (nvm, ~/.cargo/bin). They start when you press Start' +
+        (s.on_demand ? ', or with a visit when on demand,' : '') + ' and never at login. A command that asks a question stops with an error; its log says why.')),
       h('div.dv-tools', {},
         cmds.length ? btn([icon('play'), 'Start all'], () => act('Starting…', () => req('command_start'), started), '', { disabled: !!S.busy || running === cmds.length }) : null,
         cmds.length ? btn([icon('stop'), 'Stop all'], () => act('Stopping…', () => req('command_stop'),
-          (r) => r.stopped.length ? 'Stopped ' + andList(r.stopped) : 'Nothing was running'), '', { disabled: !!S.busy || !running }) : null,
+          (r) => r.stopped.length ? 'Stopped ' + andList(r.stopped) + sleepsNote(r, host) : 'Nothing was running'), '', { disabled: !!S.busy || !running }) : null,
         btn([icon('plus'), 'Add command'], () => addCommand(s), 'primary'))),
-    card(cmds.length ? cmds.map((c) => commandRow(c, req)) : h('div.dv-empty', {}, h('div.dv-strong', {}, 'No commands yet'),
+    card(cmds.length ? cmds.map((c) => commandRow(c, req, s.on_demand, host)) : h('div.dv-empty', {}, h('div.dv-strong', {}, 'No commands yet'),
       h('div.dv-sub', {}, 'Add the commands you run in Terminal for this project, such as a dev server or a queue worker.'))),
     panel && h('div.dv-logbar', {}, h('span.dv-strong', {}, 'Log'),
       h('span.dv-sub.dv-mono.dv-grow.dv-ellipsis', {}, (st.home || '~/.devid') + '/log/' + panel.log),
       btn('Hide', () => { S.logPanel = null; renderPage(); }, 'ghost')),
     box,
-    h('p.dv-sub.dv-note', {}, 'Commands run in ', h('span.dv-mono', {}, s.path), ' with your login shell\'s PATH (nvm, ~/.cargo/bin). ' +
-      'They start only when you press Start, never at login. A command that asks a question stops with an error; its log says why.'),
-    h('h2.dv-h2', {}, 'Share'), shareCard(s, host),
-    h('p.dv-sub.dv-note', {}, 'Uses the cloudflared already on this Mac. Your own Cloudflare tunnel is never touched. ' +
-      'Links the app builds from APP_URL still point at ' + host + '.'),
+    ...(s.mode === 'proxy' ? [
+      h('h2.dv-h2', {}, 'On demand', tip('Devid starts a command when someone opens ' + host + ' and stops it when the site has been idle; ' +
+        'while it sleeps it uses no memory. A page still waiting after 5 s shows a Starting page with the log. With nginx, Caddy and Apache.')),
+      onDemandCard(s, host, set, cmds),
+    ] : []),
+    h('h2.dv-h2', {}, 'Share', tip('Uses the cloudflared already on this Mac; your own Cloudflare tunnel is never touched. ' +
+      'Links the app builds from APP_URL still point at ' + host + '.')),
+    shareCard(s, host),
   ];
+}
+
+// ---------- dev servers on demand (Phase 10 O5, D-054) ----------
+
+/** The idle times offered for an on-demand command, in minutes; 0 never stops it. */
+const IDLE_STOPS = [[5, 'After 5 min'], [10, 'After 10 min'], [15, 'After 15 min'], [30, 'After 30 min'], [60, 'After 1 hour'], [0, 'Never']];
+
+const onDemandTitle = (od) => od.command + ' starts with the first visit' + (od.idle_stop ? ' and stops after ' + od.idle_stop + ' min idle' : '');
+
+/** The Sites table's chip: "Sleeping" while the command waits for a visit, "On demand" while it runs. */
+function onDemandChip(s) {
+  const od = s.on_demand;
+  if (!od) return null;
+  const title = onDemandTitle(od);
+  return od.state === 'sleeping' ? h('span.dv-chip.muted', { title }, 'Sleeping')
+    : od.state === 'failed' ? h('span.dv-chip.warn', { title: od.command + ' exited; the next visit starts it again' }, 'On demand')
+    : h('span.dv-chip.accent', { title }, 'On demand');
+}
+
+/** "; dev sleeps until the next visit to x.test" for the on-demand commands a stop put to sleep. */
+const sleepsNote = (r, host) => r.sleeping?.length ? '; ' + andList(r.sleeping) + ' sleeps until the next visit to ' + host : '';
+
+/** The site detail's On demand card (the board "Devid — Dev servers on demand (Phase 10 O5)"): a switch,
+ *  then which command and how long it may be idle. The command's own row says whether it sleeps or
+ *  runs, and the heading's tooltip says what on demand does, so the card does not repeat either. */
+function onDemandCard(s, host, set, cmds) {
+  const od = s.on_demand;
+  const starts = (name, minutes) => name + ' starts with the first visit to ' + host + (minutes ? ' and stops after ' + minutes + ' min idle' : ' and keeps running');
+  const toggle = h('input.dv-switch', { id: 'od-on', type: 'checkbox', role: 'switch', checked: !!od, disabled: !!S.busy || !cmds.length,
+    onchange: (e) => e.target.checked
+      ? set({ on_demand: cmds[0].name, idle_stop: 10 }, starts(cmds[0].name, 10))
+      : set({ on_demand: '' }, host + ' is not on demand; its commands start when you press Start') });
+  // Without a command the switch is off and disabled, so the reason stays on the page.
+  const sw = row(cmds.length ? titled('Start on the first visit', null, 'od-on')
+    : h('div.dv-grow', {}, h('label', { for: 'od-on' }, 'Start on the first visit'), h('div.dv-sub', {}, 'Add the command that starts the dev server first.')), toggle);
+  if (!od) return card(sw);
+  // A time set from the CLI that is not in the list still shows, before Never.
+  const stops = IDLE_STOPS.some(([m]) => m === od.idle_stop) ? IDLE_STOPS
+    : [...IDLE_STOPS.slice(0, -1), [od.idle_stop, 'After ' + od.idle_stop + ' min'], IDLE_STOPS[IDLE_STOPS.length - 1]];
+  return card(sw,
+    row(titled('Command', 'The first request waits for it; later ones go straight to the dev server.'),
+      h('div.dv-seg', { role: 'group', 'aria-label': 'Command that starts with the first visit' }, cmds.map((x) =>
+        h('button.dv-mono', { type: 'button', 'aria-pressed': String(x.name === od.command), disabled: !!S.busy,
+          onclick: () => { if (x.name !== od.command) set({ on_demand: x.name, idle_stop: od.idle_stop }, starts(x.name, od.idle_stop)); } }, x.name)))),
+    row(titled('Stop when idle', 'No requests and no open tab; a tab\'s hot reload counts as one.'),
+      dropdown('Stop ' + od.command + ' when idle', String(od.idle_stop), stops.map(([m, l]) => ({ value: String(m), label: l })),
+        (v) => set({ on_demand: od.command, idle_stop: Number(v) }, starts(od.command, Number(v))))));
 }
 
 /** Share (D-037): a temporary trycloudflare.com link to the site, until Stop sharing. */
@@ -1009,7 +1100,7 @@ function shareCard(s, host) {
   const on = sh && (sh.state === 'running' || sh.state === 'starting');
   const req = (cmd) => daemon({ cmd, site: s.name, cwd: '/' });
   return card(
-    row(text('Share on the internet', 'A temporary trycloudflare.com link to ' + host + '. Anyone with the link can open the site until you stop sharing.'),
+    row(titled('Share on the internet', 'A temporary trycloudflare.com link to ' + host + '; anyone with it can open the site until you stop sharing.'),
       sh?.state === 'starting' ? h('span.dv-sub', { role: 'status' }, 'Connecting…') : null,
       on ? btn('Stop sharing', () => act('Stopping…', () => req('share_stop'), 'Stopped sharing ' + host))
         : busyBtn('share', 'Share', () => act('Starting cloudflared…', () => req('share_start'),
@@ -1021,21 +1112,28 @@ function shareCard(s, host) {
         (r) => r.url ? 'Shared at ' + r.url : 'cloudflared is still connecting; the link shows here', 'share'))));
 }
 
-function commandRow(c, req) {
+/** `od` is the site's `on_demand` (D-054): its command sleeps when stopped and shows how long it is idle. */
+function commandRow(c, req, od, host) {
   const on = c.state === 'running';
   const failed = c.state === 'exited' && c.code !== 0;
-  const state = on ? 'Running · pid ' + c.pid
-    : c.state === 'exited' ? (c.code != null ? 'Exited with code ' + c.code : 'Ended by signal ' + c.signal) : 'Stopped';
+  const isOd = od?.command === c.name;
+  const idle = isOd && on && od.idle_for != null ? ' · idle ' + Math.floor(od.idle_for / 60) + ' min' : '';
+  // On demand, "starting" means it runs but its port does not accept yet; the chip's tooltip says when it starts and stops.
+  const state = on ? (isOd && od.state === 'starting' ? 'Starting' : 'Running') + ' · pid ' + c.pid + idle
+    : c.state === 'exited' ? (c.code != null ? 'Exited with code ' + c.code : 'Ended by signal ' + c.signal)
+    : isOd ? 'Sleeping' : 'Stopped';
   const logOpen = S.logPanel === c.name;
   const toggleLog = () => { S.logPanel = logOpen ? null : c.name; renderPage(); };
   const start = () => act('Starting ' + c.name + '…', () => req('command_start', c.name), (r) => {
     if (r.warning) toast(r.warning, true);
     return 'Started ' + c.name;
   });
-  const stop = () => act('Stopping ' + c.name + '…', () => req('command_stop', c.name), 'Stopped ' + c.name);
+  const stop = () => act('Stopping ' + c.name + '…', () => req('command_stop', c.name), (r) => 'Stopped ' + c.name + sleepsNote(r, host));
   return row(h('span.dv-dot' + (on ? '.ok' : failed ? '.bad' : ''), { 'aria-hidden': 'true' }),
     h('div.dv-grow', {},
-      h('div.dv-line', {}, h('span.dv-mono.dv-strong', {}, c.name), h('span.dv-sub', { role: 'status' }, state)),
+      h('div.dv-line', {}, h('span.dv-mono.dv-strong', {}, c.name),
+        isOd ? h('span.dv-chip.accent', { title: onDemandTitle(od) }, 'On demand') : null,
+        h('span.dv-sub', { role: 'status' }, state)),
       h('div.dv-sub.dv-mono.dv-ellipsis', {}, c.run)),
     on ? btn([icon('stop'), 'Stop'], stop, '', { 'aria-label': 'Stop ' + c.name })
       : btn([icon('play'), 'Start'], start, '', { 'aria-label': 'Start ' + c.name }),
@@ -1924,7 +2022,7 @@ function renderChrome() {
 function renderPage() {
   // A page that can update in place does: the inbox keeps its open email's frame.
   if (S.status && S.data[S.page] && PAGES[S.page].patch?.(S.data[S.page])) return;
-  if (menuOpen || (!$('overlay').hidden && !S.ext)) { S.dirty = true; return; }
+  if (menuOpen || tipOpen || (!$('overlay').hidden && !S.ext)) { S.dirty = true; return; }
   // Typing in a field: redraw once it loses focus, so a poll never undoes what is typed.
   if (document.activeElement?.matches('#page input.dv-input')) { S.dirty = true; return; }
   S.dirty = false;

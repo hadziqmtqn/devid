@@ -21,7 +21,7 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 - [Phase 7 plan](roadmap/phase-7.md): the desktop app, Tauri v2 on the daemon API (D-023; G1–G5, done 2026-11-06).
 - [Phase 8 plan](roadmap/phase-8.md): app types, user commands, a local port per site and Share (D-035 to D-037; accepted 2026-11-08, done 2026-11-09 in v0.12.1).
 - [Phase 9 plan](roadmap/phase-9.md): Mail, a mail catcher that runs Mailpit, in two stages (D-049; accepted 2026-11-16, done in 0.15.0).
-- [Phase 10 plan](roadmap/phase-10.md): dev servers on demand, started by a site's first request and stopped when idle (D-054, accepted 2026-11-21; O2 in 0.16.1, O3 merged, O4 built).
+- [Phase 10 plan](roadmap/phase-10.md): dev servers on demand, started by a site's first request and stopped when idle (D-054, accepted 2026-11-21; O2 in 0.16.1, O3 and O4 merged, O5 built).
 - [Implementation timeline](implementation-timeline/README.md): one record per merged milestone.
 
 ## Research

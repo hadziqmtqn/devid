@@ -330,6 +330,21 @@ mod tests {
         assert!(text.contains("q quit"), "footer lists keys");
     }
 
+    /// D-054: an on-demand site says it sleeps, or that its command runs on demand.
+    #[test]
+    fn on_demand_sites() {
+        let mut a = app(false);
+        a.sites[0]["mode"] = json!("proxy");
+        a.sites[0]["upstream"] = json!(4321);
+        a.sites[0]["on_demand"] = json!({"command": "dev", "idle_stop": 10, "state": "sleeping"});
+        assert!(render(&a).0.contains("proxy :4321 · sleeping"));
+        a.sites[0]["commands"] = json!([{"name": "dev", "state": "running"}]);
+        a.sites[0]["on_demand"]["state"] = json!("running");
+        assert!(render(&a).0.contains("proxy :4321 · ● on demand"));
+        a.sites[0]["commands"] = json!([{"name": "dev", "state": "running"}, {"name": "queue", "state": "running"}]);
+        assert!(render(&a).0.contains("proxy :4321 · ● 2 running"));
+    }
+
     #[test]
     fn mail_page() {
         let mut a = app(false);

@@ -166,6 +166,7 @@ All behaviour lives in `daemon` and is reached through its socket API. `cli` and
 - `devid` with no command opens the TUI only when stdout is a terminal; scripts and pipes get the help text. `devid tui` opens it explicitly.
 - **Actions (T2).** Keys produce an `Effect` instead of doing anything themselves: a daemon request, open a URL (`open`), open a folder in Terminal (`open -a Terminal`), or copy (`pbcopy`). Overlays (`Mode`) handle a site's action menu, path input (`~` expanded), a pick list (PHP version, parked folder) and a y/n confirmation for destructive actions. The result appears as ✓/✗ in the footer, and state refreshes right away. The daemon's `sites` reply includes the `parked` folders for unpark.
 - **Phase 8 (A5).** The Sites table shows each site's type and how it is served (PHP version, `proxy :<port>` or `static`), its local port and its running commands. A site's menu adds App type…, Serve as…, Local port… (a port, `off`, or empty for the first free one), Commands… (start or stop one), Start/Stop all commands, Remove a command… and Add a command… (the site's suggestions, or a name and a command typed in). Each command's log is on the Logs page.
+- **Phase 10 (O5, D-054).** The Sites table adds `· sleeping`, or `· ● on demand` when the on-demand command is the only one running. A proxy site's menu with commands adds `z` On demand… (the command or Off, then the idle time: 5, 10, 15, 30 or 60 min, or never), and Commands… marks the command "sleeping, on demand".
 
 Implemented in T3:
 - **Extensions (D-008):** `php_ext` writes `php/<ver>/etc/conf.d/devid-xdebug.ini` (`zend_extension`, `xdebug.mode=debug,develop`, `start_with_request=trigger`, port 9003) or `devid-pcov.ini` (`extension`, `pcov.enabled=1`), or removes it, then restarts that version's php-fpm. The CLI shim reads the same scan dir, so `php` on the command line follows the toggle. The `php` list in `status` reports each version's `extensions` and `ini` path.
@@ -243,7 +244,7 @@ Implemented in T5:
 - **Share (A6, D-037):** `share_start` runs an existing `cloudflared`, the first one in `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, `~/bin` or the daemon's PATH (launchd's system folders): `cloudflared tunnel --url http://127.0.0.1:<http_port> --http-host-header <site>.<tld>` as the site's `.share` command entry and reads its `trycloudflare.com` URL from `share-<site>.log`; `share_stop` ends it. `sites` reports `share` per site, `status` the `shares`.
 - **Desktop app (A5):** a site's detail view (type, serving, local port, commands with their log) and the menu bar's running commands with Stop; every action is a daemon request the CLI also sends.
 
-## Dev servers on demand (Phase 10 O3 and O4, D-054)
+## Dev servers on demand (Phase 10 O3–O5, D-054)
 
 - **Setting:** `[apps.<site>] on_demand = "<command>"` and `idle_stop = <minutes>` (default 10, 0 never, at most 1440). It applies only to a proxy site whose command is saved (`Site.on_demand`); `mutate` drops it when the site stops being a proxy site or loses the command. nginx, Caddy and Apache all wake it.
 - **Waking (nginx):** an on-demand site's `@devid_again` hands a failure to `@devid_wake` instead of `@devid_down`.
@@ -268,6 +269,14 @@ Implemented in T5:
   - A site with neither for `idle_stop` minutes (counting from the command's start, the last request, wake-up or open connection) is stopped as `command_stop` does, with a line in its log and the daemon's.
 - **Stop and lifetime:** `command_stop` on an on-demand command puts it to sleep (the reply lists it in `sleeping`). `command_start` works as before and the idle stop then applies. The update resume (D-040) skips on-demand commands. Nothing starts at login.
 - **Requests and CLI:** `app_set` gains `on_demand` (a command name, or `""` for off) and `idle_stop`. `sites` gives each site `on_demand`: null or `{command, idle_stop, state, idle_for}`, with `state` sleeping, starting, running or failed. `status` lists the `sleeping` sites. CLI: `devid cmd on-demand [site] <name>|off [--idle <minutes>]`; `devid cmd`, `devid sites` and `devid status` show it.
+- **Desktop app (O5),** after the board "Devid — Dev servers on demand (Phase 10 O5)" on the Devid Redesign canvas, which the owner approved on 2026-11-22:
+  - **Sites table:** a "Sleeping" chip, with "Sleeping" in place of "Not running", or an "On demand" chip while the command runs.
+  - **Site detail of a proxy site:** an On demand card under Commands holds the "Start on the first visit" switch (off with no command), then the command (a segmented control), "Stop when idle" (5, 10, 15, 30, 60 min, Never, plus a time set from the CLI). Every change is one `app_set` with `on_demand` and `idle_stop`. The card does not repeat the command's state, which its row shows.
+  - **Command rows:** the on-demand command has an "On demand" chip (its tooltip: when it starts and stops), "Sleeping", "Starting · pid …" or "Running · pid … · idle N min"; Stop says that it sleeps until the next visit.
+  - **The detail's toolbar:** Open in browser, which also wakes a sleeping site.
+  - **Explanations in tooltips (D-055):** every title on the site detail has an (i) (`tip()`, `titled()` in `app.js`), and the notes under App, Commands, On demand and Share are their headings' tooltips. The tooltip is fixed on the body like the menus, opens on hover or focus, closes with Esc, and holds back a redraw while it is open.
+- **Menu bar (O5):** `tray::View.sleeping` comes from `status.sleeping`. The Commands section reads "Commands · 2 running · 1 sleeping" and lists each sleeping site as "Open <site> (sleeping)", which opens its URL (`api::site_url`) and so wakes it. The count next to the icon stays the running commands.
+- **TUI (O5):** see "TUI (Phase 4)", Phase 10.
 
 ## Mail (Phase 9 M3, D-049)
 

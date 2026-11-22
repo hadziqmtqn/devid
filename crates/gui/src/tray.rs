@@ -1,6 +1,7 @@
 //! The menu-bar icon and its menu (Phase 7 G3): the state at a glance, Start all, Stop all and
-//! Restart, available updates (D-028), running commands with Stop (Phase 8 A5, D-036), Mail
-//! (Phase 9, D-049), Open Devid, Settings and Quit.
+//! Restart, available updates (D-028), running commands with Stop (Phase 8 A5, D-036), sleeping
+//! on-demand sites, which a click opens and so wakes (Phase 10, D-054), Mail (Phase 9, D-049),
+//! Open Devid, Settings and Quit.
 
 use devid_daemon::{
     paths::Paths,
@@ -36,6 +37,8 @@ pub struct View {
     pub updates: usize,
     /// Running commands (D-036) as (site, name); their number shows next to the icon.
     pub commands: Vec<(String, String)>,
+    /// On-demand sites whose command waits for the next visit (D-054).
+    pub sleeping: Vec<String>,
     /// Shared sites (D-037).
     pub shares: Vec<String>,
     /// Mail (D-049): None while it is off.
@@ -92,6 +95,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
             server: String::new(),
             updates: 0,
             commands: Vec::new(),
+            sleeping: Vec::new(),
             shares: Vec::new(),
             mail: None,
         };
@@ -119,6 +123,8 @@ pub fn view(status: Result<&Value, &str>) -> View {
         .flatten()
         .map(|c| (c["site"].as_str().unwrap_or("?").to_string(), c["name"].as_str().unwrap_or("?").to_string()))
         .collect();
+    let sleeping =
+        s["sleeping"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
     let shares =
         s["shares"].as_array().into_iter().flatten().filter_map(|x| x["site"].as_str().map(String::from)).collect();
     let m = &s["mail"];
@@ -146,8 +152,20 @@ pub fn view(status: Result<&Value, &str>) -> View {
         server,
         updates,
         commands,
+        sleeping,
         shares,
         mail,
+    }
+}
+
+/// "Commands · 2 running · 1 sleeping"; None when nothing runs or sleeps.
+fn commands_header(v: &View) -> Option<String> {
+    let (running, sleeping) = (v.commands.len(), v.sleeping.len());
+    match (running, sleeping) {
+        (0, 0) => None,
+        (r, 0) => Some(format!("Commands · {r} running")),
+        (0, z) => Some(format!("Commands · {z} sleeping")),
+        (r, z) => Some(format!("Commands · {r} running · {z} sleeping")),
     }
 }
 
@@ -255,14 +273,19 @@ fn menu(app: &AppHandle, v: &View, error: Option<&str>) -> tauri::Result<Menu<Wr
     if v.updates > 0 {
         m.append(&item("updates", &format!("Updates available ({})…", v.updates), true, None)?)?;
     }
-    if !v.commands.is_empty() {
+    if let Some(header) = commands_header(v) {
         m.append(&sep()?)?;
-        let n = v.commands.len();
-        m.append(&item("commands", &format!("Commands · {n} running"), false, None)?)?;
+        m.append(&item("commands", &header, false, None)?)?;
         for (site, name) in &v.commands {
             m.append(&item(&format!("cmd-stop:{site}/{name}"), &format!("Stop {site} · {name}"), true, None)?)?;
         }
-        m.append(&item("cmd-stop-all", "Stop all commands", true, None)?)?;
+        // D-054: opening a sleeping site is what wakes its command.
+        for site in &v.sleeping {
+            m.append(&item(&format!("site-open:{site}"), &format!("Open {site} (sleeping)"), true, None)?)?;
+        }
+        if !v.commands.is_empty() {
+            m.append(&item("cmd-stop-all", "Stop all commands", true, None)?)?;
+        }
     }
     if !v.shares.is_empty() {
         m.append(&sep()?)?;
@@ -320,6 +343,17 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
             });
         }
         "quit" => app.exit(0),
+        id if id.starts_with("site-open:") => {
+            let (app, site) = (app.clone(), id.trim_start_matches("site-open:").to_string());
+            std::thread::spawn(move || {
+                // The full path, as in api::open: a terminal's own `open` can come first on PATH.
+                let opened = crate::api::site_url(&Paths::from_env(), &site).and_then(|url| {
+                    std::process::Command::new("/usr/bin/open").arg(url).status().map(|_| ()).map_err(|e| e.to_string())
+                });
+                *app.state::<TrayState>().error.lock().unwrap() = opened.err();
+                refresh(&app);
+            });
+        }
         id if id.starts_with("share-stop:") => {
             let (app, site) = (app.clone(), id.trim_start_matches("share-stop:").to_string());
             std::thread::spawn(move || {
@@ -421,6 +455,17 @@ mod tests {
             view(Ok(&commands)).commands,
             [("erd".to_string(), "dev:pg:local".to_string()), ("erd".to_string(), "tauri".to_string())]
         );
+
+        // D-054: sleeping on-demand sites, counted apart from running commands.
+        assert_eq!(commands_header(&view(Ok(&running))), None);
+        assert_eq!(commands_header(&view(Ok(&commands))).as_deref(), Some("Commands · 2 running"));
+        let mut sleeping = commands.clone();
+        sleeping["sleeping"] = json!(["devid-site"]);
+        let v = view(Ok(&sleeping));
+        assert_eq!(v.sleeping, ["devid-site"]);
+        assert_eq!(commands_header(&v).as_deref(), Some("Commands · 2 running · 1 sleeping"));
+        sleeping["running_commands"] = json!([]);
+        assert_eq!(commands_header(&view(Ok(&sleeping))).as_deref(), Some("Commands · 1 sleeping"));
     }
 
     #[test]
