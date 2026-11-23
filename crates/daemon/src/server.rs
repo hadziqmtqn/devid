@@ -910,8 +910,10 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
         }
         Request::ServerList => {
             let config = state.config.lock().unwrap().clone();
+            // Only the servers this system can run: no Apache on Linux (D-057).
             let list: Vec<Value> = webserver::SERVERS
                 .iter()
+                .filter(|s| crate::platform::unavailable_server(s).is_none())
                 .map(|s| {
                     let installed = webserver::installed(&state.paths, s);
                     let config_file = match *s {

@@ -37,7 +37,7 @@ fn dns_and_helper_without_root() {
     let status = json(&home, &["status", "--json"]);
     assert_eq!(status["dns"], format!("listening on 127.0.0.1:{port}"));
     assert_eq!(status["standard_ports"], false);
-    assert!(status["standard_ports_ok"].is_null(), "nothing to check without the pf redirect (D-047)");
+    assert!(status["standard_ports_ok"].is_null(), "nothing to check without the redirect (D-047)");
 
     let reply = query(port, "erdbpro-saas.test");
     assert_eq!(&reply[0..2], &[0x12, 0x34]);
@@ -49,11 +49,21 @@ fn dns_and_helper_without_root() {
     let out = devid(&home, &["helper", "install", "--dry-run"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let plan = String::from_utf8_lossy(&out.stdout);
-    for expected in ["/etc/resolver/test", "pfctl", "add-trusted-cert", "dry run: nothing changed"] {
+    // Each system's own parts (platform/): macOS's resolver file, pf and keychain; Linux's
+    // systemd-resolved drop-in, nftables unit and CA store (D-057).
+    let (install, uninstall): (&[&str], &str) = if cfg!(target_os = "macos") {
+        (&["/etc/resolver/test", "pfctl", "add-trusted-cert"], "remove-trusted-cert")
+    } else {
+        (
+            &["/etc/systemd/resolved.conf.d/devid.conf", "devid-ports.service", "update-ca-certificates"],
+            "update-ca-certificates --fresh",
+        )
+    };
+    for expected in install.iter().chain(&["dry run: nothing changed"]) {
         assert!(plan.contains(expected), "dry run mentions {expected}:\n{plan}");
     }
     let out = devid(&home, &["helper", "uninstall", "--dry-run"]);
-    assert!(String::from_utf8_lossy(&out.stdout).contains("remove-trusted-cert"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(uninstall));
 
     // The root step refuses to run without root.
     let ca = home.join("ca/devid-ca.crt");
