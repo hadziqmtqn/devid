@@ -276,6 +276,19 @@ The record is `docs/implementation-timeline/linux/2026-11-23-l4-release.md`.
   - release 0.19.0;
   - the install-to-uninstall run on the Xubuntu machine with `install.sh`.
 
+## L5 plan (2026-11-23)
+
+- **0.19.0-rc.1 first, as a pre-release** (the owner's choice). It is not GitHub's Latest, so `devid-latest`, `devid self-update` and every Mac stay on 0.18.0.
+- **The test machine** is Ubuntu 24.04 Desktop (GNOME, Firefox as a snap) in Parallels Desktop on the owner's old Intel Mac (owner, 2026-11-23), not Xubuntu.
+  - It is a VM on the old Mac, not on the M1, so D-013 holds.
+  - Claude reaches it over SSH with a key.
+- **On it:**
+  - Claude installs rc.1 with `DEVID_VERSION=0.19.0-rc.1` through `install.sh` and runs setup;
+  - opens a site in Chrome and Firefox;
+  - logs out and in, and reboots;
+  - then uninstalls.
+- **Then 0.19.0,** with the README, the devid-binaries README and the guide. On the machine, `devid self-update` goes from rc.1 to 0.19.0.
+
 ## Milestones
 
 | # | Milestone | Done when |
