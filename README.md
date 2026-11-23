@@ -1,10 +1,10 @@
 # Devid
 
-Devid is a local development environment for Laravel, PHP and Node.js on Macs with Apple silicon (M series) or Intel. Every project folder you park or link gets its own `https://<name>.test` address with a trusted certificate. Devid ships PHP and the web servers prebuilt, so it needs no Homebrew, no Docker and no virtual machine. You use it from the command line, from a terminal UI (TUI) or from the menu-bar desktop app.
+Devid is a local development environment for Laravel, PHP and Node.js on Macs with Apple silicon (M series) or Intel, and on Linux (Ubuntu, x86_64). Every project folder you park or link gets its own `https://<name>.test` address with a trusted certificate. Devid ships PHP and the web servers prebuilt, so it needs no Homebrew, no Docker and no virtual machine. You use it from the command line, from a terminal UI (TUI) or, on macOS, from the menu-bar desktop app.
 
 **Website and guide:** [devid.bekenweb.com](https://devid.bekenweb.com), with the user guide at [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs).
 
-> **Status:** v0.18, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
+> **Status:** v0.19, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). Linux builds (since v0.19, D-057) go through setup, a site over HTTPS and uninstall on GitHub's Ubuntu runners before each release, and were tested by hand on Ubuntu 24.04 Desktop. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
 
 ```sh
 devid park ~/Projects                  # every subfolder becomes <folder>.test
@@ -35,11 +35,11 @@ Homebrew moved Intel Macs to Tier 3: there are no more prebuilt packages, so Val
 - **Node.js:** Vite, Next.js, Nuxt and Node servers are proxied to your dev server, hot reload included. Node is yours, for example from nvm.
 - **Dev servers:** save a command per site once, such as `npm run dev` or a queue worker, then start and stop it from Devid. On demand, a site's first visit starts its dev server, and Devid stops it once the site has been idle, so it uses memory only while you work on it (`devid cmd on-demand`). A Laravel site's Vite, started from Devid, serves HTTPS with the site's certificate, so Safari loads its scripts and CSS too.
 - **Extensions:** intl, gd, redis and PDO are built in. apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole come prebuilt from Devid's catalog, with nothing to compile.
-- **Web server:** nginx by default, or Caddy or Apache. One runs at a time; switch with `devid server use`.
+- **Web server:** nginx by default, or Caddy, or Apache on macOS. One runs at a time; switch with `devid server use`.
 - **Share:** `devid share` gives a site a temporary public link through a Cloudflare quick tunnel (it uses your own `cloudflared`, from Homebrew or `~/.local/bin`). `devid app port` serves a site on a local port for a tunnel of your own.
-- **Mail:** `devid mail on` catches the mail your apps send, in an inbox on your Mac that the desktop app shows. Laravel's SMTP mailer and PHP's `mail()` both work, and nothing reaches a real mailbox. Devid runs Mailpit for it.
+- **Mail:** `devid mail on` catches the mail your apps send, in an inbox on your computer that the desktop app shows. Laravel's SMTP mailer and PHP's `mail()` both work, and nothing reaches a real mailbox. Devid runs Mailpit for it.
 - **Terminal commands:** `php`, `composer`, `php8.3` to `php8.5`, `nginx -t`, `caddy` and `mailpit` run Devid's own copies from any terminal, editor or script. Add to PATH in the app's Settings (or `devid path on`) sets this up.
-- **Interfaces:** the CLI, the TUI and the menu-bar app. Every action works the same in all three. `devid doctor` checks the whole setup and tells you how to fix what's wrong.
+- **Interfaces:** the CLI, the TUI and, on macOS, the menu-bar app. Every action works the same in all three. `devid doctor` checks the whole setup and tells you how to fix what's wrong.
 
 ## Install
 
@@ -55,13 +55,21 @@ The CLI and TUI only:
 curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
 ```
 
-Devid is an open-source personal project, provided as is. The builds are ad-hoc signed and not notarized; the command installs them without a Gatekeeper prompt. Setup asks for your password once for `.test` DNS, Devid's CA and ports 80/443, and `devid uninstall` undoes it. The [guide](https://devid.bekenweb.com/docs) covers the install options, sites, dev servers on demand, Laravel and Vite, PHP and extensions, web servers, Mail, the desktop app, the TUI, terminal commands, HTTPS, updates, troubleshooting and uninstall.
+On Linux (Ubuntu 24.04 or 26.04, x86_64), install curl and certutil first, then use the same command:
+
+```sh
+sudo apt install curl libnss3-tools
+curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
+```
+
+Devid is an open-source personal project, provided as is. The macOS builds are ad-hoc signed and not notarized; the command installs them without a Gatekeeper prompt. Setup asks for your password once for `.test` DNS, Devid's CA and ports 80/443, and `devid uninstall` undoes it. The [guide](https://devid.bekenweb.com/docs) covers the install options, sites, dev servers on demand, Laravel and Vite, PHP and extensions, web servers, Mail, the desktop app, the TUI, terminal commands, HTTPS, updates, troubleshooting and uninstall.
 
 ## Requirements
 
 | | |
 |---|---|
-| System | Mac with Apple silicon (M series) or Intel, macOS 12 or newer. Tested by hand on an M1 with macOS 26 Tahoe and on Intel with macOS 14 Sonoma |
+| macOS | Mac with Apple silicon (M series) or Intel, macOS 12 or newer. Tested by hand on an M1 with macOS 26 Tahoe and on Intel with macOS 14 Sonoma |
+| Linux | Ubuntu 24.04 or 26.04 on x86_64, with systemd-resolved (Ubuntu's default), `curl` and `libnss3-tools`. The CLI and the TUI; no desktop app and no Apache yet. Tested by hand on Ubuntu 24.04 Desktop |
 | Setup | Admin password, once: `.test` DNS, Devid's CA and ports 80/443 |
 | Ports | 80 and 443 free (stop Valet first) |
 | Not included | Databases (use a tool such as DBngin), and Node.js: Devid uses yours |
@@ -85,6 +93,7 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 - Terminal commands: Devid's PHP versions, nginx, Caddy and Mailpit by name from any shell, with Add to PATH in the app (D-053).
 - Dev servers on demand: a site's first visit starts its dev server, and Devid stops it when the site has been idle, on nginx, Caddy and Apache (D-054).
 - Laravel and Vite: Vite started from Devid serves HTTPS with the site's certificate, so a Laravel page works in Safari too, hot reload included (D-056).
+- Linux: Ubuntu 24.04 and 26.04 on x86_64, with the CLI and the TUI. `.test` goes through systemd-resolved and ports 80/443 through nftables, and Devid's CA is trusted by the system, Chrome and Firefox (D-057).
 
 **Next**
 
@@ -93,7 +102,8 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 
 **Later**
 
-- Linux (Debian-based), then Windows, one platform at a time (D-044). Windows is the largest effort: it needs its own PHP builds and has no php-fpm.
+- Windows (D-044). It is the largest effort: it needs its own PHP builds and has no php-fpm.
+- More of Linux: the desktop app, arm64, and Debian and other distributions (D-057).
 - Developer tools: a dump viewer.
 
 **Out of scope:** databases (use a tool such as DBngin), and Docker- or VM-based setups.

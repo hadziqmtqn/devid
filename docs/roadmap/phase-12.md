@@ -2,7 +2,7 @@
 
 > Scope: Devid on Ubuntu LTS (the daemon, the CLI and the TUI), with `.test` DNS, HTTPS and ports 80/443 as on macOS (D-057)
 > Verified against: 2026-11-23 (v0.18.0; GitHub's `ubuntu-latest` is Ubuntu 26.04; spike run 45104513332; runtime release `2026.11.23-19`)
-> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". L1 to L4 done 2026-11-23, see each one's results; L5 (docs and release 0.19.0) is next.
+> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". L1 to L4 done 2026-11-23, see each one's results; L5 ships in 0.19.0, after rc.1 and rc.2 on the owner's Ubuntu machine.
 
 D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0 (D-046). On 2026-11-23 the owner chose Linux, not Windows, as the next platform. The research backs that order: Linux is Herd's most-voted request, and neither Herd nor ServBay runs on it (`docs/research/competitors-2026-11.md`).
 
@@ -306,6 +306,19 @@ The record is `docs/implementation-timeline/linux/2026-11-23-l4-release.md`.
   - Ubuntu's Firefox snap showed a security warning until the CA was in its profile's database. From now on setup does that for every Firefox profile (#130).
 - **Reboot:** `devid-ports.service` loaded the nftables table at boot, systemd-resolved sent `.test` to Devid, and the user unit started at login.
 - **Next:** rc.2 carries #129 and #130. On the machine, Claude installs it over rc.1 and checks Firefox's step, then uninstalls and compares every file setup touched.
+
+### rc.2 on the machine (2026-11-24)
+
+- **The release run** passed every target the first time.
+- **Firefox:**
+  - Before the install, the CA was removed again from the Firefox profile.
+  - `install.sh` put rc.2 over rc.1, and setup added the CA to `~/.pki/nssdb` and to the snap's profile ("~/.pki/nssdb and 1 Firefox profile").
+  - `devid doctor` checked both and said "all good".
+- **Uninstall (`devid uninstall --purge`):**
+  - Compared with the record from before rc.1, `~/.bashrc`, `~/.profile` and the system CA bundle matched byte for byte, and every file setup writes was gone.
+  - Gone too: the `devid` nftables table, both units, Devid's CA in the browsers' databases, and `.test` resolution.
+  - The only new item was an empty `~/.pki/nssdb`, which Brave creates on its first run anyway.
+- **Then** rc.2 went back on, with the test site, for the update check: `devid self-update` from rc.2 to 0.19.0 once 0.19.0 is released.
 
 ## Milestones
 
