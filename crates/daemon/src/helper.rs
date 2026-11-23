@@ -1,27 +1,17 @@
-//! The one-time root setup (D-002, D-013: macOS-only code lives here). Run through
-//! `sudo devid helper apply …`; every other part of Devid runs as the owner.
-//!
-//! It touches only these, and `uninstall` reverses each:
-//! - `/etc/resolver/<tld>`: send `.<tld>` lookups to the daemon's DNS port (an existing file,
-//!   e.g. Valet's, is backed up first and restored on uninstall);
-//! - a pf anchor in `com.apple/devid` (no edit to /etc/pf.conf) redirecting 127.0.0.1:80/443 to
-//!   the high ports nginx listens on, plus a LaunchDaemon that reloads it at boot;
-//! - trust for the Devid CA (SSL only) in the System keychain. The CA is name-constrained to
-//!   `.<tld>` (see ca.rs), so trusting it cannot vouch for any real domain.
+//! The one-time root setup (D-002, D-013). Run through `sudo devid helper apply …`; every other
+//! part of Devid runs as the owner. This file holds what both systems share: the plan, its
+//! validation, and `apply`. Which files and commands each system needs is in platform/: on macOS
+//! /etc/resolver, a pf anchor and the System keychain; on Linux systemd-resolved, an nftables table
+//! and the system CA store (D-057). `uninstall` reverses each. The CA is name-constrained to
+//! `.<tld>` (see ca.rs), so trusting it cannot vouch for any real domain.
 
 use crate::sites;
 use std::{
     fs, io,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
 };
-
-pub const PF_ANCHOR: &str = "com.apple/devid";
-pub const PF_FILE: &str = "/etc/pf.anchors/dev.devid";
-pub const PF_PLIST: &str = "/Library/LaunchDaemons/dev.devid.pf.plist";
-pub const PF_LABEL: &str = "dev.devid.pf";
-const SYSTEM_KEYCHAIN: &str = "/Library/Keychains/System.keychain";
-const CA_NAME: &str = "Devid Local CA";
 
 /// Everything the helper needs, passed explicitly on the sudo command line and validated as root.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +27,8 @@ pub struct Plan {
 pub enum Action {
     /// Write a file; if `backup` and another file is already there, keep it as `<path>.devid-backup`.
     Write { path: PathBuf, content: String, backup: bool },
+    /// Copy a file the owner has (the CA certificate), readable by everyone.
+    Copy { from: PathBuf, to: PathBuf },
     /// Remove a file, restoring `<path>.devid-backup` if present.
     Remove { path: PathBuf, restore_backup: bool },
     /// Run a command; `ok_to_fail` for best-effort cleanup steps.
@@ -49,6 +41,7 @@ impl Action {
             Action::Write { path, backup, .. } => {
                 format!("write {}{}", path.display(), if *backup { " (backing up an existing file)" } else { "" })
             }
+            Action::Copy { from, to } => format!("copy {} to {}", from.display(), to.display()),
             Action::Remove { path, restore_backup } => {
                 format!(
                     "remove {}{}",
@@ -56,7 +49,9 @@ impl Action {
                     if *restore_backup { " (restoring a backup if any)" } else { "" }
                 )
             }
-            Action::Run { program, args, .. } => format!("run {program} {}", args.join(" ")),
+            Action::Run { program, args, .. } => {
+                format!("run {program}{}", args.iter().map(|a| format!(" {a}")).collect::<String>())
+            }
         }
     }
 }
@@ -87,94 +82,14 @@ pub fn validate(plan: &Plan) -> io::Result<()> {
     Ok(())
 }
 
-pub fn resolver_path(tld: &str) -> PathBuf {
-    PathBuf::from(format!("/etc/resolver/{tld}"))
-}
-
-pub fn resolver_content(plan: &Plan) -> String {
-    format!("# Devid: send .{} lookups to the Devid daemon\nnameserver 127.0.0.1\nport {}\n", plan.tld, plan.dns_port)
-}
-
-pub fn pf_rules(plan: &Plan) -> String {
-    format!(
-        "# Devid: local-only redirect of the standard web ports to nginx's high ports\n\
-         rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 80 -> 127.0.0.1 port {}\n\
-         rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 443 -> 127.0.0.1 port {}\n",
-        plan.http_port, plan.https_port
-    )
-}
-
-fn pf_load_command() -> String {
-    // -E enables pf (it is off by default on macOS) and takes a reference so others' -X cannot disable it.
-    format!("/sbin/pfctl -E >/dev/null 2>&1; /sbin/pfctl -a {PF_ANCHOR} -f {PF_FILE}")
-}
-
-/// Another pf client can set `skip on lo0` (macOS Internet Sharing does when OrbStack, Docker or UTM
-/// adds a VM network); the `rdr … on lo0` rules then stop matching and 80/443 refuse connections.
-/// Reloading Devid's anchor does not undo it, reloading pf's options from /etc/pf.conf does (D-047).
-/// Only when it is set, so a working setup is left as it is.
-const PF_UNSKIP_LO0: &str = "/sbin/pfctl -s Interfaces -v 2>/dev/null | /usr/bin/grep -q '^lo0 (skip)' \
-    && /sbin/pfctl -O -f /etc/pf.conf >/dev/null 2>&1; exit 0";
-
-fn pf_plist() -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{PF_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/sh</string>
-        <string>-c</string>
-        <string>{cmd}</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-</dict>
-</plist>
-"#,
-        cmd = pf_load_command()
-    )
-}
-
-fn run(program: &str, args: &[&str], ok_to_fail: bool) -> Action {
-    Action::Run { program: program.into(), args: args.iter().map(|s| s.to_string()).collect(), ok_to_fail }
-}
-
+/// The root step's actions for this OS (platform/).
 pub fn install_actions(plan: &Plan) -> Vec<Action> {
-    let ca = plan.ca_cert.display().to_string();
-    vec![
-        Action::Write { path: resolver_path(&plan.tld), content: resolver_content(plan), backup: true },
-        Action::Write { path: PF_FILE.into(), content: pf_rules(plan), backup: false },
-        Action::Write { path: PF_PLIST.into(), content: pf_plist(), backup: false },
-        run("/bin/sh", &["-c", &pf_load_command()], false),
-        run("/bin/sh", &["-c", PF_UNSKIP_LO0], true),
-        // Replace any earlier Devid CA in the System keychain, then trust the current one for SSL.
-        run("/usr/bin/security", &["delete-certificate", "-c", CA_NAME, SYSTEM_KEYCHAIN], true),
-        run(
-            "/usr/bin/security",
-            &["add-trusted-cert", "-d", "-r", "trustRoot", "-p", "ssl", "-k", SYSTEM_KEYCHAIN, &ca],
-            false,
-        ),
-        run("/usr/bin/dscacheutil", &["-flushcache"], true),
-        run("/usr/bin/killall", &["-HUP", "mDNSResponder"], true),
-    ]
+    crate::platform::install_actions(plan)
 }
 
+/// What `install_actions` undoes, in reverse.
 pub fn uninstall_actions(plan: &Plan) -> Vec<Action> {
-    let ca = plan.ca_cert.display().to_string();
-    vec![
-        run("/sbin/pfctl", &["-a", PF_ANCHOR, "-F", "all"], true),
-        Action::Remove { path: PF_PLIST.into(), restore_backup: false },
-        Action::Remove { path: PF_FILE.into(), restore_backup: false },
-        Action::Remove { path: resolver_path(&plan.tld), restore_backup: true },
-        run("/usr/bin/security", &["remove-trusted-cert", "-d", &ca], true),
-        run("/usr/bin/security", &["delete-certificate", "-c", CA_NAME, SYSTEM_KEYCHAIN], true),
-        run("/usr/bin/dscacheutil", &["-flushcache"], true),
-        run("/usr/bin/killall", &["-HUP", "mDNSResponder"], true),
-    ]
+    crate::platform::uninstall_actions(plan)
 }
 
 fn backup_path(path: &Path) -> PathBuf {
@@ -198,6 +113,13 @@ pub fn apply(actions: &[Action], mut log: impl FnMut(&str)) -> io::Result<()> {
                 }
                 fs::write(path, content)?;
             }
+            Action::Copy { from, to } => {
+                if let Some(dir) = to.parent() {
+                    fs::create_dir_all(dir)?;
+                }
+                fs::copy(from, to)?;
+                fs::set_permissions(to, fs::Permissions::from_mode(0o644))?;
+            }
             Action::Remove { path, restore_backup } => {
                 let backup_file = backup_path(path);
                 if *restore_backup && backup_file.exists() {
@@ -217,19 +139,9 @@ pub fn apply(actions: &[Action], mut log: impl FnMut(&str)) -> io::Result<()> {
     Ok(())
 }
 
-/// Read-only checks, usable without root.
+/// Read-only checks of the root step, usable without root.
 pub fn status(plan: &Plan) -> Vec<(&'static str, bool)> {
-    let resolver = fs::read_to_string(resolver_path(&plan.tld)).is_ok_and(|c| c == resolver_content(plan));
-    let pf = fs::read_to_string(PF_FILE).is_ok_and(|c| c == pf_rules(plan)) && Path::new(PF_PLIST).exists();
-    let trusted = Command::new("/usr/bin/security")
-        .args(["verify-cert", "-q", "-L", "-c"])
-        .arg(&plan.ca_cert)
-        .args(["-l", "-p", "ssl"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success());
-    vec![("resolver", resolver), ("ports 80/443", pf), ("CA trusted", trusted)]
+    crate::platform::system_status(plan)
 }
 
 #[cfg(test)]
@@ -264,38 +176,6 @@ mod tests {
     }
 
     #[test]
-    fn generated_files() {
-        let p = plan(Path::new("/Users/me/.devid"));
-        assert_eq!(
-            resolver_content(&p),
-            "# Devid: send .test lookups to the Devid daemon\nnameserver 127.0.0.1\nport 53535\n"
-        );
-        let rules = pf_rules(&p);
-        assert!(rules.contains("to 127.0.0.1 port 80 -> 127.0.0.1 port 8088"));
-        assert!(rules.contains("to 127.0.0.1 port 443 -> 127.0.0.1 port 8443"));
-        assert!(rules.contains("on lo0"), "local traffic only");
-        assert!(pf_plist().contains("<string>dev.devid.pf</string>"));
-        // D-047: install also undoes another pf client's `skip on lo0`, which an anchor reload cannot.
-        let unskip = install_actions(&p).into_iter().any(|a| {
-            matches!(a, Action::Run { ref args, ok_to_fail: true, .. }
-                if args.iter().any(|x| x.contains("lo0 (skip)") && x.contains("pfctl -O -f /etc/pf.conf")))
-        });
-        assert!(unskip, "install clears skip on lo0");
-        // Uninstall reverses every file install writes.
-        let written: Vec<PathBuf> = install_actions(&p)
-            .into_iter()
-            .filter_map(|a| if let Action::Write { path, .. } = a { Some(path) } else { None })
-            .collect();
-        let removed: Vec<PathBuf> = uninstall_actions(&p)
-            .into_iter()
-            .filter_map(|a| if let Action::Remove { path, .. } = a { Some(path) } else { None })
-            .collect();
-        for path in written {
-            assert!(removed.contains(&path), "{} is cleaned up by uninstall", path.display());
-        }
-    }
-
-    #[test]
     fn apply_backs_up_and_restores_foreign_files() {
         let dir = std::env::temp_dir().join(format!("devid-helper-apply-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -312,6 +192,11 @@ mod tests {
         apply(&[Action::Remove { path: target.clone(), restore_backup: true }], |_| {}).unwrap();
         assert_eq!(fs::read_to_string(&target).unwrap(), "nameserver 127.0.0.1\n", "original restored");
         assert!(!backup_path(&target).exists());
+
+        let copy = dir.join("ca/devid-ca.crt");
+        apply(&[Action::Copy { from: target.clone(), to: copy.clone() }], |_| {}).unwrap();
+        assert_eq!(fs::read_to_string(&copy).unwrap(), "nameserver 127.0.0.1\n");
+        assert_eq!(fs::metadata(&copy).unwrap().permissions().mode() & 0o777, 0o644, "readable by all");
 
         let failing = Action::Run { program: "/usr/bin/false".into(), args: vec![], ok_to_fail: false };
         assert!(apply(&[failing], |_| {}).is_err());

@@ -428,7 +428,7 @@ pub fn tick(od: &OnDemand, commands: &Commands, paths: &Paths, sites: &[Site], n
         let Some(name) = &site.on_demand else { continue };
         let Some((pgid, since)) = commands.running_group(&site.name, name) else { continue };
         trim_requests(paths, &site.name);
-        if established(pgid, site.upstream) {
+        if crate::platform::established(pgid, site.upstream) {
             od.mark_used(&site.name, now);
             running = true;
             continue;
@@ -471,93 +471,6 @@ fn trim_requests(paths: &Paths, site: &str) {
     }
     if let (Ok(file), Ok(modified)) = (OpenOptions::new().write(true).open(&path), meta.modified()) {
         let _ = file.set_len(0).and_then(|_| file.set_modified(modified));
-    }
-}
-
-/// Whether a process of group `pgid` has an established TCP connection on its local port `port`:
-/// a request in progress, or an open WebSocket such as a dev server's HMR, which an open tab
-/// keeps. Read through libproc, without starting a process.
-#[cfg(target_os = "macos")]
-pub fn established(pgid: i32, port: u16) -> bool {
-    libproc::group_pids(pgid).into_iter().any(|pid| {
-        libproc::fds(pid)
-            .iter()
-            .filter(|fd| fd.proc_fdtype == libc::PROX_FDTYPE_SOCKET as u32)
-            .any(|fd| libproc::tcp_established_on(pid, fd.proc_fd, port))
-    })
-}
-
-/// Other systems have no libproc; nothing counts as an open connection there.
-#[cfg(not(target_os = "macos"))]
-pub fn established(_pgid: i32, _port: u16) -> bool {
-    false
-}
-
-#[cfg(target_os = "macos")]
-mod libproc {
-    use std::{mem::size_of, ptr::null_mut};
-
-    // From <sys/proc_info.h>, the same on arm64 and x86_64 (offsetof checked with clang for both,
-    // 2026-11-21). libc has no `socket_fdinfo`, so the few fields needed are read by offset.
-    const PROC_PIDFDSOCKETINFO: i32 = 3;
-    const SOCKET_FDINFO_SIZE: usize = 792;
-    /// psi.soi_kind
-    const SOI_KIND: usize = 256;
-    /// psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport, in network byte order
-    const INSI_LPORT: usize = 268;
-    /// psi.soi_proto.pri_tcp.tcpsi_state
-    const TCPSI_STATE: usize = 344;
-    const SOCKINFO_TCP: i32 = 2;
-    const TSI_S_ESTABLISHED: i32 = 4;
-
-    /// The processes of a process group.
-    pub fn group_pids(pgid: i32) -> Vec<i32> {
-        let mut capacity = 64;
-        loop {
-            let mut pids = vec![0i32; capacity];
-            let bytes = (capacity * size_of::<i32>()) as i32;
-            // SAFETY: the buffer holds `bytes` bytes; the call returns how many pids it wrote.
-            let n = unsafe { libc::proc_listpgrppids(pgid, pids.as_mut_ptr().cast(), bytes) };
-            let Ok(n) = usize::try_from(n) else { return Vec::new() };
-            if n < capacity || capacity >= 16_384 {
-                pids.truncate(n.min(capacity));
-                return pids;
-            }
-            capacity *= 4;
-        }
-    }
-
-    /// A process's open file descriptors.
-    pub fn fds(pid: i32) -> Vec<libc::proc_fdinfo> {
-        // SAFETY: a null buffer asks for the size needed.
-        let needed = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDLISTFDS, 0, null_mut(), 0) };
-        let Ok(needed) = usize::try_from(needed) else { return Vec::new() };
-        // Room for a few descriptors opened since.
-        let count = needed / size_of::<libc::proc_fdinfo>() + 16;
-        // SAFETY: proc_fdinfo is two integers; all zeroes is a valid value.
-        let mut fds: Vec<libc::proc_fdinfo> = (0..count).map(|_| unsafe { std::mem::zeroed() }).collect();
-        let bytes = (count * size_of::<libc::proc_fdinfo>()) as i32;
-        // SAFETY: the buffer holds `bytes` bytes; the call returns how many it wrote.
-        let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDLISTFDS, 0, fds.as_mut_ptr().cast(), bytes) };
-        let Ok(got) = usize::try_from(got) else { return Vec::new() };
-        fds.truncate(got / size_of::<libc::proc_fdinfo>());
-        fds
-    }
-
-    /// Whether `fd` of `pid` is an established TCP connection on local port `port`.
-    pub fn tcp_established_on(pid: i32, fd: i32, port: u16) -> bool {
-        let mut info = [0u8; SOCKET_FDINFO_SIZE];
-        // SAFETY: the buffer holds a whole socket_fdinfo; the call returns how many bytes it wrote.
-        let got = unsafe {
-            libc::proc_pidfdinfo(pid, fd, PROC_PIDFDSOCKETINFO, info.as_mut_ptr().cast(), SOCKET_FDINFO_SIZE as i32)
-        };
-        if usize::try_from(got) != Ok(SOCKET_FDINFO_SIZE) {
-            return false;
-        }
-        let int = |at: usize| i32::from_ne_bytes(info[at..at + 4].try_into().expect("four bytes"));
-        int(SOI_KIND) == SOCKINFO_TCP
-            && int(TCPSI_STATE) == TSI_S_ESTABLISHED
-            && u16::from_be(int(INSI_LPORT) as u16) == port
     }
 }
 
@@ -719,24 +632,5 @@ mod tests {
         od.mark_used("shop", now);
         assert_eq!(od.last_use(&paths, "shop", 0), now, "a wake-up counts");
         fs::remove_dir_all(&home).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn an_open_connection_is_seen() {
-        use std::net::{TcpListener, TcpStream};
-        // SAFETY: getpgrp(2) has no preconditions.
-        let group = unsafe { libc::getpgrp() };
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        assert!(!established(group, port), "listening only");
-        let client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        let (server, _) = listener.accept().unwrap();
-        assert!(established(group, port), "the accepted side has local port {port}");
-        let other = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        assert!(!established(group, other));
-        drop((client, server));
-        assert!(!established(group, port), "closed");
-        assert!(!established(i32::MAX, port), "no such group");
     }
 }

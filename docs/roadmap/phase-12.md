@@ -159,6 +159,83 @@ Merged as hadziqmtqn/devid-binaries#19 (5f0f8f9) and released as `2026.11.23-19`
   - `devid doctor` can warn when imagick is installed and they are missing.
 - **L3:** on Linux the daemon looks up the arch key `linux-x86_64`. On macOS it stays `x86_64` or `arm64`. The runtime release needs no further change for L3 or L4.
 
+## L3 design (2026-11-23)
+
+The daemon, the CLI and the TUI on Linux, built from L1's answers. The owner chose `certutil` for Chrome on 2026-11-23.
+
+### The platform interface
+
+`crates/daemon/src/platform/` holds everything that differs by OS, as `macos.rs` and `linux.rs`; nothing else in the daemon or the CLI branches on the OS.
+- **What each one provides:**
+  - the root step's actions and their read-only status;
+  - the login service: write, load, stop, and say whether it runs;
+  - the shell startup files for the PATH line;
+  - the arch key in the runtime manifest;
+  - the open-connection check for on-demand;
+  - the browser trust step that runs as the user;
+  - the programs that open a URL or copy text.
+- **Both compile on both systems.** The generated files and action lists are plain functions, so the owner's Mac and CI test the Linux plans and the macOS ones alike. Only the calls into the OS (libproc, `/proc`) are behind `cfg`.
+- `helper.rs` keeps the shared parts: the plan, validation, and `apply` with its backups. It gains a `Copy` action for the CA file.
+
+### The root step on Linux (`sudo devid helper apply`)
+
+| Part | Install | Uninstall |
+|---|---|---|
+| `.test` DNS | write `/etc/systemd/resolved.conf.d/devid.conf` (`DNS=127.0.0.1:<dns_port>`, `Domains=~<tld>`; an existing file is backed up), then restart systemd-resolved | restore or remove it, then restart systemd-resolved |
+| Ports 80/443 | write `/etc/devid-ports.nft` (the `inet devid` table) and `/etc/systemd/system/devid-ports.service`, then `daemon-reload`, `enable` and `restart` it | `disable --now` (its `ExecStop` deletes the table), remove both files, `daemon-reload` |
+| CA | copy the CA to `/usr/local/share/ca-certificates/devid-ca.crt`, then `update-ca-certificates` | remove it, then `update-ca-certificates --fresh` |
+
+- **IPv4 only, as on macOS.** Devid's DNS answers only A records, and the web servers listen on `127.0.0.1`.
+- **Status, without root:** each file's content, and whether the system bundle `/etc/ssl/certs/ca-certificates.crt` holds the CA.
+- **Before `sudo`:** setup checks that `systemctl`, `nft` and `update-ca-certificates` exist and that systemd-resolved runs. A missing one stops setup with the package to install.
+
+### As the user
+
+- **Chrome:**
+  - Setup adds the CA to `~/.pki/nssdb` with `certutil`, the way mkcert does. It creates the database if it is missing, and replaces an older Devid CA first.
+  - This covers Chrome, Chromium, Brave and Edge. Snap Chromium keeps its own database and is not covered yet.
+  - Without `certutil`, setup says to install `libnss3-tools` and run it again. The rest of setup still runs, and curl, PHP and Firefox work.
+  - Uninstall removes the CA from the database.
+- **The login service:** `~/.config/systemd/user/devid.service`.
+  - It runs `~/.devid/bin/devid daemon run` with `DEVID_HOME` and appends its output to `~/.devid/log/daemon.log`.
+  - `Restart=on-failure`, like the LaunchAgent's `KeepAlive`.
+  - `KillMode=mixed`: systemd stops only the daemon, and the daemon stops PHP, the web server and dev servers itself, as under launchd.
+  - Setup runs `systemctl --user daemon-reload`, `enable` and `restart`. Lingering stays off, so Devid runs while the user is logged in, as on macOS.
+- **PATH:**
+  - bash: `~/.bashrc` for terminals, and `~/.profile` for the desktop session, so editors started from the menu find `php` after the next login.
+  - zsh: `~/.zshenv` and `~/.zshrc`, as on macOS.
+
+### The rest
+
+- **On-demand:** a dev server counts as busy while a process of its group holds an established connection on its port. On Linux the check reads `/proc/net/tcp` and `tcp6`, then matches the socket inodes against `/proc/<pid>/fd` of the group's processes, as L1's prototype did.
+- **Apache:** refused on Linux, with a message; nginx and Caddy work.
+- **The desktop app:** `devid setup --gui` is refused on Linux.
+- **The TUI:**
+  - It opens URLs with `xdg-open`.
+  - It copies text with `wl-copy`, `xclip` or `xsel`, whichever exists.
+  - It opens a terminal in a site's folder with `x-terminal-emulator`.
+- **`devid doctor` on Linux:**
+  - the user unit runs;
+  - the root step's three parts are in place, and `.test` resolves through systemd-resolved;
+  - Chrome's database holds the CA;
+  - if imagick is installed, the DejaVu fonts are there.
+
+  The Valet and pf checks stay macOS-only.
+- **Downloads:** composer.phar is checked with Devid's own SHA-256 code instead of `shasum`. curl is still needed, as `install.sh` already needs it.
+
+### How a runner proves it
+
+`scripts/linux-e2e.sh`, run by a `linux-e2e` job in `ci.yml` on every pull request. The job builds the musl binary, enables lingering for the runner user, and installs `libnss3-tools`. Then the script:
+
+1. Records the files setup may change: the shell files and every system file in the table above.
+2. Runs `devid setup`, which installs PHP and nginx from `runtime-latest`, then links a site.
+3. Checks the site:
+   - curl reaches `https://<site>.test/` through ports 80/443 and systemd-resolved;
+   - headless Chrome loads it without a certificate error.
+
+   The `/proc` check has a unit test of its own, which opens a connection in the test process and looks for it.
+4. Runs `devid uninstall --purge`, then compares every recorded file and checks that no `devid` table, user unit or CA is left.
+
 ## Milestones
 
 | # | Milestone | Done when |

@@ -8,7 +8,7 @@ use crate::request;
 /// Sizes as the TUI shows them, for `devid mail show` too.
 pub(crate) use app::human_size;
 use app::{Action, App, Effect};
-use devid_daemon::{paths::Paths, protocol::Request};
+use devid_daemon::{paths::Paths, platform, protocol::Request};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use std::time::{Duration, Instant};
 
@@ -77,9 +77,9 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
             },
             Err(e) => (e, true),
         },
-        Effect::OpenUrl(url) => run(Command::new("open").arg(&url), format!("opened {url}")),
+        Effect::OpenUrl(url) => run(Command::new(platform::OPEN_COMMAND).arg(&url), format!("opened {url}")),
         Effect::OpenTerminal(path) => {
-            run(Command::new("open").args(["-a", "Terminal"]).arg(&path), format!("opened {path} in Terminal"))
+            run(&mut platform::terminal_command(&path), format!("opened a terminal in {path}"))
         }
         Effect::Update { check } => match request(paths, &Request::Update { check }) {
             Ok(v) => {
@@ -149,14 +149,16 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
             }
         }
         Effect::Copy(text) => {
-            let copied = Command::new("pbcopy").stdin(Stdio::piped()).spawn().and_then(|mut child| {
-                std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes())?;
-                child.wait()
+            // The first clipboard tool that is there and works (pbcopy; wl-copy, xclip or xsel).
+            let copied = platform::COPY_COMMANDS.iter().any(|argv| {
+                let Ok(mut child) = Command::new(argv[0]).args(&argv[1..]).stdin(Stdio::piped()).spawn() else {
+                    return false;
+                };
+                let wrote = std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes());
+                drop(child.stdin.take());
+                wrote.is_ok() && child.wait().is_ok_and(|s| s.success())
             });
-            match copied {
-                Ok(s) if s.success() => (format!("copied {text}"), false),
-                _ => ("could not copy to the clipboard".into(), true),
-            }
+            if copied { (format!("copied {text}"), false) } else { ("could not copy to the clipboard".into(), true) }
         }
     }
 }

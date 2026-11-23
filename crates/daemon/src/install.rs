@@ -1,6 +1,6 @@
-//! User-level installation (D-014, macOS): the binary and shims in `~/.devid/bin`, a PATH line in
-//! the shell's startup files, and a LaunchAgent that keeps the daemon running. Root steps live in
-//! helper.rs.
+//! User-level installation (D-014): the binary and shims in `~/.devid/bin`, a PATH line in the
+//! shell's startup files, and composer.phar. The login service that keeps the daemon running (a
+//! LaunchAgent or a systemd user unit) is in platform/, the root step in helper.rs.
 
 use crate::paths::{Paths, user_home};
 use std::{
@@ -11,7 +11,6 @@ use std::{
     process::Command,
 };
 
-pub const AGENT_LABEL: &str = "dev.devid.daemon";
 /// Names that run through `devid` itself (argv[0] dispatch in the CLI): the PHP of the current
 /// folder and composer, then (D-053) one PHP version each, and Devid's own nginx, Caddy and Mailpit.
 pub const SHIMS: [&str; 8] = ["php", "composer", "php8.3", "php8.4", "php8.5", "nginx", "caddy", "mailpit"];
@@ -32,10 +31,6 @@ pub fn installed_bin(paths: &Paths) -> PathBuf {
 
 pub fn composer_phar(paths: &Paths) -> PathBuf {
     paths.home.join("composer/composer.phar")
-}
-
-pub fn agent_plist_path() -> PathBuf {
-    user_home().join("Library/LaunchAgents").join(format!("{AGENT_LABEL}.plist"))
 }
 
 /// The desktop app's login item (D-031), separate from the daemon's LaunchAgent.
@@ -137,22 +132,10 @@ fn login_shell() -> String {
     shell.filter(|s| !s.is_empty()).or_else(|| std::env::var("SHELL").ok()).unwrap_or_default()
 }
 
-/// The startup files that put `~/.devid/bin` on PATH (D-053), for the login shell:
-/// - zsh (the macOS default): ~/.zshenv, which every zsh reads, also the shells that editors,
-///   scripts and other tools start; and ~/.zshrc, because in a terminal macOS's path_helper
-///   (/etc/zprofile) runs after ~/.zshenv and moves its entries behind /usr/local/bin. The line in
-///   ~/.zshrc, read last, puts Devid's `php` before Homebrew's again.
-/// - bash: ~/.bash_profile.
+/// The startup files that put `~/.devid/bin` on PATH (D-053) for the login shell; which ones
+/// depends on the OS (`platform::rc_files_for`).
 pub fn rc_files() -> Vec<PathBuf> {
-    rc_files_for(&login_shell(), &user_home())
-}
-
-fn rc_files_for(shell: &str, home: &Path) -> Vec<PathBuf> {
-    if shell.ends_with("bash") {
-        vec![home.join(".bash_profile")]
-    } else {
-        vec![home.join(".zshenv"), home.join(".zshrc")]
-    }
+    crate::platform::rc_files_for(&login_shell(), &user_home())
 }
 
 pub fn rc_line(paths: &Paths) -> String {
@@ -201,12 +184,17 @@ pub fn ensure_rc_line(rc: &Path, line: &str) -> io::Result<bool> {
     Ok(true)
 }
 
-/// Remove every line Devid added (marked), leaving the rest untouched. Returns whether it changed.
+/// Remove every line Devid added (marked), leaving the rest untouched; a file left with nothing
+/// in it was Devid's own and goes. Returns whether it changed.
 pub fn remove_rc_line(rc: &Path) -> io::Result<bool> {
     let Ok(text) = fs::read_to_string(rc) else { return Ok(false) };
     let kept: Vec<&str> = text.lines().filter(|l| !l.ends_with(RC_MARKER)).collect();
     if kept.len() == text.lines().count() {
         return Ok(false);
+    }
+    if kept.iter().all(|l| l.trim().is_empty()) {
+        fs::remove_file(rc)?;
+        return Ok(true);
     }
     let mut new = kept.join("\n");
     if text.ends_with('\n') {
@@ -238,98 +226,6 @@ pub fn install_binary(paths: &Paths) -> io::Result<()> {
     Ok(())
 }
 
-pub fn agent_plist(paths: &Paths) -> String {
-    let log = paths.log_dir().join("daemon.log");
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{AGENT_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{bin}</string>
-        <string>daemon</string>
-        <string>run</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>DEVID_HOME</key>
-        <string>{home}</string>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <!-- Restart after a crash, but not after `devid daemon stop` (a clean exit). -->
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    <!-- No ProcessType: "Background" ran nginx and php-fpm at the lowest CPU priority, so pages
-         took seconds whenever the Mac was busy. -->
-    <key>StandardErrorPath</key>
-    <string>{log}</string>
-    <key>StandardOutPath</key>
-    <string>{log}</string>
-</dict>
-</plist>
-"#,
-        bin = installed_bin(paths).display(),
-        home = paths.home.display(),
-        log = log.display(),
-    )
-}
-
-fn gui_domain() -> String {
-    // SAFETY: getuid has no preconditions.
-    format!("gui/{}", unsafe { libc::getuid() })
-}
-
-/// Write the LaunchAgent and (re)load it so it starts the daemon now and at every login.
-pub fn load_agent(paths: &Paths) -> io::Result<()> {
-    let plist = agent_plist_path();
-    fs::create_dir_all(plist.parent().expect("plist has a parent"))?;
-    fs::create_dir_all(paths.log_dir())?;
-    fs::write(&plist, agent_plist(paths))?;
-    unload_agent();
-    // Even after the old job is gone, launchd can briefly refuse the new one ("Bootstrap failed: 5:
-    // Input/output error"); retry instead of leaving the sites down.
-    let mut last = String::new();
-    for _ in 0..10 {
-        let out = Command::new("/bin/launchctl").arg("bootstrap").arg(gui_domain()).arg(&plist).output()?;
-        if out.status.success() {
-            return Ok(());
-        }
-        last = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    Err(err(format!(
-        "launchctl bootstrap failed: {last}; retry with `launchctl bootstrap {} {}`",
-        gui_domain(),
-        plist.display()
-    )))
-}
-
-/// Stop the agent (launchd sends SIGTERM; the daemon stops PHP and nginx cleanly) and wait until
-/// launchd has really released it: `bootout` returns before teardown finishes, and a `bootstrap`
-/// right after it fails (this took the owner's sites down during the first upgrade).
-pub fn unload_agent() {
-    let _ = Command::new("/bin/launchctl").arg("bootout").arg(format!("{}/{AGENT_LABEL}", gui_domain())).output();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while agent_loaded() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-}
-
-pub fn agent_loaded() -> bool {
-    Command::new("/bin/launchctl")
-        .arg("print")
-        .arg(format!("{}/{AGENT_LABEL}", gui_domain()))
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// Download composer.phar with its published SHA-256, if missing.
 // shortcut: trusts getcomposer.org over HTTPS plus its sha256; verifying Composer's signature comes with the Phase 5 pipeline.
 pub fn ensure_composer(paths: &Paths) -> io::Result<bool> {
@@ -348,8 +244,7 @@ pub fn ensure_composer(paths: &Paths) -> io::Result<bool> {
     let sum_file = tmp.with_extension("sha256");
     fetch(&format!("{COMPOSER_URL}.sha256sum"), &sum_file)?;
     let expected = fs::read_to_string(&sum_file)?.split_whitespace().next().unwrap_or_default().to_string();
-    let actual = Command::new("/usr/bin/shasum").args(["-a", "256"]).arg(&tmp).output()?;
-    let actual = String::from_utf8_lossy(&actual.stdout).split_whitespace().next().unwrap_or_default().to_string();
+    let actual = crate::releases::sha256_hex(&tmp)?;
     let _ = fs::remove_file(&sum_file);
     if expected.len() != 64 || expected != actual {
         let _ = fs::remove_file(&tmp);
@@ -389,18 +284,6 @@ mod tests {
     }
 
     #[test]
-    fn zsh_gets_zshenv_and_zshrc_bash_gets_bash_profile() {
-        let home = Path::new("/Users/me");
-        assert_eq!(
-            rc_files_for("/bin/zsh", home),
-            [home.join(".zshenv"), home.join(".zshrc")],
-            ".zshenv for every zsh, .zshrc to come before Homebrew after path_helper"
-        );
-        assert_eq!(rc_files_for("", home), [home.join(".zshenv"), home.join(".zshrc")], "zsh is the default");
-        assert_eq!(rc_files_for("/bin/bash", home), [home.join(".bash_profile")]);
-    }
-
-    #[test]
     fn rc_line_is_added_once_and_removed_cleanly() {
         let dir = std::env::temp_dir().join(format!("devid-rc-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -418,6 +301,11 @@ mod tests {
         assert!(remove_rc_line(&rc).unwrap());
         assert_eq!(fs::read_to_string(&rc).unwrap(), "export FOO=1\nexport PATH=\"/x:$PATH\"\n");
         assert!(!remove_rc_line(&rc).unwrap());
+
+        let own = dir.join(".zshenv"); // a file Devid created goes again
+        assert!(ensure_rc_line(&own, &line).unwrap());
+        assert!(remove_rc_line(&own).unwrap());
+        assert!(!own.exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -430,16 +318,5 @@ mod tests {
         let start = args.find("<string>").unwrap() + 8;
         let end = start + args[start..].find("</string>").unwrap();
         assert_eq!(xml_unescape(&args[start..end]), "/Users/a&b/Devid.app/Contents/MacOS/devid-gui");
-    }
-
-    #[test]
-    fn agent_plist_runs_the_installed_binary() {
-        let paths = Paths { home: PathBuf::from("/Users/me/.devid") };
-        let plist = agent_plist(&paths);
-        assert!(plist.contains("<string>/Users/me/.devid/bin/devid</string>"));
-        assert!(plist.contains("<string>dev.devid.daemon</string>"));
-        assert!(plist.contains("<key>SuccessfulExit</key>\n        <false/>"), "no restart after a clean stop");
-        assert!(plist.contains("/Users/me/.devid/log/daemon.log"));
-        assert!(!plist.contains("<key>ProcessType</key>"), "sites must not run at background priority");
     }
 }

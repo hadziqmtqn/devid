@@ -13,11 +13,10 @@ pub enum Reload {
 }
 
 pub fn check(name: &str) -> Result<(), String> {
-    if SERVERS.contains(&name) {
-        Ok(())
-    } else {
-        Err(format!("unknown web server {name:?}; choose one of {}", SERVERS.join(", ")))
+    if !SERVERS.contains(&name) {
+        return Err(format!("unknown web server {name:?}; choose one of {}", SERVERS.join(", ")));
     }
+    crate::platform::unavailable_server(name).map_or(Ok(()), Err)
 }
 
 pub fn installed(paths: &Paths, name: &str) -> bool {
