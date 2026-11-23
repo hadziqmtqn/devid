@@ -87,17 +87,23 @@ fn setup_and_uninstall_dry_runs_change_nothing() {
         assert!(o.status.success(), "{args:?}: {}", stderr(&o));
         String::from_utf8_lossy(&o.stdout).into_owned()
     };
+    // Each system's own steps (platform/): a LaunchAgent, /etc/resolver and the keychain on macOS;
+    // a systemd user unit, systemd-resolved, the CA store and Chrome's database on Linux (D-057).
+    let (service, setup_os, uninstall_os): (&str, &[&str], &[&str]) = if cfg!(target_os = "macos") {
+        ("LaunchAgent", &["/etc/resolver/test"], &["remove-trusted-cert"])
+    } else {
+        (
+            "systemd user unit",
+            &["/etc/systemd/resolved.conf.d/devid.conf", "Chrome's certificate database"],
+            &["update-ca-certificates --fresh", "Chrome's certificate database"],
+        )
+    };
     let plan = run(&["setup", "--dry-run"]);
-    for expected in [
-        "shims",
-        "PATH",
-        "LaunchAgent",
-        "composer.phar",
-        "/etc/resolver/test",
-        "dry run: nothing changed",
-        "install PHP 8.5",
-        "install nginx",
-    ] {
+    for expected in
+        ["shims", "PATH", service, "composer.phar", "dry run: nothing changed", "install PHP 8.5", "install nginx"]
+            .iter()
+            .chain(setup_os)
+    {
         assert!(plan.contains(expected), "setup dry run mentions {expected}:\n{plan}");
     }
     let plan = run(&["setup", "--dry-run", "--php", "8.3", "--php", "8.4", "--server", "caddy"]);
@@ -109,7 +115,7 @@ fn setup_and_uninstall_dry_runs_change_nothing() {
     let plan = run(&["setup", "--dry-run", "--no-php", "--no-server"]);
     assert!(!plan.contains("PHP") && !plan.contains("nginx"), "--no-php --no-server installs neither:\n{plan}");
     let plan = run(&["uninstall", "--dry-run", "--purge"]);
-    for expected in ["remove-trusted-cert", "LaunchAgent", "PATH line", "delete"] {
+    for expected in [service, "PATH line", "delete"].iter().chain(uninstall_os) {
         assert!(plan.contains(expected), "uninstall dry run mentions {expected}:\n{plan}");
     }
     assert!(fs::read_dir(&fake_home).unwrap().next().is_none(), "nothing written to the user's home");
