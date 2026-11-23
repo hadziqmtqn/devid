@@ -155,7 +155,7 @@ Merged as hadziqmtqn/devid-binaries#19 (5f0f8f9) and released as `2026.11.23-19`
 
 - **imagick's fonts (L3, and the Xubuntu machine):**
   - The Linux build has no fontconfig, so its `type.xml` names the DejaVu fonts (`fonts-dejavu-core`) and Liberation fonts (`fonts-liberation`) in `/usr/share/fonts/truetype/`.
-  - Check that a fresh Xubuntu has both packages.
+  - Check on the Xubuntu machine that both packages come with the desktop.
   - `devid doctor` can warn when imagick is installed and they are missing.
 - **L3:** on Linux the daemon looks up the arch key `linux-x86_64`. On macOS it stays `x86_64` or `arm64`. The runtime release needs no further change for L3 or L4.
 
