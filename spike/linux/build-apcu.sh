@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(pwd)"
 WORK="${WORK:-$ROOT/work}"
 OUT="${OUT:-$ROOT/out}"
-SPC_TARGET="${SPC_TARGET:-native-native-gnu.2.17}"
+SPC_TARGET="${SPC_TARGET:-x86_64-linux-gnu.2.17}"
 GLIBC_TARGET="x86_64-linux-gnu.${SPC_TARGET##*gnu.}"
 APCU_URL="https://pecl.php.net/get/apcu-5.1.28.tgz"
 APCU_SHA256=ca9c1820810a168786f8048a4c3f8c9e3fd941407ad1553259fb2e30b5f057bf

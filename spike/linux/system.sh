@@ -211,8 +211,9 @@ sudo resolvectl domain devid0 '~test'
 sudo resolvectl default-route devid0 false
 sleep 1
 resolvectl status >"$OUT/resolvectl-b.txt" 2>&1
-check "B (own link): resolvectl query $HOST" bash -c "resolvectl query $HOST | grep -q 127.0.0.1"
-check "B: getent hosts $HOST" resolves_local "$HOST"
+# Recorded as "does not resolve": in runs 3 and 4 resolved gave the address-less link no DNS scope.
+refuse "B (own link): resolved does not use a link without an address" bash -c "resolvectl query $HOST | grep -q 127.0.0.1"
+refuse "B: getent hosts $HOST does not resolve either" resolves_local "$HOST"
 check "B: other names still resolve" getent hosts github.com
 b=$(leaks b "${others[@]}")
 note "B: queries outside .test that reached Devid's DNS: $b"
@@ -234,9 +235,9 @@ check "update-ca-certificates adds the CA" bash -c "sudo update-ca-certificates 
 check "curl trusts https://$HOST (443 -> 8443)" serves "https://$HOST/"
 check "PHP trusts it with Devid's cacert.pem" bash -c "'$BIN/php' -n -d openssl.cafile='$DEVID_HOME/ca/cacert.pem' -r 'echo file_get_contents(\"https://$HOST/\");' | grep -qx '$TEXT'"
 note "PHP's own OpenSSL locations: $("$BIN/php" -n -r 'echo json_encode(openssl_get_cert_locations());' 2>&1)"
-for b in chrome firefox; do
-  check "$b trusts https://$HOST with only the system store" "$PYTHON" "$HERE/browser.py" "$b" "https://$HOST/" "$TEXT"
-done
+# Measured in runs 3 and 4: Firefox reads the system store, Chrome does not.
+refuse "chrome does not trust it from the system store alone" "$PYTHON" "$HERE/browser.py" chrome "https://$HOST/" "$TEXT"
+check "firefox trusts it from the system store alone" "$PYTHON" "$HERE/browser.py" firefox "https://$HOST/" "$TEXT"
 # Chrome without certutil: the CACertificates policy (a base64 DER list), read from Chrome's
 # managed policy folder. Chrome then says it is managed by an organization.
 sudo mkdir -p /etc/opt/chrome/policies/managed
