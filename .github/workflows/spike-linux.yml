@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read   # download-artifact from an earlier run (REUSE_PHP_RUN)
 
 concurrency:
   group: spike-linux-${{ github.ref }}
@@ -21,16 +22,30 @@ jobs:
     # Questions 1 and 2: PHP 8.4 from static-php-cli's glibc target, with .so extensions.
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    env:
+      # The PHP build of an earlier run of this workflow, to skip the 20-minute build; empty builds again.
+      REUSE_PHP_RUN: '45102166731'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/cache@v6
+      - if: env.REUSE_PHP_RUN != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: php-linux
+          run-id: ${{ env.REUSE_PHP_RUN }}
+          github-token: ${{ github.token }}
+      - if: env.REUSE_PHP_RUN != ''
+        run: mkdir -p out && tar xzf php-linux.tar.gz -C out && rm php-linux.tar.gz && cat out/BUILDINFO-php
+      - if: env.REUSE_PHP_RUN == ''
+        uses: actions/cache@v6
         with:
           path: work/downloads
           key: spike-linux-php-downloads-v1
-      - run: spike/linux/build-php.sh
+      - if: env.REUSE_PHP_RUN == ''
+        run: spike/linux/build-php.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}   # spc fetches some sources through the GitHub API
-      - run: spike/linux/build-apcu.sh
+      - if: env.REUSE_PHP_RUN == ''
+        run: spike/linux/build-apcu.sh
         continue-on-error: true
       - name: What the binaries link
         run: |
@@ -62,6 +77,12 @@ jobs:
         with:
           name: php-linux
       - run: mkdir php && tar xzf php-linux.tar.gz -C php && bash spike/linux/check-php.sh php
+      - name: Why php does not run (strace)
+        if: failure()
+        run: |
+          apt-get update -qq && apt-get install -y -qq strace >/dev/null
+          strace -f -o /tmp/strace.txt php/php -n -v; echo "exit $?"
+          tail -40 /tmp/strace.txt
 
   nginx:
     # Question 3: nginx, fully static with musl.
