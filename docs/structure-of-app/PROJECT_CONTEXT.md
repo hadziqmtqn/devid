@@ -33,7 +33,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 - Phase 11 (accepted 2026-11-22, done in 0.18.0): Laravel + Vite over HTTPS, so a Laravel site's Vite dev server works in Safari too (D-056).
 
 **Non-goals:**
-- Databases. The owner uses DBngin for PostgreSQL and MySQL.
+- Running databases from Devid. The owner uses DBngin for PostgreSQL and MySQL. Since D-058, `devid-binaries` builds MySQL, PostgreSQL and MongoDB for every Devid platform, but no Devid release installs or runs them yet.
 - Per-site web server choice.
 - Arbitrary extra PHP extensions in v1 (see D-008).
 - In v1: mail catcher, dump viewer, log viewer, share/tunnel (deferred, D-011). Share/tunnel is scheduled for Phase 8 (D-037), the mail catcher for Phase 9 (D-049).

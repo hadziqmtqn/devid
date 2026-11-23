@@ -13,7 +13,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-003 | 2026-11-01 | superseded by D-012 | GUI: Tauri v2 + React + Tailwind + shadcn/ui, menu bar first |
 | D-004 | 2026-11-01 | accepted (version range superseded by D-009) | PHP 8.1 to latest from static-php-cli builds, php-fpm with `pm = ondemand` |
 | D-005 | 2026-11-01 | accepted (default changed to nginx by D-015; all three implemented in M7) | One global web server: Caddy (default), nginx, Apache |
-| D-006 | 2026-11-01 | accepted | Databases are out of scope (DBngin is used) |
+| D-006 | 2026-11-01 | superseded in part by D-058 (binaries are built; Devid does not run databases yet) | Databases are out of scope (DBngin is used) |
 | D-007 | 2026-11-01 | accepted (applies to the TUI page structure, D-012) | UI follows macOS System Settings, per the approved prototype |
 | D-008 | 2026-11-02 | accepted | How to ship static PHP binaries (details below) |
 | D-009 | 2026-11-02 | accepted | Supported PHP versions: 8.3, 8.4, 8.5; no 8.1 or 8.2 |
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-058 | 2026-11-24 | accepted 2026-11-24 (supersedes D-006 in part) | Database binaries for every Devid platform: official MySQL and MongoDB builds mirrored, PostgreSQL built from source, in a release track of their own; Devid does not run them yet |
 | D-057 | 2026-11-23 | accepted 2026-11-23 (Phase 12; narrows D-044); L1 details 2026-11-23; L2 runtime 2026-11-23; L3 daemon 2026-11-23; L4 release build 2026-11-23 | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners and, for the desktop, on the owner's Xubuntu machine over SSH |
 | D-056 | 2026-11-22 | accepted 2026-11-22 (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
 | D-055 | 2026-11-22 | accepted 2026-11-22 (the owner's request) | The app's site detail puts explanations in tooltips: an (i) after each title, the notes under the cards in their headings' tooltips; what needs action stays on the page, and a status is said once |
@@ -1037,3 +1038,47 @@ See ARCHITECTURE, "PHP runtime".
   - `install.sh` and self-update pick the binary for their own system. Linux on arm64 is refused until it has a build.
 - **Plan:** `docs/roadmap/phase-12.md`.
 - **Status:** accepted by the owner on 2026-11-23, answering the plan's three questions ("ubuntu dulu, berbasis Xubuntu"; "sesuai usulan kamu, dahulukan pondasi CLI dan TUI dulu baru ke desktop app linux").
+
+## D-058: database binaries for every Devid platform (proposed and accepted 2026-11-24; supersedes D-006 in part)
+
+- **Context:**
+  - D-006 left databases to DBngin, which runs only on macOS. With Linux coming (D-057), the owner asked on 2026-11-24 for MySQL, PostgreSQL and MongoDB binaries for every OS Devid supports, prepared while Phase 12 testing goes on.
+  - What upstream publishes:
+    - **MySQL:** official builds for macOS (Intel and Apple silicon) and a generic Linux build for glibc 2.28. Oracle publishes only an MD5, on a download page that refuses scripts, and no machine-readable list of releases.
+    - **MongoDB:** official Community builds for macOS and for named Linux distributions, with SHA-256s in its `full.json`. There has been no generic Linux build since 4.4.
+    - **PostgreSQL:** source only. postgresql.org has no macOS or generic Linux binaries.
+- **Decision:**
+  - **Scope:** binaries only, in `devid-binaries`. Installing and running databases from Devid (daemon, CLI, TUI, app) is a later decision, so D-006 still stands for Devid itself.
+  - **Platforms:** macOS on Intel and Apple silicon, and Linux x86_64. The manifest uses Devid's arch keys (`x86_64`, `arm64`, `linux-x86_64`).
+  - **Versions:** every series upstream still supports, pinned in `db/versions.json`:
+    - MySQL 8.4 LTS and 9.7 LTS (8.0 reached end of life in April 2026). The 26.x Innovation releases are left out: they have no Intel macOS build and are replaced every few months;
+    - PostgreSQL 15 to 19 (14 ended on 2026-11-12);
+    - MongoDB 7.0, 8.0 and 9.0 (major releases; the short-lived minor releases 8.2 and 8.3 are left out), with mongosh.
+  - **MySQL and MongoDB are mirrored, PostgreSQL is built:**
+    - **MySQL:** the official build, checked against the SHA-256 pinned in its pull request, repackaged without the debug server, the MeCab dictionary, static libraries, headers and man pages (about 80 MB instead of 170 MB). The files kept are unmodified.
+    - **MySQL per platform:** Oracle stopped building MySQL for Intel Macs after 8.4.11 and 9.7.4; 8.4.13 and 26.x have none. So MySQL is pinned per platform: Intel Macs stay on their last build (8.4.11), and the other platforms move on (8.4.13). Every arch entry in the manifest carries its own `version`.
+    - **MySQL on Linux:** `mysqld` needs `libaio.so.1` and `libnuma.so.1`. Ubuntu 24.04 ships libaio only as `libaio.so.1t64`, so both are built from source into `lib/private`, where the binaries' runpath looks first. They are built with static-php-cli's zig for glibc 2.17, since the runner's glibc would make them need symbols that Ubuntu 22.04 and Debian 12 lack.
+    - **MongoDB:** `mongod` only (no `mongos`), checked against `full.json`. Linux uses the Ubuntu 22.04 build, which also runs on 24.04 and Debian 12 and links the system's OpenSSL 3 and libcurl.
+    - **mongosh:** the official build, checked against GitHub's digest.
+    - **PostgreSQL:** built from source with OpenSSL 3.5 LTS linked statically (`no-atexit no-thread-pool no-quic`, since libpq refuses a library that can call `exit`), zlib, libedit and the contrib modules; no ICU, uuid-ossp or LLVM. It is relocatable: binaries find `share/` and `lib/` relative to themselves, and the links to libpq are rewritten to `@loader_path` (macOS) or `$ORIGIN` (Linux). macOS uses its own zlib and libedit and targets macOS 12. Linux builds with static-php-cli's zig toolchain for glibc 2.17, as PHP does, and must start on QEMU's Nehalem CPU.
+  - **Checks:** every archive is unpacked under a new path on its own platform's runner. A server is created there, started on 127.0.0.1 and a spare port, then queried with the bundled client and stopped (`scripts/db-smoke.sh`). MongoDB is queried through mongosh.
+  - **Releases:** a track of their own, `.github/workflows/db-release.yml`:
+    - `db-YYYY.MM.DD-N` releases, and the rolling `db-latest` with the newest `manifest.json`;
+    - the runtime releases, their manifest and `runtime-latest` do not change, so no Devid release reads the new builds;
+    - a pull request that touches the database scripts builds and smoke-tests everything; a merge that changes `db/versions.json` publishes;
+    - a weekly `db.py check` reports newer upstream versions and series, and changes nothing.
+- **Limits found:**
+  - MySQL's macOS builds need macOS 14 or later, and so do MongoDB 8.0 and 9.0 (7.0 needs 11). Devid's PHP and nginx target macOS 12.
+  - MongoDB 5.0 and later need AVX on x86_64 (Sandy Bridge or newer), above the Nehalem floor of the rest of Devid's Linux runtime.
+  - MySQL on Intel Macs no longer gets security fixes from Oracle's builds. Building it from source for Intel was not chosen: a MySQL build takes about an hour on CI.
+- **Not chosen:**
+  - **Third-party PostgreSQL builds** (theseus-rs/postgresql-binaries): quicker, but the builds would depend on an outside project.
+  - **Adding the databases to the runtime release:** every PHP release would upload about 1.7 GB of database archives again, and the manifest Devid reads would grow.
+  - **Downloading from upstream at install time:** MySQL's checksums cannot be fetched by a script, and MongoDB and PostgreSQL would each need their own download path in Devid.
+- **Owner's answers (2026-11-24):**
+  - Binaries only; every supported series; official MySQL and MongoDB builds mirrored and PostgreSQL built from source; a separate release track.
+  - MySQL on Intel Macs: a version per platform, not one version for all and not a source build. MySQL Innovation releases: not yet, LTS only.
+- **Status:** accepted on 2026-11-24. The scripts and workflow are on the `db-binaries` branch of `devid-binaries`.
+  - The MD5 of every pinned MySQL archive matched Oracle's download pages on 2026-11-24.
+  - Every macOS arm64 archive (MySQL 8.4.13 and 9.7.4, PostgreSQL 15 to 19, MongoDB 7.0 to 9.0, mongosh 2.14.3) was built and smoke-tested on the owner's M1.
+  - Intel macOS and Linux run only in CI.
