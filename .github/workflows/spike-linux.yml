@@ -7,6 +7,7 @@ name: Spike Linux (Phase 12 L1)
 on:
   push:
     branches: ['spike/linux-**']
+    paths-ignore: ['docs/**']
   workflow_dispatch:
 
 permissions:
