@@ -2,7 +2,7 @@
 
 > Scope: Devid on Ubuntu LTS (the daemon, the CLI and the TUI), with `.test` DNS, HTTPS and ports 80/443 as on macOS (D-057)
 > Verified against: 2026-11-23 (v0.18.0; GitHub's `ubuntu-latest` is Ubuntu 26.04; spike run 45104513332; runtime release `2026.11.23-19`)
-> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". L1 and L2 done 2026-11-23, see "L1 results" and "L2 results"; L3 is next.
+> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". L1, L2 and L3 done 2026-11-23, see "L1 results", "L2 results" and "L3 results"; L4 is next.
 
 D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0 (D-046). On 2026-11-23 the owner chose Linux, not Windows, as the next platform. The research backs that order: Linux is Herd's most-voted request, and neither Herd nor ServBay runs on it (`docs/research/competitors-2026-11.md`).
 
@@ -236,13 +236,33 @@ The daemon, the CLI and the TUI on Linux, built from L1's answers. The owner cho
    The `/proc` check has a unit test of its own, which opens a connection in the test process and looks for it.
 4. Runs `devid uninstall --purge`, then compares every recorded file and checks that no `devid` table, user unit or CA is left.
 
+## L3 results (2026-11-23)
+
+Merged as #125. The record, with what CI found on the way, is `docs/implementation-timeline/linux/2026-11-23-l3-daemon.md`.
+
+- **On a runner (CI run 45199716519, Ubuntu 24.04):**
+  - `linux-e2e` ran setup with the real `sudo` step, then curl and headless Chrome loaded `https://e2e.test/` ("e2e 8.5.13 Linux").
+  - `devid doctor` said "all good".
+  - After `devid uninstall --purge`, every recorded file matched its state before setup, the system CA bundle included. The job takes about 1.5 minutes.
+- **Tests:** the Linux plans (the root step, the user unit, the PATH files, `/proc`) have unit tests that also run on the Mac. The whole suite passes on CI's Ubuntu runner.
+- **Still for the Xubuntu machine:**
+  - a desktop login, logout and reboot with the user unit and `devid-ports.service`;
+  - Chrome (.deb) and Firefox (snap) in the Xfce session;
+  - whether `libnss3-tools`, `nftables` and the fonts come with the desktop.
+
+### What this changes in the plan
+
+- **L4:**
+  - `linux-e2e` already builds the static musl binary, so the release build and `smoke.sh` on Ubuntu can start from it.
+  - Self-update still downloads `devid-darwin-*`, which L4 changes, together with `install.sh`.
+
 ## Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
 | L1 | **Spike** | the answers above are in this doc, and D-057 is accepted or changed to match them (done 2026-11-23, see "L1 results") |
 | L2 | **Runtime for Linux** (devid-binaries): PHP 8.3–8.5, the extension catalog and nginx built for Linux; Linux mirrors of Caddy and Mailpit; Linux entries in the manifest | a runtime release holds `linux-x86_64` builds, and Devid 0.18 on macOS still updates from it (done 2026-11-23, release `2026.11.23-19`, see "L2 results") |
-| L3 | **Daemon on Linux:** the platform interface; the Linux helper (DNS, ports, CA); the systemd user unit; the PATH file; the `/proc` check; `devid doctor` | unit tests cover the Linux plans; on a runner, `devid setup` serves a site at `https://<site>.test` (curl and headless Chrome), and `devid uninstall` puts every changed file back |
+| L3 | **Daemon on Linux:** the platform interface; the Linux helper (DNS, ports, CA); the systemd user unit; the PATH file; the `/proc` check; `devid doctor` | unit tests cover the Linux plans; on a runner, `devid setup` serves a site at `https://<site>.test` (curl and headless Chrome), and `devid uninstall` puts every changed file back (done 2026-11-23, #125, see "L3 results") |
 | L4 | **Install, update and CI:** `install.sh` and self-update on Linux; a Linux build in `release.yml`; `smoke.sh` on an Ubuntu runner | a dry run builds macOS and Linux and passes the smoke test on both |
 | L5 | **Docs and release 0.19.0:** README, the guide's requirements and install pages | released, after Claude installs it on the Xubuntu machine from `install.sh`, runs setup, opens a site in Chrome and Firefox, updates it and uninstalls it |
 
