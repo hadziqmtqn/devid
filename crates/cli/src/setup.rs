@@ -189,10 +189,10 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
     Ok(())
 }
 
-/// Where the system store is not enough (Chrome on Linux reads `~/.pki/nssdb`), add the CA there
-/// as the user. A missing tool is reported, not fatal: the rest of setup still works.
+/// Where the system store is not enough (on Linux, Chrome reads `~/.pki/nssdb` and each Firefox
+/// profile its own database), add the CA there as the user. A missing tool is reported, not fatal: the rest of setup still works.
 fn trust_in_browsers(paths: &Paths, dry_run: bool) {
-    const WHAT: &str = "trust the Devid CA in Chrome's certificate database";
+    const WHAT: &str = "trust the Devid CA in the browsers' certificate databases (Chrome, Firefox)";
     if dry_run {
         if platform::browser_trust_needed() {
             println!("  - {WHAT}");
@@ -413,7 +413,7 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
         helper(HelperAction::Uninstall { dry_run }, paths)?;
     }
     if platform::browser_trust_needed() {
-        step(dry_run, "remove the Devid CA from Chrome's certificate database", || {
+        step(dry_run, "remove the Devid CA from the browsers' certificate databases", || {
             platform::browser_untrust().unwrap_or(Ok(String::new()))
         })?;
     }

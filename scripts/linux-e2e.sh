@@ -1,7 +1,8 @@
 #!/bin/bash
 # Devid on Linux end to end (Phase 12 L3, D-057), for a GitHub Ubuntu runner: `devid setup` with the
 # real root step (sudo, systemd-resolved, nftables, the CA store), Chrome's database and the systemd
-# user unit; a linked site over https://<site>.test through ports 80/443, for curl and headless
+# user unit; a Firefox profile's own database (as Ubuntu's Firefox snap keeps one); a linked site
+# over https://<site>.test through ports 80/443, for curl and headless
 # Chrome; then `devid uninstall --purge`, after which every file setup touched must be as before.
 # It changes the system, so it is for throwaway runners only, never a workstation.
 # Usage: scripts/linux-e2e.sh <path to devid>
@@ -22,12 +23,18 @@ snapshot() {
   for f in "${FILES[@]}"; do
     if [ -e "$f" ]; then sha256sum "$f"; else echo "absent $f"; fi
   done
-  # Chrome's database: the certificates in it, without certutil's header. Setup may create the
-  # database itself (Chrome would on its first run); uninstall leaves it empty.
-  if [ -f "$HOME/.pki/nssdb/cert9.db" ]; then
-    certutil -d "sql:$HOME/.pki/nssdb" -L | awk 'NF && !/^Certificate Nickname/ && !/SSL,S\/MIME,JAR\/XPI/'
-  fi
+  # The browsers' databases: the certificates in each, without certutil's header. Setup may create
+  # Chrome's itself (Chrome would on its first run); uninstall leaves it empty.
+  for db in "$HOME/.pki/nssdb" "$FIREFOX"; do
+    if [ -f "$db/cert9.db" ]; then
+      echo "$db:"
+      certutil -d "sql:$db" -L | awk 'NF && !/^Certificate Nickname/ && !/SSL,S\/MIME,JAR\/XPI/'
+    fi
+  done
 }
+# A Firefox profile as Ubuntu's snap keeps it, with its own certificate database: the snap reads
+# nothing else, so setup must add the CA there and uninstall take it out.
+FIREFOX="$HOME/snap/firefox/common/.mozilla/firefox/e2e.default"
 
 finish() {
   status=$?
@@ -46,6 +53,8 @@ sudo loginctl enable-linger "$USER"
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 for _ in $(seq 50); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 0.2; done
 systemctl --user is-system-running || true
+mkdir -p "$FIREFOX"
+certutil -N -d "sql:$FIREFOX" --empty-password
 snapshot > "$T/before.txt"
 
 step "devid setup"
@@ -55,6 +64,7 @@ D="$HOME/.devid/bin/devid"
 systemctl --user is-active --quiet devid.service || fail "the user unit does not run"
 grep -qx "export PATH=\"$HOME/.devid/bin:\$PATH\" # added by devid" "$HOME/.bashrc" || fail "no PATH line in ~/.bashrc"
 "$D" helper status
+certutil -d "sql:$FIREFOX" -L -n "Devid Local CA" >/dev/null || fail "setup left the CA out of the Firefox profile"
 
 step "A site at https://$SITE.test"
 mkdir -p "$T/$SITE/public"
