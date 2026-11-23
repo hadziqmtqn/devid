@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 150
     env:
       # The PHP build of an earlier run of this workflow, to skip the 20-minute build; empty builds again.
-      REUSE_PHP_RUN: '45102166731'
+      REUSE_PHP_RUN: ''
     steps:
       - uses: actions/checkout@v7
       - if: env.REUSE_PHP_RUN != ''
@@ -55,6 +55,11 @@ jobs:
           echo "newest glibc symbol: $(objdump -T php php-fpm modules/*.so | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1)"
           ls -l php php-fpm modules
       - run: spike/linux/check-php.sh out
+      - name: On an older CPU (QEMU, Nehalem = x86-64-v2)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user >/dev/null
+          qemu-x86_64 -cpu Nehalem out/php -n -d zend_extension="$PWD/out/modules/xdebug.so" -v
+          qemu-x86_64 -cpu Nehalem out/php-fpm -n -m | head -3
       - run: tar -C out -czf php-linux.tar.gz .
       - uses: actions/upload-artifact@v7
         with:
@@ -93,6 +98,8 @@ jobs:
       - run: spike/linux/build-nginx.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
+      - name: On an older CPU (QEMU, Nehalem = x86-64-v2)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user >/dev/null && qemu-x86_64 -cpu Nehalem out/nginx -v
       - run: tar -C out -czf nginx-linux.tar.gz .
       - uses: actions/upload-artifact@v7
         with:
@@ -118,6 +125,7 @@ jobs:
           f=target/x86_64-unknown-linux-musl/release/devid
           file "$f"; ldd "$f" || true; ls -l "$f"
           mkdir -p out && cp "$f" out/ && tar -C out -czf devid-linux.tar.gz .
+          sudo apt-get install -y -qq qemu-user >/dev/null && qemu-x86_64 -cpu Nehalem "$f" --version
       - uses: actions/upload-artifact@v7
         with:
           name: devid-linux
