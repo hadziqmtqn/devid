@@ -1,4 +1,5 @@
 //! M7: switching the active web server between nginx, Caddy and Apache (fakes, so CI can run it).
+//! Apache is macOS's own httpd; Linux refuses it (D-057), and the test checks that instead.
 
 mod common;
 
@@ -38,8 +39,14 @@ fn switch_between_nginx_caddy_and_apache() {
     // Without --from, install downloads from the release manifest (unreachable here).
     assert!(stderr(&devid(&home, &["server", "install", "caddy"])).contains("download failed"));
 
+    let apache = cfg!(target_os = "macos");
     for (name, bin) in [("nginx", &nginx), ("caddy", &caddy), ("apache", &httpd)] {
         let out = devid(&home, &["server", "install", name, "--from", &s(bin)]);
+        if name == "apache" && !apache {
+            assert!(stderr(&out).contains("Apache is not available on Linux"), "{}", stderr(&out));
+            assert!(stderr(&devid(&home, &["server", "use", "apache"])).contains("not available on Linux"));
+            continue;
+        }
         assert!(out.status.success(), "{name}: {}", stderr(&out));
     }
     wait_for("nginx running", || server(&home) == ("nginx".into(), "running".into()));
@@ -64,18 +71,21 @@ fn switch_between_nginx_caddy_and_apache() {
     assert!(fs::read_to_string(home.join("caddy/Caddyfile")).unwrap().contains("shop.test"));
 
     // caddy -> apache: httpd.conf rendered; a site change is a graceful SIGUSR1 reload.
-    assert!(devid(&home, &["server", "use", "apache"]).status.success());
-    wait_for("apache running", || server(&home) == ("apache".into(), "running".into()));
-    assert!(fs::read_to_string(home.join("apache/httpd.conf")).unwrap().contains("ServerName shop.test"));
-    assert!(devid(&home, &["unlink", "shop"]).status.success());
-    wait_for("apache graceful reload", || home.join("apache-reloads").exists());
-    assert!(!fs::read_to_string(home.join("apache/httpd.conf")).unwrap().contains("shop.test"));
+    if apache {
+        assert!(devid(&home, &["server", "use", "apache"]).status.success());
+        wait_for("apache running", || server(&home) == ("apache".into(), "running".into()));
+        assert!(fs::read_to_string(home.join("apache/httpd.conf")).unwrap().contains("ServerName shop.test"));
+        assert!(devid(&home, &["unlink", "shop"]).status.success());
+        wait_for("apache graceful reload", || home.join("apache-reloads").exists());
+        assert!(!fs::read_to_string(home.join("apache/httpd.conf")).unwrap().contains("shop.test"));
+    }
 
     // Back to nginx.
     assert!(devid(&home, &["server", "use", "nginx"]).status.success());
     wait_for("nginx running again", || server(&home) == ("nginx".into(), "running".into()));
     let listing = String::from_utf8_lossy(&devid(&home, &["server", "list"]).stdout).into_owned();
-    assert!(listing.contains("* nginx") && listing.contains("caddy") && listing.contains("apache"), "{listing}");
+    assert!(listing.contains("* nginx") && listing.contains("caddy"), "{listing}");
+    assert_eq!(listing.contains("apache"), apache, "Linux lists only the servers it runs: {listing}");
 
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();

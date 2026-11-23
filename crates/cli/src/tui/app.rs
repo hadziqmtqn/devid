@@ -243,7 +243,7 @@ pub struct App {
     pub parked: Vec<String>,
     /// Names of ignored parked sites (D-029).
     pub ignored: Vec<String>,
-    /// `server_list` entries (nginx, caddy, apache).
+    /// `server_list` entries: nginx and caddy, and apache on macOS.
     pub servers: Vec<Value>,
     /// Log files (name, size) and the selected log's text.
     pub logs: Vec<Value>,
