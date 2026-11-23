@@ -62,9 +62,15 @@ echo '<?php echo "e2e ", PHP_VERSION, " ", PHP_OS;' > "$T/$SITE/public/index.php
 "$D" link "$SITE" --path "$T/$SITE"
 getent hosts "$SITE.test" | grep -q '^127\.0\.0\.1 ' || fail "$SITE.test does not resolve through systemd-resolved"
 getent hosts example.org >/dev/null || fail "other names stopped resolving"
-# Devid reloads nginx with SIGHUP and replies at once (see smoke.sh); until the new workers run,
-# nginx does not know the site's name yet ("unrecognized name").
-for _ in $(seq 50); do curl -fs -o /dev/null "https://$SITE.test/" && break; sleep 0.2; done
+# Devid reloads nginx with SIGHUP and replies at once. Until the old worker quits it still accepts
+# connections with the previous config, which does not know the site ("unrecognized name"), so one
+# good answer is not enough: wait for three in a row, as smoke.sh's settle does.
+good=0
+for _ in $(seq 100); do
+  if curl -fs -o /dev/null "https://$SITE.test/"; then good=$((good + 1)); else good=0; fi
+  [ "$good" -ge 3 ] && break
+  sleep 0.1
+done
 page="$(curl -fsS "https://$SITE.test/")" || fail "curl cannot reach https://$SITE.test/"
 echo "curl: $page"
 grep -q '^e2e 8\.[0-9.]* Linux$' <<<"$page" || fail "unexpected page: $page"
