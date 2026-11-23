@@ -10,7 +10,9 @@ miss() { echo "FAIL: $1"; [ -z "${2:-}" ] || sed 's/^/    /' <<<"$2" | head -8; 
 
 echo "on $(. /etc/os-release && echo "$PRETTY_NAME"), $(ldd --version 2>&1 | head -1)"
 
-out="$("$D/php" -n -v 2>&1)" && pass "php runs" || miss "php runs" "$out"
+out="$("$D/php" -n -v 2>&1)"
+rc=$?
+[ "$rc" = 0 ] && pass "php runs" || miss "php runs (exit $rc)" "$out"
 out="$("$D/php" -n -d zend_extension="$D/modules/xdebug.so" -v 2>&1)"
 grep -q "with Xdebug" <<<"$out" && pass "xdebug.so loads in php" || miss "xdebug.so loads in php" "$out"
 out="$("$D/php" -n -d extension="$D/modules/pcov.so" -m 2>&1)"

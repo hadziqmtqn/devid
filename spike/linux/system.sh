@@ -92,7 +92,7 @@ systemctl --user daemon-reload
 check "systemctl --user enable --now devid" systemctl --user enable --now devid
 check "the daemon answers devid status" retry 20 "$BIN/devid" status
 check "the daemon created its CA" retry 10 test -s "$CA"
-check "the CA is name-constrained to .test" bash -c "openssl x509 -in '$CA' -noout -text | grep -A3 'Name Constraints' | grep -q 'DNS:.test'"
+check "the CA is name-constrained to .test" bash -c "openssl x509 -in '$CA' -noout -text | grep -A3 'Name Constraints' | grep -qx ' *DNS:test'"
 check "Devid's DNS answers $HOST on 127.0.0.1:53535" bash -c "dig +short -p 53535 @127.0.0.1 $HOST A | grep -qx 127.0.0.1"
 check "Devid's DNS refuses other names" bash -c "dig -p 53535 @127.0.0.1 example.org A | grep -q 'status: REFUSED'"
 journalctl --user -u devid --no-pager >"$OUT/devid-journal.txt" 2>&1
@@ -237,6 +237,14 @@ note "PHP's own OpenSSL locations: $("$BIN/php" -n -r 'echo json_encode(openssl_
 for b in chrome firefox; do
   check "$b trusts https://$HOST with only the system store" "$PYTHON" "$HERE/browser.py" "$b" "https://$HOST/" "$TEXT"
 done
+# Chrome without certutil: the CACertificates policy (a base64 DER list), read from Chrome's
+# managed policy folder. Chrome then says it is managed by an organization.
+sudo mkdir -p /etc/opt/chrome/policies/managed
+printf '{"CACertificates": ["%s"]}' "$(openssl x509 -in "$CA" -outform der | base64 -w0)" |
+  sudo tee /etc/opt/chrome/policies/managed/devid.json >/dev/null
+check "chrome trusts it with the CACertificates policy" "$PYTHON" "$HERE/browser.py" chrome "https://$HOST/" "$TEXT"
+sudo rm /etc/opt/chrome/policies/managed/devid.json
+refuse "without the policy, chrome rejects it again" "$PYTHON" "$HERE/browser.py" chrome "https://$HOST/" "$TEXT"
 mkdir -p "$HOME/.pki/nssdb"
 [ -f "$HOME/.pki/nssdb/cert9.db" ] || certutil -d "$NSSDB" -N --empty-password
 check "certutil adds the CA to ~/.pki/nssdb" certutil -d "$NSSDB" -A -t C,, -n "Devid CA" -i "$CA"
