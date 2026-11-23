@@ -90,7 +90,8 @@ fn hex(s: &str) -> String {
 
 fn arch(rel: &Path, file: &str) -> Value {
     let e = json!({"url": format!("file://{}/{file}", rel.display()), "sha256": sha256(&rel.join(file)), "size": 1});
-    json!({"x86_64": e.clone(), "arm64": e})
+    // Every arch key a Devid build looks up: macOS on Intel and Apple silicon, and Linux (D-057).
+    json!({"x86_64": e.clone(), "arm64": e.clone(), "linux-x86_64": e})
 }
 
 fn publish(rel: &Path, tag: &str, php: &Value, extensions: Value) {

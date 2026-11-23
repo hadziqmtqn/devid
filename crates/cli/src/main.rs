@@ -242,7 +242,7 @@ enum Command {
         #[arg(long)]
         stop: bool,
     },
-    /// Catch the mail your apps send, in an inbox on this Mac (Mailpit). With no action: its status
+    /// Catch the mail your apps send, in an inbox on this computer (Mailpit). With no action: its status
     Mail {
         #[command(subcommand)]
         action: Option<MailAction>,

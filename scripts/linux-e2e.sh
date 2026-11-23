@@ -24,7 +24,9 @@ snapshot() {
   done
   # Chrome's database: the certificates in it, without certutil's header. Setup may create the
   # database itself (Chrome would on its first run); uninstall leaves it empty.
-  if [ -f "$HOME/.pki/nssdb/cert9.db" ]; then certutil -d "sql:$HOME/.pki/nssdb" -L | tail -n +4; fi
+  if [ -f "$HOME/.pki/nssdb/cert9.db" ]; then
+    certutil -d "sql:$HOME/.pki/nssdb" -L | awk 'NF && !/^Certificate Nickname/ && !/SSL,S\/MIME,JAR\/XPI/'
+  fi
 }
 
 finish() {

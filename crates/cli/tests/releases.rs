@@ -45,7 +45,8 @@ fn asset(root: &Path, rel: &Path, tool: &str, full: &str) -> (String, String) {
 
 fn entry(rel: &Path, (name, sum): &(String, String)) -> Value {
     let e = json!({"url": format!("file://{}/{name}", rel.display()), "sha256": sum, "size": 1});
-    json!({"x86_64": e.clone(), "arm64": e})
+    // Every arch key a Devid build looks up: macOS on Intel and Apple silicon, and Linux (D-057).
+    json!({"x86_64": e.clone(), "arm64": e.clone(), "linux-x86_64": e})
 }
 
 fn publish(rel: &Path, tag: &str, php: &(String, String), php_full: &str, nginx: &(String, String), nginx_ver: &str) {
@@ -129,8 +130,9 @@ fn install_and_update_from_a_release() {
 
     // An asset outside the manifest's own folder is refused before any download.
     let mut manifest: Value = serde_json::from_str(&fs::read_to_string(rel.join("manifest.json")).unwrap()).unwrap();
-    manifest["php"]["8.5"]["arch"]["x86_64"]["url"] = json!("file:///etc/hosts");
-    manifest["php"]["8.5"]["arch"]["arm64"]["url"] = json!("file:///etc/hosts");
+    for arch in ["x86_64", "arm64", "linux-x86_64"] {
+        manifest["php"]["8.5"]["arch"][arch]["url"] = json!("file:///etc/hosts");
+    }
     fs::write(rel.join("manifest.json"), manifest.to_string()).unwrap();
     let o = devid(&home, &["php", "install", "8.5"]);
     assert!(stderr(&o).contains("refusing file:///etc/hosts"), "{}", stderr(&o));

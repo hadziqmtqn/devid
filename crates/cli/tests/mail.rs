@@ -31,7 +31,7 @@ fn mailpit_asset(root: &Path, rel: &Path, version: &str) -> Value {
     let tar = Command::new("tar").arg("-czf").arg(rel.join(&name)).arg("-C").arg(&stage).arg(".").status().unwrap();
     assert!(tar.success());
     let e = json!({"url": format!("file://{}/{name}", rel.display()), "sha256": sha256(&rel.join(&name)), "size": 1});
-    json!({"version": version, "arch": {"x86_64": e.clone(), "arm64": e}})
+    json!({"version": version, "arch": {"x86_64": e.clone(), "arm64": e.clone(), "linux-x86_64": e}})
 }
 
 fn publish(rel: &Path, tag: &str, mailpit: Value) {

@@ -319,7 +319,7 @@ fn draw_mail(frame: &mut Frame, app: &App, area: Rect) {
     } else if m["enabled"] != true {
         let first = if m["installed"] == true { "" } else { " The first time, Devid downloads Mailpit (11 MB)." };
         vec![
-            Line::raw("Mail is off. It catches the email your apps send, in an inbox on this Mac."),
+            Line::raw("Mail is off. It catches the email your apps send, in an inbox on this computer."),
             Line::raw(format!("Press m to turn it on.{first}")),
         ]
     } else {

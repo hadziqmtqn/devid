@@ -1578,7 +1578,7 @@ fn install_php(
                 }
             };
             let artifact = releases::artifact(manifest, "php", Some(version))
-                .ok_or(format!("the release has no PHP {version} for this Mac"))?;
+                .ok_or(format!("the release has no PHP {version} for this computer"))?;
             let dir = releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?;
             on_downloaded();
             dir
@@ -1686,7 +1686,7 @@ fn install_server(
                 }
             };
             let artifact = releases::artifact(manifest, server, None)
-                .ok_or(format!("the release has no {server} for this Mac"))?;
+                .ok_or(format!("the release has no {server} for this computer"))?;
             let dir = releases::download(&state.paths, &artifact).map_err(|e| e.to_string())?;
             on_downloaded();
             Some(dir.join(server))
@@ -1715,7 +1715,7 @@ fn install_mail(state: &State, manifest: Option<&Value>, on_downloaded: &dyn Fn(
         }
     };
     let artifact = releases::artifact(manifest, "mailpit", None)
-        .ok_or("Devid's release has no Mailpit for this Mac yet; try again after the next runtime release")?;
+        .ok_or("Devid's release has no Mailpit for this computer yet; try again after the next runtime release")?;
     *state.mail_download.lock().unwrap() = Some((releases::archive_path(&state.paths, &artifact), artifact.size));
     let downloaded = releases::download(&state.paths, &artifact).map_err(|e| e.to_string());
     *state.mail_download.lock().unwrap() = None;

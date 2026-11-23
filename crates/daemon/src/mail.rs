@@ -404,7 +404,7 @@ pub fn send_test(mail: &Mail) -> io::Result<()> {
          Date: {date}\r\nMessage-ID: <{now}.{pid}@devid.test>\r\nMIME-Version: 1.0\r\n\
          Content-Type: text/plain; charset=utf-8\r\n\r\n\
          If you can read this, Mail works.\r\n\r\n\
-         Apps on this Mac can send mail to 127.0.0.1:{port}. It lands in this inbox and never reaches a \
+         Apps on this computer can send mail to 127.0.0.1:{port}. It lands in this inbox and never reaches a \
          real mailbox.\r\n.\r\n",
         date = rfc2822(now),
         pid = std::process::id(),
