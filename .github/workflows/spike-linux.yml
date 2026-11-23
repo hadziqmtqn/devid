@@ -1,0 +1,142 @@
+name: Spike Linux (Phase 12 L1)
+
+# Phase 12 L1 (docs/roadmap/phase-12.md): answers the spike's questions on GitHub's Ubuntu
+# runners. It runs only on spike/linux-* branches and publishes nothing; the scripts are in
+# spike/linux/.
+
+on:
+  push:
+    branches: ['spike/linux-**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php:
+    # Questions 1 and 2: PHP 8.4 from static-php-cli's glibc target, with .so extensions.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: work/downloads
+          key: spike-linux-php-downloads-v1
+      - run: spike/linux/build-php.sh
+      - name: What the binaries link
+        run: |
+          cd out
+          file php php-fpm modules/*.so
+          ldd php
+          echo "newest glibc symbol: $(objdump -T php php-fpm modules/*.so | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1)"
+          ls -l php php-fpm modules
+      - run: spike/linux/check-php.sh out
+      - run: tar -C out -czf php-linux.tar.gz .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: php-linux
+          path: php-linux.tar.gz
+
+  php-distros:
+    # Question 1: the glibc floor. The same build on older and newer distros.
+    needs: php
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'ubuntu:24.04', 'ubuntu:26.04', 'debian:12', 'debian:13']
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: php-linux
+      - run: mkdir php && tar xzf php-linux.tar.gz -C php && bash spike/linux/check-php.sh php
+
+  nginx:
+    # Question 3: nginx, fully static with musl.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - run: spike/linux/build-nginx.sh
+      - run: tar -C out -czf nginx-linux.tar.gz .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nginx-linux
+          path: nginx-linux.tar.gz
+
+  devid:
+    # Question 10: Devid itself as a static musl binary.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl --bin devid
+      - name: What it links
+        run: |
+          f=target/x86_64-unknown-linux-musl/release/devid
+          file "$f"; ldd "$f" || true; ls -l "$f"
+          mkdir -p out && cp "$f" out/ && tar -C out -czf devid-linux.tar.gz .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: devid-linux
+          path: devid-linux.tar.gz
+
+  devid-tests:
+    # Question 10: the test suite on musl.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl-tests
+      - run: cargo test --target x86_64-unknown-linux-musl
+
+  system:
+    # Questions 3 to 9: the system pieces, with Devid's own daemon, CA and DNS.
+    needs: [php, nginx, devid]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: '*-linux'
+          path: dl
+          merge-multiple: true
+      - run: mkdir bin && for t in dl/*.tar.gz; do tar xzf "$t" -C bin; done && ls -l bin
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dnsutils libnss3-tools tcpdump nftables
+          python3 -m venv ~/venv && ~/venv/bin/pip install -q selenium
+      - run: BIN=bin PYTHON=~/venv/bin/python spike/linux/system.sh
+      - if: always()
+        run: cat system-out/table.md >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: system-${{ matrix.os }}
+          path: system-out
