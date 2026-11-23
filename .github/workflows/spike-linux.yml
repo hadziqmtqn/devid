@@ -28,6 +28,8 @@ jobs:
           path: work/downloads
           key: spike-linux-php-downloads-v1
       - run: spike/linux/build-php.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # spc fetches some sources through the GitHub API
       - name: What the binaries link
         run: |
           cd out
@@ -66,6 +68,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: spike/linux/build-nginx.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: tar -C out -czf nginx-linux.tar.gz .
       - uses: actions/upload-artifact@v7
         with:

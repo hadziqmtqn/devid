@@ -45,7 +45,9 @@ echo "::group::nginx configure and make"
   --with-http_ssl_module --with-http_v2_module --with-http_realip_module --with-http_gzip_static_module \
   --with-pcre="../pcre2-$PCRE2_VER" --with-pcre-jit \
   --with-cc-opt="-I$BR/include -Os" \
-  --with-ld-opt="-static -L$BR/lib -lz"
+  --with-ld-opt="-static -L$BR/lib -Wl,--start-group -lssl -lcrypto -lz -Wl,--end-group" ||
+  { tail -40 objs/autoconf.err; ls "$BR/lib"; exit 1; }
+# GNU ld reads static archives in order, unlike Apple's: OpenSSL needs zlib after it, hence the group.
 make -j"$(nproc)"
 echo "::endgroup::"
 cp objs/nginx "$OUT/nginx"
