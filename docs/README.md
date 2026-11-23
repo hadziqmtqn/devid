@@ -23,7 +23,7 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 - [Phase 9 plan](roadmap/phase-9.md): Mail, a mail catcher that runs Mailpit, in two stages (D-049; accepted 2026-11-16, done in 0.15.0).
 - [Phase 10 plan](roadmap/phase-10.md): dev servers on demand, started by a site's first request and stopped when idle (D-054, accepted 2026-11-21; O2 in 0.16.1; O3 to O5 in 0.17.0, released 2026-11-22).
 - [Phase 11 plan](roadmap/phase-11.md): Laravel + Vite over HTTPS, so a Laravel site's Vite dev server works in Safari too (D-056, accepted 2026-11-22; done in 0.18.0, released 2026-11-22).
-- [Phase 12 plan](roadmap/phase-12.md): Linux, starting with Ubuntu 24.04 and 26.04 LTS on x86_64 with the CLI and the TUI (D-057, accepted 2026-11-23; L1 spike first).
+- [Phase 12 plan](roadmap/phase-12.md): Linux, starting with Ubuntu 24.04 and 26.04 LTS on x86_64 with the CLI and the TUI (D-057, accepted 2026-11-23; L1 spike done 2026-11-23).
 - [Implementation timeline](implementation-timeline/README.md): one record per merged milestone.
 
 ## Research

@@ -45,7 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
-| D-057 | 2026-11-23 | accepted 2026-11-23 (Phase 12; narrows D-044) | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners and, for the desktop, on the owner's Xubuntu machine over SSH |
+| D-057 | 2026-11-23 | accepted 2026-11-23 (Phase 12; narrows D-044); L1 details 2026-11-23 | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners and, for the desktop, on the owner's Xubuntu machine over SSH |
 | D-056 | 2026-11-22 | accepted 2026-11-22 (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
 | D-055 | 2026-11-22 | accepted 2026-11-22 (the owner's request) | The app's site detail puts explanations in tooltips: an (i) after each title, the notes under the cards in their headings' tooltips; what needs action stays on the page, and a status is said once |
 | D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040); amended 2026-11-21 (O4) and 2026-11-22 (O5) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, on nginx, Caddy and Apache |
@@ -995,5 +995,11 @@ See ARCHITECTURE, "PHP runtime".
   - Ubuntu first, on Xubuntu; the owner sets up the machine.
   - Claude runs the desktop checks on the owner's old Intel Mac running Xubuntu, over SSH on the local network.
   - The CLI and the TUI first; the app on Linux after them.
+- **L1 (2026-11-23), on GitHub's Ubuntu 24.04 and 26.04 runners:** every part holds, with these details:
+  - **PHP:** `SPC_TARGET=x86_64-linux-gnu.2.17`, not `native-…`, which builds for the build machine's CPU and died with SIGILL on older runners. Its newest glibc symbol is 2.17. Xdebug, pcov and apcu load, and it runs on Ubuntu 22.04 to 26.04 and Debian 12 and 13.
+  - **DNS:** the global drop-in `/etc/systemd/resolved.conf.d/devid.conf` (`DNS=127.0.0.1:53535`, `Domains=~test`). No query outside `.test` reached Devid's port.
+  - **Ports:** an `inet devid` nftables table with an `output` nat hook, loaded by a oneshot system unit. It works next to Docker and ufw.
+  - **CA:** the system store serves curl and Firefox 160. Chrome 157 ignores it and needs `~/.pki/nssdb` (`certutil`) or its `CACertificates` policy; L3 picks one.
+  - **The rest:** a systemd user unit, the `/proc` connection check, nginx and Devid as static musl builds (Devid's tests pass on musl), and about 19 MB idle for the daemon, nginx and one php-fpm master.
 - **Plan:** `docs/roadmap/phase-12.md`.
 - **Status:** accepted by the owner on 2026-11-23, answering the plan's three questions ("ubuntu dulu, berbasis Xubuntu"; "sesuai usulan kamu, dahulukan pondasi CLI dan TUI dulu baru ke desktop app linux").
