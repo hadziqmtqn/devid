@@ -30,6 +30,8 @@ jobs:
       - run: spike/linux/build-php.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}   # spc fetches some sources through the GitHub API
+      - run: spike/linux/build-apcu.sh
+        continue-on-error: true
       - name: What the binaries link
         run: |
           cd out

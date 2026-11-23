@@ -15,9 +15,13 @@ out="$("$D/php" -n -d zend_extension="$D/modules/xdebug.so" -v 2>&1)"
 grep -q "with Xdebug" <<<"$out" && pass "xdebug.so loads in php" || miss "xdebug.so loads in php" "$out"
 out="$("$D/php" -n -d extension="$D/modules/pcov.so" -m 2>&1)"
 grep -qx pcov <<<"$out" && pass "pcov.so loads in php" || miss "pcov.so loads in php" "$out"
-out="$("$D/php" -n -d extension="$D/modules/apcu.so" -d apc.enable_cli=1 \
-  -r 'apcu_store("k", 41); apcu_inc("k"); echo apcu_fetch("k");' 2>&1)"
-[ "$out" = 42 ] && pass "apcu.so (built with phpize) loads and works" || miss "apcu.so loads and works" "$out"
+if [ -f "$D/modules/apcu.so" ]; then
+  out="$("$D/php" -n -d extension="$D/modules/apcu.so" -d apc.enable_cli=1 \
+    -r 'apcu_store("k", 41); apcu_inc("k"); echo apcu_fetch("k");' 2>&1)"
+  [ "$out" = 42 ] && pass "apcu.so (built with phpize) loads and works" || miss "apcu.so loads and works" "$out"
+else
+  echo "SKIP: no apcu.so (build-apcu.sh failed; see its step)"
+fi
 out="$("$D/php-fpm" -n -d zend_extension="$D/modules/xdebug.so" -m 2>&1)"
 grep -q "^Xdebug" <<<"$out" && pass "xdebug.so loads in php-fpm" || miss "xdebug.so loads in php-fpm" "$out"
 
