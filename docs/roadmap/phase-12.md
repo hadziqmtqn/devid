@@ -1,8 +1,8 @@
 # Phase 12 Plan: Linux
 
 > Scope: Devid on Ubuntu LTS (the daemon, the CLI and the TUI), with `.test` DNS, HTTPS and ports 80/443 as on macOS (D-057)
-> Verified against: 2026-11-23 (v0.18.0; GitHub's `ubuntu-latest` is Ubuntu 26.04; spike run 45104513332)
-> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". L1 done 2026-11-23, see "L1 results"; L2 is next.
+> Verified against: 2026-11-23 (v0.18.0; GitHub's `ubuntu-latest` is Ubuntu 26.04; spike run 45104513332; runtime release `2026.11.23-19`)
+> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". L1 and L2 done 2026-11-23, see "L1 results" and "L2 results"; L3 is next.
 
 D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0 (D-046). On 2026-11-23 the owner chose Linux, not Windows, as the next platform. The research backs that order: Linux is Herd's most-voted request, and neither Herd nor ServBay runs on it (`docs/research/competitors-2026-11.md`).
 
@@ -139,12 +139,32 @@ All on GitHub's Ubuntu runners (24.04 and 26.04), except where a question names 
   - **The `CACertificates` policy** needs no package and fits the root step. It covers only Chrome, and a managed policy makes Chrome say it is managed by an organization (to see on the Xubuntu machine).
 - **Still for the Xubuntu machine:** reboots, logging in and out, Chrome (.deb) and Firefox (snap) in the Xfce session, and whether `libnss3-tools` is there.
 
+## L2 results (2026-11-23)
+
+Merged as hadziqmtqn/devid-binaries#19 (5f0f8f9) and released as `2026.11.23-19` (run 45160460967); the record with every check and gotcha is `docs/implementation-timeline/linux/2026-11-23-l2-runtime.md`.
+
+- **What the release holds for `linux-x86_64`:** 30 archives. PHP 8.3.37, 8.4.28 and 8.5.13 (glibc 2.17, with Xdebug and pcov), the eight catalog extensions for each, nginx 1.30.7 (static musl), and the official Caddy 2.11.9 and Mailpit 1.34.0.
+- **The manifest:** Linux builds sit in the same entries under the arch key `linux-x86_64`, next to the macOS keys `x86_64` and `arm64`.
+- **Devid 0.18 on macOS:** `devid update --check` on the owner's Mac reads the new release ("everything is up to date (release 2026.11.23-19)"). Devid 0.18.0's own manifest readers, run on that manifest in a throwaway test, pick the `darwin-arm64` builds and ignore the Linux ones.
+- **Checks on every Linux build:**
+  - glibc's own libraries only, no glibc symbol newer than 2.17, and no rpath;
+  - php, php-fpm, nginx and each extension's smoke test also run under QEMU's Nehalem CPU;
+  - extensions load with `LD_BIND_NOW`, so a missing symbol fails at once.
+
+### What this changes in the plan
+
+- **imagick's fonts (L3, and the Xubuntu machine):**
+  - The Linux build has no fontconfig, so its `type.xml` names the DejaVu fonts (`fonts-dejavu-core`) and Liberation fonts (`fonts-liberation`) in `/usr/share/fonts/truetype/`.
+  - Check that a fresh Xubuntu has both packages.
+  - `devid doctor` can warn when imagick is installed and they are missing.
+- **L3:** on Linux the daemon looks up the arch key `linux-x86_64`. On macOS it stays `x86_64` or `arm64`. The runtime release needs no further change for L3 or L4.
+
 ## Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
 | L1 | **Spike** | the answers above are in this doc, and D-057 is accepted or changed to match them (done 2026-11-23, see "L1 results") |
-| L2 | **Runtime for Linux** (devid-binaries): PHP 8.3–8.5, the extension catalog and nginx built for Linux; Linux mirrors of Caddy and Mailpit; Linux entries in the manifest | a runtime release holds `linux-x86_64` builds, and Devid 0.18 on macOS still updates from it |
+| L2 | **Runtime for Linux** (devid-binaries): PHP 8.3–8.5, the extension catalog and nginx built for Linux; Linux mirrors of Caddy and Mailpit; Linux entries in the manifest | a runtime release holds `linux-x86_64` builds, and Devid 0.18 on macOS still updates from it (done 2026-11-23, release `2026.11.23-19`, see "L2 results") |
 | L3 | **Daemon on Linux:** the platform interface; the Linux helper (DNS, ports, CA); the systemd user unit; the PATH file; the `/proc` check; `devid doctor` | unit tests cover the Linux plans; on a runner, `devid setup` serves a site at `https://<site>.test` (curl and headless Chrome), and `devid uninstall` puts every changed file back |
 | L4 | **Install, update and CI:** `install.sh` and self-update on Linux; a Linux build in `release.yml`; `smoke.sh` on an Ubuntu runner | a dry run builds macOS and Linux and passes the smoke test on both |
 | L5 | **Docs and release 0.19.0:** README, the guide's requirements and install pages | released, after Claude installs it on the Xubuntu machine from `install.sh`, runs setup, opens a site in Chrome and Firefox, updates it and uninstalls it |
