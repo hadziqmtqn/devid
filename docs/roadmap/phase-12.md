@@ -293,6 +293,20 @@ The record is `docs/implementation-timeline/linux/2026-11-23-l4-release.md`.
   - then uninstalls.
 - **Then 0.19.0,** with the README, the devid-binaries README and the guide. On the machine, `devid self-update` goes from rc.1 to 0.19.0.
 
+### rc.1 on the machine (2026-11-24)
+
+- **The release run:** its Linux build failed once, on Mailpit's online version check (#129). A rerun of that job published `devid-v0.19.0-rc.1`.
+- **Install:**
+  - `install.sh` installed it, and setup applied the root step.
+  - Without `libnss3-tools`, setup printed the certutil message; with it, setup put the CA in `~/.pki/nssdb`.
+  - `https://hello.test` answered to curl, and `devid doctor` said "all good".
+  - Ubuntu 24.04 Desktop has no curl, so the guide must start with `sudo apt install curl`.
+- **Browsers:**
+  - Brave (Chromium) loaded the site securely.
+  - Ubuntu's Firefox snap showed a security warning until the CA was in its profile's database. From now on setup does that for every Firefox profile (#130).
+- **Reboot:** `devid-ports.service` loaded the nftables table at boot, systemd-resolved sent `.test` to Devid, and the user unit started at login.
+- **Next:** rc.2 carries #129 and #130. On the machine, Claude installs it over rc.1 and checks Firefox's step, then uninstalls and compares every file setup touched.
+
 ## Milestones
 
 | # | Milestone | Done when |
