@@ -41,6 +41,9 @@ const NSS_NICKNAME: &str = "Devid Local CA";
 const NO_CERTUTIL: &str = "Chrome does not trust https://*.test yet: install certutil (`sudo apt install \
      libnss3-tools`), then run `devid setup` again";
 
+/// The Linux devid binary in a devid release (self-update, install.sh): a static musl build (L4).
+pub const DEVID_ASSET: &str = if cfg!(target_arch = "aarch64") { "devid-linux-arm64" } else { "devid-linux-x86_64" };
+
 /// The arch key of Linux builds in the runtime manifest, apart from the macOS keys (L2).
 pub fn arch_key() -> &'static str {
     if cfg!(target_arch = "aarch64") { "linux-arm64" } else { "linux-x86_64" }

@@ -474,7 +474,7 @@ pub fn self_update(paths: &Paths, check: bool, no_sudo: bool) -> Result<(), Stri
         return Ok(());
     }
 
-    let asset = if cfg!(target_arch = "aarch64") { "devid-darwin-arm64" } else { "devid-darwin-x86_64" };
+    let asset = platform::DEVID_ASSET;
     println!("downloading devid {latest} (sha256-checked)…");
     let sums = std::fs::read_to_string(get("checksums.txt")?).map_err(|e| e.to_string())?;
     let expected = checksum_for(&sums, asset)?;
@@ -497,7 +497,8 @@ pub fn self_update(paths: &Paths, check: bool, no_sudo: bool) -> Result<(), Stri
         return Err(format!("checksum mismatch for {asset}; not installed"));
     }
     std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).map_err(|e| e.to_string())?;
-    // The new binary installs itself (copy to ~/.devid/bin, LaunchAgent reload); same steps as setup.
+    // The new binary installs itself (copy to ~/.devid/bin, restart of the login service); same steps
+    // as setup.
     releases::self_update_step(paths, &serde_json::json!({"to": latest, "step": "install"}), false);
     let mut setup = std::process::Command::new(&bin);
     setup.arg("setup");

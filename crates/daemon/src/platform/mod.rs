@@ -15,7 +15,7 @@ use linux as os;
 use macos as os;
 
 pub use os::{
-    COPY_COMMANDS, DESKTOP_APP, NAME, OPEN_COMMAND, REDIRECT_FIX, SERVICE, arch_key, browser_trust,
+    COPY_COMMANDS, DESKTOP_APP, DEVID_ASSET, NAME, OPEN_COMMAND, REDIRECT_FIX, SERVICE, arch_key, browser_trust,
     browser_trust_needed, browser_untrust, established, install_actions, load_service, os_checks, prerequisites,
     rc_files_for, redirect_installed, remove_service, service_loaded, service_path, stop_service, system_status,
     terminal_command, unavailable_server, uninstall_actions,

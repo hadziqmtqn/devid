@@ -7,7 +7,8 @@ mod common;
 use common::*;
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 
-const ASSET: &str = if cfg!(target_arch = "aarch64") { "devid-darwin-arm64" } else { "devid-darwin-x86_64" };
+/// This system's binary in a devid release: devid-darwin-<arch> or devid-linux-<arch> (D-057).
+const ASSET: &str = devid_daemon::platform::DEVID_ASSET;
 
 /// Publish a fake devid `version` as `<base>/latest` and `<base>/devid-latest`; its `setup`
 /// writes a marker file and keeps the self-update step it was started in.
@@ -103,8 +104,7 @@ fn self_update_checks_verifies_and_hands_over() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// install.sh detects macOS via uname, so it only runs there.
-#[cfg(target_os = "macos")]
+/// install.sh picks the binary for this system from uname: macOS or Linux.
 #[test]
 fn install_sh_downloads_verifies_and_installs() {
     let root = temp_root("devid-install-sh-it");
@@ -132,7 +132,7 @@ fn install_sh_downloads_verifies_and_installs() {
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("checksum mismatch"));
     let o = sh(&[("DEVID_VERSION", "1.2.3")]);
-    assert!(String::from_utf8_lossy(&o.stderr).contains("no devid-darwin-"), "missing version tag is reported");
+    assert!(String::from_utf8_lossy(&o.stderr).contains(&format!("no {ASSET} ")), "missing version tag is reported");
 
     fs::remove_dir_all(&root).unwrap();
 }

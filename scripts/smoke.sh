@@ -1,9 +1,10 @@
 #!/bin/bash
 # End-to-end check of a devid build with the real PHP and nginx from runtime-latest (D-044): a daemon
 # in a throwaway DEVID_HOME on spare ports installs them, serves a linked site, and stops. The
-# on-demand check also installs Caddy from the release and points Devid at the macOS httpd. It needs
-# no sudo and leaves the system alone. release.yml runs it on each arch before publishing, since
-# Apple silicon is tested on CI only.
+# on-demand check also installs Caddy from the release and, on macOS, points Devid at the macOS
+# httpd (Linux has no Apache in Devid, D-057). It needs no sudo and leaves the system alone.
+# release.yml runs it on each target before publishing: Intel and Apple silicon Macs, and Linux
+# x86_64; Apple silicon and Linux are tested on CI only.
 # Usage: scripts/smoke.sh <path to devid>
 set -euo pipefail
 DEVID="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
@@ -117,12 +118,14 @@ for _ in $(seq 60); do [ "$(front)" = "proxy smoke" ] && break; sleep 0.5; done
 "$DEVID" cmd on-demand front broken > /dev/null
 got="$(page)"
 case "$got" in *"exited with code 3"*smoke-broken*$'\n'500) ;; *) echo "FAIL: no failure page: $got" >&2; exit 1 ;; esac
-# Caddy (from the runtime release) and Apache (the macOS httpd) wake it too (Phase 10 O4). Apache
-# answers 307 to the same URL once the dev server accepts; browsers follow it, curl with -L.
+# Caddy (from the runtime release) and, on macOS, Apache (the macOS httpd) wake it too (Phase 10
+# O4). Apache answers 307 to the same URL once the dev server accepts; browsers follow it, curl
+# with -L.
+servers="caddy"
+[ "$(uname -s)" != Darwin ] || servers="caddy apache"
 "$DEVID" cmd on-demand front dev > /dev/null
-"$DEVID" server install caddy > /dev/null
-"$DEVID" server install apache > /dev/null
-for server in caddy apache; do
+for server in $servers; do "$DEVID" server install "$server" > /dev/null; done
+for server in $servers; do
   "$DEVID" cmd stop front dev > /dev/null 2>&1 || true
   "$DEVID" server use "$server" > /dev/null
   settle "proxy smoke" -L || { echo "FAIL: on-demand front.test on $server: $(front -L)" >&2; exit 1; }
@@ -130,7 +133,7 @@ for server in caddy apache; do
 done
 "$DEVID" server use nginx > /dev/null
 "$DEVID" cmd on-demand front off > /dev/null
-echo "on-demand smoke test passed on nginx, caddy and apache on $(uname -m)"
+echo "on-demand smoke test passed on nginx and $servers on $(uname -s) $(uname -m)"
 
 # Mail (D-049), once the runtime release has Mailpit: the real Mailpit on spare ports catches a test
 # email and one from PHP's mail(), and refuses a foreign Host header (DNS rebinding).
