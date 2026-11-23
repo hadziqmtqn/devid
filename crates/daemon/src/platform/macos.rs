@@ -31,6 +31,9 @@ const SYSTEM_KEYCHAIN: &str = "/Library/Keychains/System.keychain";
 const CA_NAME: &str = "Devid Local CA";
 pub const AGENT_LABEL: &str = "dev.devid.daemon";
 
+/// This Mac's devid binary in a devid release (self-update, install.sh).
+pub const DEVID_ASSET: &str = if cfg!(target_arch = "aarch64") { "devid-darwin-arm64" } else { "devid-darwin-x86_64" };
+
 /// The arch key of this Mac's builds in the runtime manifest.
 pub fn arch_key() -> &'static str {
     if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" }

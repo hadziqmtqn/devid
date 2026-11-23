@@ -1,5 +1,6 @@
 #!/bin/sh
-# Devid installer: fetches the devid binary and hands over to `devid setup` (D-014).
+# Devid installer for macOS and Linux (D-057): fetches the devid binary for this system and hands
+# over to `devid setup` (D-014).
 # This script never uses sudo; system changes happen only inside `devid setup`, which lists them first.
 #
 #   curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
@@ -21,12 +22,17 @@ os=$(uname -s)
 arch=$(uname -m)
 case "$os" in
   Darwin) os=darwin ;;
-  *) die "unsupported OS '$os'; v1 supports macOS only" ;;
+  Linux) os=linux ;;
+  *) die "unsupported OS '$os'; Devid runs on macOS and Linux" ;;
 esac
 case "$arch" in
-  x86_64 | arm64) ;;
+  x86_64) ;;
+  arm64 | aarch64) arch=arm64 ;;
   *) die "unsupported CPU '$arch'" ;;
 esac
+if [ "$os-$arch" = linux-arm64 ]; then
+  die "Devid on Linux runs on x86_64 only for now"
+fi
 asset="devid-$os-$arch"
 case "$VERSION" in
   latest) tag="devid-latest" ;;
@@ -38,12 +44,17 @@ trap 'rm -rf "$tmp"' EXIT
 
 say "downloading $asset ($tag)"
 curl -fsSL --proto '=https,file' -o "$tmp/$asset" "$BASE/$tag/$asset" \
-  || die "no $asset in release $tag (Apple silicon builds start with a newer release)"
+  || die "no $asset in release $tag (older releases have no build for this system)"
 curl -fsSL --proto '=https,file' -o "$tmp/checksums.txt" "$BASE/$tag/checksums.txt" || die "checksums.txt missing"
 
 expected=$(awk -v f="$asset" '$2 == f || $2 == "*"f {print $1}' "$tmp/checksums.txt")
 [ -n "$expected" ] || die "no checksum listed for $asset"
-actual=$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')
+# sha256sum on Linux (coreutils), shasum on macOS.
+if command -v sha256sum >/dev/null 2>&1; then
+  actual=$(sha256sum "$tmp/$asset" | awk '{print $1}')
+else
+  actual=$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')
+fi
 [ "$expected" = "$actual" ] || die "checksum mismatch for $asset"
 
 mkdir -p "$BIN_DIR"
