@@ -1028,6 +1028,10 @@ See ARCHITECTURE, "PHP runtime".
     - `~/.config/systemd/user/devid.service`, with `KillMode=mixed` so the daemon stops its own children, and without lingering;
     - the PATH line in `~/.bashrc` and `~/.profile` for bash.
   - **Not on Linux yet:** Apache and the desktop app; Devid refuses both with a message.
+- **Firefox (2026-11-24, found with 0.19.0-rc.1 on the owner's Ubuntu 24.04 machine):**
+  - Ubuntu's Firefox snap (160) showed a security warning for a site that curl and Brave trusted. It reads neither the system store, which Mozilla's own build reads (L1), nor `~/.pki/nssdb`.
+  - Setup now also adds the CA to every Firefox profile's database (`~/.mozilla/firefox/*` and `~/snap/firefox/common/.mozilla/firefox/*`), with certutil as the user, in line with the owner's choice for Chrome.
+  - Uninstall removes it, and doctor checks each profile. Firefox loaded the site once the CA was in its profile.
 - **L4 (2026-11-23), installing and updating on Linux:**
   - From the next release on, every devid release carries `devid-linux-x86_64`, a static musl binary built and tested on Ubuntu 24.04.
   - `install.sh` and self-update pick the binary for their own system. Linux on arm64 is refused until it has a build.

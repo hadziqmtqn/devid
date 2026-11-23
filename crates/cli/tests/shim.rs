@@ -94,8 +94,8 @@ fn setup_and_uninstall_dry_runs_change_nothing() {
     } else {
         (
             "systemd user unit",
-            &["/etc/systemd/resolved.conf.d/devid.conf", "Chrome's certificate database"],
-            &["update-ca-certificates --fresh", "Chrome's certificate database"],
+            &["/etc/systemd/resolved.conf.d/devid.conf", "browsers' certificate databases"],
+            &["update-ca-certificates --fresh", "browsers' certificate databases"],
         )
     };
     let plan = run(&["setup", "--dry-run"]);

@@ -38,7 +38,7 @@ const NFT: &str = "/usr/sbin/nft";
 const UPDATE_CA: &str = "/usr/sbin/update-ca-certificates";
 const UNIT: &str = "devid.service";
 const NSS_NICKNAME: &str = "Devid Local CA";
-const NO_CERTUTIL: &str = "Chrome does not trust https://*.test yet: install certutil (`sudo apt install \
+const NO_CERTUTIL: &str = "Chrome and Firefox do not trust https://*.test yet: install certutil (`sudo apt install \
      libnss3-tools`), then run `devid setup` again";
 
 /// The Linux devid binary in a devid release (self-update, install.sh): a static musl build (L4).
@@ -103,10 +103,12 @@ fn run(program: &str, args: &[&str], ok_to_fail: bool) -> Action {
 pub fn install_actions(plan: &Plan) -> Vec<Action> {
     vec![
         Action::Write { path: RESOLVED_DROPIN.into(), content: resolved_dropin(plan), backup: true },
-        run(SYSTEMCTL, &["restart", "systemd-resolved"], false),
         Action::Write { path: NFT_FILE.into(), content: nft_rules(plan), backup: false },
         Action::Write { path: PORTS_UNIT.into(), content: ports_unit(), backup: false },
+        // Before any restart: systemctl warns about unit files changed on disk otherwise, as after
+        // the Ubuntu 24.04 machine's upgrade (0.19.0-rc.1).
         run(SYSTEMCTL, &["daemon-reload"], false),
+        run(SYSTEMCTL, &["restart", "systemd-resolved"], false),
         run(SYSTEMCTL, &["enable", "devid-ports.service"], false),
         // restart, not start: a running unit must load changed ports.
         run(SYSTEMCTL, &["restart", "devid-ports.service"], false),
@@ -271,16 +273,33 @@ fn nssdb() -> PathBuf {
     user_home().join(".pki/nssdb")
 }
 
+/// Where Firefox keeps its profiles: Mozilla's own builds, and Ubuntu's snap.
+const FIREFOX_PROFILES: [&str; 2] = [".mozilla/firefox", "snap/firefox/common/.mozilla/firefox"];
+
+/// Every Firefox profile under `home` that has a certificate database. Each profile keeps its own,
+/// and Ubuntu's Firefox snap reads nothing else: on the Ubuntu 24.04 machine it rejected a site that
+/// curl and Brave trusted until the CA was in its profile (0.19.0-rc.1).
+fn firefox_profiles(home: &Path) -> Vec<PathBuf> {
+    let mut profiles: Vec<PathBuf> = FIREFOX_PROFILES
+        .iter()
+        .filter_map(|base| fs::read_dir(home.join(base)).ok())
+        .flat_map(|dir| dir.flatten().map(|e| e.path()))
+        .filter(|p| p.join("cert9.db").is_file())
+        .collect();
+    profiles.sort();
+    profiles
+}
+
 /// certutil, from libnss3-tools; not installed by default.
 fn certutil() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path).map(|d| d.join("certutil")).find(|c| c.is_file())
 }
 
-fn certutil_run(certutil: &Path, args: &[&str]) -> Result<String, String> {
-    let db = format!("sql:{}", nssdb().display());
+fn certutil_run(certutil: &Path, db: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new(certutil)
-        .args(["-d", &db])
+        .arg("-d")
+        .arg(format!("sql:{}", db.display()))
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -288,67 +307,108 @@ fn certutil_run(certutil: &Path, args: &[&str]) -> Result<String, String> {
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
-        Err(format!("certutil {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()))
+        Err(format!("certutil {} ({}): {}", args.join(" "), db.display(), String::from_utf8_lossy(&out.stderr).trim()))
     }
 }
 
-/// Remove every copy of the Devid CA from the database; certutil deletes one per call.
-fn nss_remove(certutil: &Path) {
+/// Remove every copy of the Devid CA from a database; certutil deletes one per call.
+fn nss_remove(certutil: &Path, db: &Path) {
     for _ in 0..10 {
-        if certutil_run(certutil, &["-D", "-n", NSS_NICKNAME]).is_err() {
+        if certutil_run(certutil, db, &["-D", "-n", NSS_NICKNAME]).is_err() {
             break;
         }
     }
 }
 
-/// Whether setup has a browser step: Chrome needs one on Linux.
+fn profiles_note(n: usize) -> String {
+    if n == 1 { "1 Firefox profile".to_string() } else { format!("{n} Firefox profiles") }
+}
+
+/// "~/.pki/nssdb and 2 Firefox profiles", for setup and uninstall.
+fn databases_note(firefox: usize) -> String {
+    if firefox == 0 { "~/.pki/nssdb".to_string() } else { format!("~/.pki/nssdb and {}", profiles_note(firefox)) }
+}
+
+/// Whether setup has a browser step: Chrome and Firefox need one on Linux.
 pub fn browser_trust_needed() -> bool {
     true
 }
 
-/// Chrome and the other Chromium browsers ignore the system store on Linux (L1) and read the
-/// user's NSS database, `~/.pki/nssdb`. The CA goes there, as the user, the way mkcert does it
-/// (owner's choice, 2026-11-23). Returns the database it went into.
+/// The browsers ignore the system store on Linux, and the CA goes into their own NSS databases, as
+/// the user, the way mkcert does it (owner's choice, 2026-11-23):
+/// - Chrome and the other Chromium browsers (Brave, Edge) share `~/.pki/nssdb` (L1), which setup
+///   creates if it is missing;
+/// - every Firefox profile that exists has its own (see `firefox_profiles`). A profile Firefox
+///   creates later gets the CA when setup runs again.
+///
+/// Returns where it went.
 pub fn browser_trust(ca: &Path) -> Option<Result<String, String>> {
     Some((|| {
         let certutil = certutil().ok_or(NO_CERTUTIL)?;
-        let dir = nssdb();
-        if !dir.join("cert9.db").exists() {
-            fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-            certutil_run(&certutil, &["-N", "--empty-password"])?;
+        let chrome = nssdb();
+        if !chrome.join("cert9.db").exists() {
+            fs::create_dir_all(&chrome).map_err(|e| format!("{}: {e}", chrome.display()))?;
+            certutil_run(&certutil, &chrome, &["-N", "--empty-password"])?;
         }
-        nss_remove(&certutil);
+        let firefox = firefox_profiles(&user_home());
         let ca = ca.display().to_string();
-        certutil_run(&certutil, &["-A", "-t", "C,,", "-n", NSS_NICKNAME, "-i", &ca])?;
-        Ok(dir.display().to_string())
+        for db in std::iter::once(&chrome).chain(&firefox) {
+            nss_remove(&certutil, db);
+            certutil_run(&certutil, db, &["-A", "-t", "C,,", "-n", NSS_NICKNAME, "-i", &ca])?;
+        }
+        Ok(databases_note(firefox.len()))
     })())
 }
 
 pub fn browser_untrust() -> Option<Result<String, String>> {
     let certutil = certutil()?;
-    if !nssdb().join("cert9.db").exists() {
+    let firefox = firefox_profiles(&user_home());
+    let chrome = Some(nssdb()).filter(|d| d.join("cert9.db").exists());
+    if chrome.is_none() && firefox.is_empty() {
         return None;
     }
-    nss_remove(&certutil);
-    Some(Ok(nssdb().display().to_string()))
+    for db in chrome.iter().chain(&firefox) {
+        nss_remove(&certutil, db);
+    }
+    Some(Ok(databases_note(firefox.len())))
 }
 
-/// Whether Chrome's database holds this CA (not an older one).
-fn nss_has(certutil: &Path, ca: &Path) -> bool {
-    let Ok(ca) = fs::read_to_string(ca) else { return false };
-    certutil_run(certutil, &["-L", "-n", NSS_NICKNAME, "-a"]).is_ok_and(|pem| pem_body(&pem).contains(&pem_body(&ca)))
+/// Whether a database holds this CA (not an older one).
+fn nss_has(certutil: &Path, db: &Path, ca: &str) -> bool {
+    certutil_run(certutil, db, &["-L", "-n", NSS_NICKNAME, "-a"])
+        .is_ok_and(|pem| pem_body(&pem).contains(&pem_body(ca)))
 }
 
 const DEJAVU: &str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 
-/// Checks only Linux needs: Chrome's trust, and imagick's fonts (devid-binaries' type-linux.xml).
+/// Checks only Linux needs: the browsers' trust (Chrome's database, and each Firefox profile), and
+/// imagick's fonts (devid-binaries' type-linux.xml).
 pub fn os_checks(paths: &Paths) -> Vec<Check> {
-    let ca = ca::ca_cert(paths);
-    let (trusted, fix) = match certutil() {
-        None => (false, "install libnss3-tools (`sudo apt install libnss3-tools`), then run `devid setup`"),
-        Some(c) => (nss_has(&c, &ca), "run `devid setup`"),
-    };
-    let mut checks = vec![(trusted, "Chrome trusts the Devid CA (~/.pki/nssdb)".to_string(), fix.to_string())];
+    let ca = fs::read_to_string(ca::ca_cert(paths)).unwrap_or_default();
+    let firefox = firefox_profiles(&user_home());
+    let mut checks = Vec::new();
+    match certutil() {
+        None => checks.push((
+            false,
+            "Chrome and Firefox trust the Devid CA".to_string(),
+            "install libnss3-tools (`sudo apt install libnss3-tools`), then run `devid setup`".to_string(),
+        )),
+        Some(c) => {
+            checks.push((
+                nss_has(&c, &nssdb(), &ca),
+                "Chrome trusts the Devid CA (~/.pki/nssdb)".to_string(),
+                "run `devid setup`".to_string(),
+            ));
+            if !firefox.is_empty() {
+                let missing = firefox.iter().filter(|db| !nss_has(&c, db, &ca)).count();
+                checks.push((
+                    missing == 0,
+                    format!("Firefox trusts the Devid CA ({})", profiles_note(firefox.len())),
+                    format!("run `devid setup`: {} lack it (Firefox made them after setup)", profiles_note(missing)),
+                ));
+            }
+        }
+    }
     let imagick = php::installed(paths).iter().any(|v| phpext::installed(paths, v).iter().any(|e| e.name == "imagick"));
     if imagick {
         checks.push((
@@ -459,8 +519,8 @@ mod tests {
         assert_eq!(
             runs,
             [
-                "run /usr/bin/systemctl restart systemd-resolved",
                 "run /usr/bin/systemctl daemon-reload",
+                "run /usr/bin/systemctl restart systemd-resolved",
                 "run /usr/bin/systemctl enable devid-ports.service",
                 "run /usr/bin/systemctl restart devid-ports.service",
                 "run /usr/sbin/update-ca-certificates",
@@ -520,6 +580,36 @@ mod tests {
         assert_eq!(stat_pgrp("4242 (node) S 1 4240 4240 0 -1"), Some(4240));
         assert_eq!(stat_pgrp("4242 (a) b (c)) S 1 77 77 0 -1"), Some(77), "a name with parentheses");
         assert_eq!(stat_pgrp("garbage"), None);
+    }
+
+    #[test]
+    fn finds_every_firefox_profile_with_a_database() {
+        let home = std::env::temp_dir().join(format!("devid-ff-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        for (dir, db) in [
+            (".mozilla/firefox/abc.default-release", true),
+            (".mozilla/firefox/Crash Reports", false),
+            ("snap/firefox/common/.mozilla/firefox/xyz.default", true),
+            ("snap/firefox/common/.mozilla/firefox/Profile Groups", false),
+        ] {
+            fs::create_dir_all(home.join(dir)).unwrap();
+            if db {
+                fs::write(home.join(dir).join("cert9.db"), "").unwrap();
+            }
+        }
+        assert_eq!(
+            firefox_profiles(&home),
+            [
+                home.join(".mozilla/firefox/abc.default-release"),
+                home.join("snap/firefox/common/.mozilla/firefox/xyz.default")
+            ],
+            "Mozilla's and the snap's profiles, not their other folders"
+        );
+        assert!(firefox_profiles(&home.join("nobody")).is_empty());
+        assert_eq!(databases_note(0), "~/.pki/nssdb");
+        assert_eq!(databases_note(1), "~/.pki/nssdb and 1 Firefox profile");
+        assert_eq!(databases_note(2), "~/.pki/nssdb and 2 Firefox profiles");
+        fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

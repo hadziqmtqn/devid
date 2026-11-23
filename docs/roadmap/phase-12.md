@@ -194,7 +194,11 @@ The daemon, the CLI and the TUI on Linux, built from L1's answers. The owner cho
 - **Chrome:**
   - Setup adds the CA to `~/.pki/nssdb` with `certutil`, the way mkcert does. It creates the database if it is missing, and replaces an older Devid CA first.
   - This covers Chrome, Chromium, Brave and Edge. Snap Chromium keeps its own database and is not covered yet.
-  - Without `certutil`, setup says to install `libnss3-tools` and run it again. The rest of setup still runs, and curl, PHP and Firefox work.
+  - **Firefox (added after 0.19.0-rc.1):**
+    - Ubuntu's Firefox snap read neither the system store nor `~/.pki/nssdb` on the Ubuntu machine, so setup also adds the CA to every Firefox profile's database.
+    - That covers both `~/.mozilla/firefox/*` and `~/snap/firefox/common/.mozilla/firefox/*`, with certutil, as mkcert does.
+    - A profile Firefox makes later needs setup again, and doctor names the profiles that lack the CA.
+  - Without `certutil`, setup says to install `libnss3-tools` and run it again. The rest of setup still runs, and curl and PHP work.
   - Uninstall removes the CA from the database.
 - **The login service:** `~/.config/systemd/user/devid.service`.
   - It runs `~/.devid/bin/devid daemon run` with `DEVID_HOME` and appends its output to `~/.devid/log/daemon.log`.
