@@ -2,7 +2,7 @@
 
 > Scope: Devid on Ubuntu LTS (the daemon, the CLI and the TUI), with `.test` DNS, HTTPS and ports 80/443 as on macOS (D-057)
 > Verified against: 2026-11-23 (v0.18.0; GitHub's `ubuntu-latest` is Ubuntu 26.04)
-> Status: proposed 2026-11-23 (D-057). Nothing is built yet; L1 (the spike) comes first.
+> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". Nothing is built yet; L1 (the spike) comes first.
 
 D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0 (D-046). On 2026-11-23 the owner chose Linux, not Windows, as the next platform. The research backs that order: Linux is Herd's most-voted request, and neither Herd nor ServBay runs on it (`docs/research/competitors-2026-11.md`).
 
@@ -31,10 +31,15 @@ D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0 (D-04
 
 ## Ground rules
 
-- **Where it is tested (D-013):** GitHub's Ubuntu runners, plus a small VPS if the owner has one. Never a VM on the owner's Mac, which has 8 GB of RAM (D-052).
-  - The runners allow `sudo` without a password, so the helper's root steps run there for real.
-  - A runner cannot reboot, so the "after a reboot" checks need a VPS.
-- **The owner's Mac stays as it is:** no step of this phase runs `sudo`, installs anything or changes a setting there.
+- **Where it is tested (D-013):**
+  - **GitHub's Ubuntu runners**, for CI and most of the spike. They allow `sudo` without a password, so the helper's root steps run there for real.
+  - **The Xubuntu machine:** the owner's old Intel Mac running Xubuntu, set up by the owner and reached over SSH on the local network.
+    - Claude runs the checks a runner cannot: real browsers in the Xfce session, and reboots.
+    - It is a separate machine, so D-013's rule against a VM on the owner's laptop still holds.
+- **The owner's M1 stays as it is:** no step of this phase runs `sudo`, installs anything or changes a setting there. It has 8 GB of RAM (D-052).
+- **`sudo` on the Xubuntu machine:**
+  - Claude asks before a step that needs it, as CLAUDE.md requires.
+  - Claude never types a password: the test user has passwordless `sudo`, or the owner types it.
 - **Same model as macOS:**
   - One root step at setup, which `devid uninstall` undoes; a file Devid would replace is backed up first.
   - Everything else runs as the user, in `~/.devid`.
@@ -44,7 +49,7 @@ D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0 (D-04
 
 ## Proposal (D-057)
 
-- **Target:** Ubuntu 24.04 and 26.04 LTS, on x86_64. Debian and arm64 come after Ubuntu ships (see "Not in this phase").
+- **Target:** Ubuntu 24.04 and 26.04 LTS, on x86_64. The desktop checks run on Xubuntu, which is Ubuntu with Xfce. Debian and arm64 come after Ubuntu ships (see "Not in this phase").
 - **Interfaces:** the CLI and the TUI, as v1 was on macOS (D-012). The app waits.
 - **Web servers:** nginx (the default) and Caddy. Apache waits: Linux has no system `httpd` to borrow, and Ubuntu's `apache2` package brings its own service on port 80.
 - **The root step** (`sudo devid helper apply`; L1 confirms each part):
@@ -66,7 +71,7 @@ D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0 (D-04
 
 ## L1: what the spike must answer
 
-All on GitHub's Ubuntu runners (24.04 and 26.04), except where noted.
+All on GitHub's Ubuntu runners (24.04 and 26.04), except where a question names the Xubuntu machine. L1 can start on the runners before that machine is ready.
 
 1. **PHP:**
    - Does a static-php-cli glibc build of 8.4 (cli and fpm, with `--build-shared` for Xdebug and pcov) load both `.so` files in cli and in php-fpm?
@@ -79,15 +84,17 @@ All on GitHub's Ubuntu runners (24.04 and 26.04), except where noted.
 5. **Ports:**
    - Does an nftables `output`-hook redirect work for `127.0.0.1` and `[::1]`?
    - Does it live alongside Docker's and ufw's rules?
-   - Does it survive a reboot (on a VPS)?
+   - Does it survive a reboot (on the Xubuntu machine)?
 6. **CA trust:**
    - After `update-ca-certificates`, do `curl` and PHP's own bundle reach `https://<site>.test`?
    - Do headless Chrome and Firefox reach it? Which stores do they read? (If the runner image lacks a browser, the job installs it.)
-   - On Ubuntu, Firefox is a snap with its own profile path.
+   - Do Chrome and Firefox in the Xfce session reach it, the way a user opens them (on the Xubuntu machine)?
+   - On Ubuntu and Xubuntu, Firefox is a snap with its own profile path.
    - `certutil` (`libnss3-tools`) is not installed by default: find a way that does not need it, or have setup say so.
 7. **Login:**
    - Does the daemon run under a systemd user unit?
    - What happens at logout? Without lingering, the user's units stop.
+   - Does Devid come back after a reboot and login (on the Xubuntu machine)?
 8. **On-demand:** does `/proc` find an established connection for a process group, without starting a process?
 9. **Idle cost on Linux:** measure the daemon, nginx and one php-fpm master.
 10. **Devid's own binary:** does a musl build of the CLI and daemon pass the test suite?
@@ -100,17 +107,23 @@ All on GitHub's Ubuntu runners (24.04 and 26.04), except where noted.
 | L2 | **Runtime for Linux** (devid-binaries): PHP 8.3–8.5, the extension catalog and nginx built for Linux; Linux mirrors of Caddy and Mailpit; Linux entries in the manifest | a runtime release holds `linux-x86_64` builds, and Devid 0.18 on macOS still updates from it |
 | L3 | **Daemon on Linux:** the platform interface; the Linux helper (DNS, ports, CA); the systemd user unit; the PATH file; the `/proc` check; `devid doctor` | unit tests cover the Linux plans; on a runner, `devid setup` serves a site at `https://<site>.test` (curl and headless Chrome), and `devid uninstall` puts every changed file back |
 | L4 | **Install, update and CI:** `install.sh` and self-update on Linux; a Linux build in `release.yml`; `smoke.sh` on an Ubuntu runner | a dry run builds macOS and Linux and passes the smoke test on both |
-| L5 | **Docs and release 0.19.0** (Linux preview): README, the guide's requirements and install pages | released, and checked on Ubuntu Desktop by someone with a Linux machine (see "Open questions") |
+| L5 | **Docs and release 0.19.0:** README, the guide's requirements and install pages | released, after Claude installs it on the Xubuntu machine from `install.sh`, runs setup, opens a site in Chrome and Firefox, updates it and uninstalls it |
 
 L2 lands before L4, the way arm64 did for 0.14.0: the runtime release first, then Devid.
 
-## Open questions for the owner
+## Owner's answers (2026-11-23)
 
-1. **Ubuntu first, Debian after,** as proposed? Or Debian from the start, which means solving DNS without systemd-resolved first?
-2. **Where the desktop check happens:**
-   - Runners have headless browsers only, and a VPS has no desktop.
-   - Without someone on a Linux desktop, the first Linux release is a preview.
-3. **The app later,** as proposed, or in this phase?
+1. **Ubuntu first**, on Xubuntu. The owner sets up the machine.
+2. **The desktop checks:** Claude runs them on the owner's old Intel Mac running Xubuntu, over SSH on the local network.
+3. **The CLI and the TUI first,** as proposed. The app on Linux comes after them.
+
+What the Xubuntu machine needs before Claude uses it:
+
+- Xubuntu 24.04 or 26.04 LTS on x86_64.
+- SSH with a key from the M1. Claude does not log in with a password.
+- A test user with `sudo` (see "Ground rules").
+- A logged-in Xfce session, so Claude can open the browsers on its display and take screenshots.
+- Chrome (the .deb from Google) and Firefox (Xubuntu's snap), the way users would have them.
 
 ## Not in this phase
 
