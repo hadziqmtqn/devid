@@ -54,10 +54,10 @@ fn ini(paths: &Paths, version: &str, name: &str) -> PathBuf {
     php::etc(paths, version).join("conf.d").join(format!("devid-{name}.ini"))
 }
 
-/// The catalog for PHP `version` (e.g. "8.4"), sorted by name; entries without a build for this Mac's
-/// architecture or with an unusable name are left out.
+/// The catalog for PHP `version` (e.g. "8.4"), sorted by name; entries without a build for this
+/// system (`platform::arch_key`) or with an unusable name are left out.
 pub fn catalog(manifest: &Value, version: &str) -> Vec<Entry> {
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
+    let arch = crate::platform::arch_key();
     let mut out: Vec<Entry> = manifest["extensions"][version]
         .as_object()
         .into_iter()
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn catalog_reads_the_manifest() {
-        let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
+        let arch = crate::platform::arch_key();
         let a = json!({arch: {"url": "u", "sha256": "AB", "size": 2048}});
         let m = json!({"extensions": {"8.4": {
             "mongodb": {"version": "2.5.5", "type": "extension", "php_api": "20240924", "license": "Apache-2.0", "arch": a},

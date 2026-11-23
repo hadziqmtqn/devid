@@ -755,7 +755,10 @@ fn mail(action: Option<MailAction>, paths: &Paths) -> Result<(), String> {
                 state => return Err(format!("Mail is {state}; `devid start mail` starts it")),
             }
             let url = inbox(&v);
-            std::process::Command::new("/usr/bin/open").arg(&url).status().map_err(|e| e.to_string())?;
+            std::process::Command::new(devid_daemon::platform::OPEN_COMMAND)
+                .arg(&url)
+                .status()
+                .map_err(|e| e.to_string())?;
             println!("opened {url}");
             Ok(())
         }
@@ -1466,6 +1469,9 @@ fn helper(action: HelperAction, paths: &Paths) -> Result<(), String> {
             let plan = helper_plan(paths)?;
             if install && !plan.ca_cert.is_file() {
                 return Err("no Devid CA yet; start the daemon once (`devid daemon run`) to create it".into());
+            }
+            if install && !dry_run {
+                devid_daemon::platform::prerequisites()?;
             }
             let actions = if install { h::install_actions(&plan) } else { h::uninstall_actions(&plan) };
             println!("devid helper will (as root):");

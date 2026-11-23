@@ -1519,7 +1519,8 @@ fn php_list(state: &State) -> Value {
     json!(versions)
 }
 
-/// True when the helper's pf redirect for these ports is installed, so URLs need no port.
+/// True when the helper's redirect for these ports (pf, or nftables on Linux) is installed, so URLs
+/// need no port.
 fn standard_ports(config: &Config, paths: &Paths) -> bool {
     let plan = helper::Plan {
         tld: config.tld.clone(),
@@ -1528,7 +1529,7 @@ fn standard_ports(config: &Config, paths: &Paths) -> bool {
         https_port: config.https_port,
         ca_cert: ca::ca_cert(paths),
     };
-    fs::read_to_string(helper::PF_FILE).is_ok_and(|c| c == helper::pf_rules(&plan))
+    crate::platform::redirect_installed(&plan)
 }
 
 /// Whether ports 80/443 really reach the running web server through pf (D-047). Another app can

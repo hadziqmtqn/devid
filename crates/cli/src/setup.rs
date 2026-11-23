@@ -2,7 +2,9 @@
 //! go through `devid helper` (sudo, one password prompt).
 
 use crate::{HelperAction, helper, helper_plan, request};
-use devid_daemon::{ca, config::Config, helper as h, install, paths::Paths, php, phpext, protocol::Request, webserver};
+use devid_daemon::{
+    ca, config::Config, helper as h, install, paths::Paths, php, phpext, platform, protocol::Request, webserver,
+};
 use std::{
     net::ToSocketAddrs,
     path::Path,
@@ -52,8 +54,7 @@ pub const NEEDS_PASSWORD: &str =
     "system setup (.test DNS, ports 80/443, CA trust) needs your password: run `devid setup` in Terminal";
 
 /// Why ports 80/443 can stop reaching the web server, and the fix (D-047).
-pub const REDIRECT_FIX: &str = "another app switched pf off on loopback (often OrbStack, Docker, UTM or Internet \
-     Sharing); run `devid helper install`";
+pub use devid_daemon::platform::REDIRECT_FIX;
 
 /// Ports 80/443 are set up and the web server runs, yet port 80 does not reach it (D-047).
 fn redirect_down(paths: &Paths) -> bool {
@@ -95,17 +96,17 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
                 .map_err(|e| e.to_string())
         },
     )?;
-    step(dry_run, "run the daemon as a LaunchAgent (now and at every login)", || {
+    step(dry_run, &format!("run the daemon as a {} (now and at every login)", platform::SERVICE), || {
         // D-040: the running commands start again in the new daemon. An older daemon does not know
         // the request, and none may run; either way there is nothing to note.
         let _ = request(paths, &Request::RememberRunning);
-        // A daemon started by hand would hold the socket; hand over to launchd.
-        if !install::agent_loaded() && request(paths, &Request::Stop).is_ok() {
+        // A daemon started by hand would hold the socket; hand over to launchd or systemd.
+        if !platform::service_loaded() && request(paths, &Request::Stop).is_ok() {
             wait_until(Duration::from_secs(15), || !paths.socket().exists());
         }
-        install::load_agent(paths).map_err(|e| e.to_string())?;
+        platform::load_service(paths).map_err(|e| e.to_string())?;
         if wait_until(Duration::from_secs(15), || request(paths, &Request::Status).is_ok()) {
-            Ok(install::agent_plist_path().display().to_string())
+            Ok(platform::service_path().display().to_string())
         } else {
             Err(format!("daemon did not start; see {}", paths.log_dir().join("daemon.log").display()))
         }
@@ -131,6 +132,7 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
         println!("  {} system setup (.test DNS, ports 80/443, CA trust) via sudo:", if dry_run { "-" } else { ".." });
         helper(HelperAction::Install { dry_run }, paths)?;
     }
+    trust_in_browsers(paths, dry_run);
 
     // After the sudo step, so the password prompt comes before the downloads.
     let config = Config::load_or_create(&paths.config()).map_err(|e| e.to_string())?;
@@ -169,8 +171,11 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
     }
     // The desktop app (Phase 7 G4): installed on request, and kept in step with devid once it is
     // there, so `devid self-update` (which runs the new binary's setup) updates it too.
+    if pick.gui && !platform::DESKTOP_APP {
+        return Err(format!("the desktop app does not run on {} yet; the CLI and the TUI do", platform::NAME));
+    }
     let app = install::app_bundle();
-    if pick.gui || app.exists() {
+    if platform::DESKTOP_APP && (pick.gui || app.exists()) {
         step(dry_run, &format!("install the Devid app ({}, sha256-checked)", app.display()), || {
             install_app(paths).map(|_| "open it from Spotlight or ~/Applications".into())
         })?;
@@ -182,6 +187,23 @@ pub fn setup(paths: &Paths, dry_run: bool, pick: Pick) -> Result<(), String> {
         println!("\ndone. Next: `devid park ~/Projects` (or `devid link` in one project), then `devid doctor`.");
     }
     Ok(())
+}
+
+/// Where the system store is not enough (Chrome on Linux reads `~/.pki/nssdb`), add the CA there
+/// as the user. A missing tool is reported, not fatal: the rest of setup still works.
+fn trust_in_browsers(paths: &Paths, dry_run: bool) {
+    const WHAT: &str = "trust the Devid CA in Chrome's certificate database";
+    if dry_run {
+        if platform::browser_trust_needed() {
+            println!("  - {WHAT}");
+        }
+        return;
+    }
+    match platform::browser_trust(&ca::ca_cert(paths)) {
+        None => {}
+        Some(Ok(db)) => println!("  ok  {WHAT} ({db})"),
+        Some(Err(e)) => println!("  !!  {e}"),
+    }
 }
 
 /// The release asset with Devid.app for this Mac's arch (scripts/bundle-app.sh).
@@ -310,7 +332,7 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
         &format!("php on PATH is Devid's shim (now: {})", on_path("php").unwrap_or_else(|| "none".into())),
         &format!("{path_fix} (Devid's bin must come before Homebrew)"),
     );
-    check(install::agent_loaded(), "LaunchAgent dev.devid.daemon is loaded", "run `devid setup`");
+    check(platform::service_loaded(), &format!("{} runs", platform::SERVICE), "run `devid setup`");
 
     match request(paths, &Request::Status) {
         Ok(s) => {
@@ -352,7 +374,11 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
     }
     let probe = format!("devid-doctor.{}:443", plan.tld);
     let resolves = probe.to_socket_addrs().is_ok_and(|mut a| a.any(|a| a.ip().is_loopback()));
-    check(resolves, &format!("*.{} resolves to 127.0.0.1 through macOS", plan.tld), "run `devid helper install`");
+    check(
+        resolves,
+        &format!("*.{} resolves to 127.0.0.1 through {}", plan.tld, platform::NAME),
+        "run `devid helper install`",
+    );
     check(ca::ca_cert(paths).is_file(), "Devid CA exists", "start the daemon once");
 
     for version in php::installed(paths) {
@@ -373,11 +399,9 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
         );
     }
 
-    let valet = std::process::Command::new("pgrep")
-        .args(["-f", "/usr/local/opt/dnsmasq"])
-        .output()
-        .is_ok_and(|o| o.status.success());
-    check(!valet, "Valet is stopped", "Valet still runs (its dnsmasq); once Devid works, stop it with `valet stop`");
+    for (ok, what, fix) in platform::os_checks(paths) {
+        check(ok, &what, &fix);
+    }
     Ok(checks)
 }
 
@@ -388,19 +412,25 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
         println!("  {} undo system setup via sudo:", if dry_run { "-" } else { ".." });
         helper(HelperAction::Uninstall { dry_run }, paths)?;
     }
-    step(dry_run, "stop the daemon and remove the LaunchAgents", || {
-        install::unload_agent();
-        let _ = std::fs::remove_file(install::agent_plist_path());
+    if platform::browser_trust_needed() {
+        step(dry_run, "remove the Devid CA from Chrome's certificate database", || {
+            platform::browser_untrust().unwrap_or(Ok(String::new()))
+        })?;
+    }
+    step(dry_run, &format!("stop the daemon and remove the {}", platform::SERVICE), || {
+        platform::remove_service();
         let _ = std::fs::remove_file(install::app_agent_plist_path());
         Ok(String::new())
     })?;
-    let app = install::app_bundle();
-    step(dry_run, &format!("quit and delete the Devid app ({})", app.display()), || {
-        let bin = install::default_app();
-        let _ = std::process::Command::new("/usr/bin/pkill").arg("-f").arg(&bin).output();
-        let _ = std::fs::remove_dir_all(&app);
-        Ok(String::new())
-    })?;
+    if platform::DESKTOP_APP {
+        let app = install::app_bundle();
+        step(dry_run, &format!("quit and delete the Devid app ({})", app.display()), || {
+            let bin = install::default_app();
+            let _ = std::process::Command::new("/usr/bin/pkill").arg("-f").arg(&bin).output();
+            let _ = std::fs::remove_dir_all(&app);
+            Ok(String::new())
+        })?;
+    }
     let rcs: Vec<String> = install::rc_files().iter().map(|rc| rc.display().to_string()).collect();
     step(dry_run, &format!("remove Devid's PATH line from {}", rcs.join(" and ")), || {
         install::set_on_path(paths, false).map(|_| String::new()).map_err(|e| e.to_string())

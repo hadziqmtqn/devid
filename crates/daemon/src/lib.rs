@@ -15,6 +15,7 @@ pub mod ondemand;
 pub mod paths;
 pub mod php;
 pub mod phpext;
+pub mod platform;
 pub mod ports;
 pub mod protocol;
 pub mod releases;

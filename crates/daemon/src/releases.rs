@@ -138,15 +138,14 @@ pub fn fetch_manifest(paths: &crate::paths::Paths) -> io::Result<Value> {
     Ok(manifest)
 }
 
-/// The x86_64/arm64 entry for `tool` ("php" needs `minor`, e.g. "8.4").
+/// This system's entry for `tool` ("php" needs `minor`, e.g. "8.4"); see `platform::arch_key`.
 pub fn artifact(manifest: &Value, tool: &str, minor: Option<&str>) -> Option<Artifact> {
     let slot = match (tool, minor) {
         ("php", Some(m)) => &manifest["php"][m],
         (_, None) => &manifest[tool],
         _ => return None,
     };
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
-    let entry = &slot["arch"][arch];
+    let entry = &slot["arch"][crate::platform::arch_key()];
     Some(Artifact {
         tool: tool.into(),
         version: slot["version"].as_str()?.into(),
@@ -325,11 +324,17 @@ mod tests {
         assert_eq!(trusted_prefix("file:///tmp/rel/manifest.json"), "file:///tmp/rel/");
         let manifest: Value = serde_json::json!({
             "schema": 1,
-            "php": {"8.4": {"version": "8.4.27", "arch": {"x86_64": {"url": "u", "sha256": "AB"}, "arm64": {"url": "u", "sha256": "ab"}}}},
-            "nginx": {"version": "1.30.6", "arch": {"x86_64": {"url": "n", "sha256": "cd"}, "arm64": {"url": "n", "sha256": "cd"}}}
+            "php": {"8.4": {"version": "8.4.27", "arch": {
+                "x86_64": {"url": "x86_64", "sha256": "AB"},
+                "arm64": {"url": "arm64", "sha256": "ab"},
+                "linux-x86_64": {"url": "linux-x86_64", "sha256": "aB"}}}},
+            "nginx": {"version": "1.30.6", "arch": {
+                "x86_64": {"url": "n", "sha256": "cd"}, "arm64": {"url": "n", "sha256": "cd"},
+                "linux-x86_64": {"url": "n", "sha256": "cd"}}}
         });
         let php = artifact(&manifest, "php", Some("8.4")).unwrap();
         assert_eq!((php.version.as_str(), php.sha256.as_str()), ("8.4.27", "ab"));
+        assert_eq!(php.url, crate::platform::arch_key(), "this system's build, macOS and Linux apart (D-057)");
         assert_eq!(artifact(&manifest, "nginx", None).unwrap().version, "1.30.6");
         assert!(artifact(&manifest, "php", Some("8.1")).is_none());
         assert!(artifact(&manifest, "caddy", None).is_none());
