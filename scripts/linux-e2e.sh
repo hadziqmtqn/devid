@@ -23,12 +23,12 @@ snapshot() {
   for f in "${FILES[@]}"; do
     if [ -e "$f" ]; then sha256sum "$f"; else echo "absent $f"; fi
   done
-  # The browsers' databases: the certificates in each, without certutil's header. Setup may create
-  # Chrome's itself (Chrome would on its first run); uninstall leaves it empty.
+  # The browsers' databases: each certificate, prefixed with its database, without certutil's
+  # header. Setup may create Chrome's itself (Chrome would on its first run), and uninstall leaves it
+  # empty, so an empty database prints nothing, as a missing one does.
   for db in "$HOME/.pki/nssdb" "$FIREFOX"; do
     if [ -f "$db/cert9.db" ]; then
-      echo "$db:"
-      certutil -d "sql:$db" -L | awk 'NF && !/^Certificate Nickname/ && !/SSL,S\/MIME,JAR\/XPI/'
+      certutil -d "sql:$db" -L | awk -v db="$db" 'NF && !/^Certificate Nickname/ && !/SSL,S\/MIME,JAR\/XPI/ {print db ": " $0}'
     fi
   done
 }
