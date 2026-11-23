@@ -13,14 +13,16 @@ fn sha256(path: &Path) -> String {
     String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap().to_string()
 }
 
-/// A release archive with a fake `mailpit` that reports `version`, writes its arguments to
+/// A release archive with a fake `mailpit` that reports `version --no-release-check` (plain
+/// `version` hangs, as Mailpit's online release check can), writes its arguments to
 /// `<DEVID_HOME>/mailpit-args` and runs until SIGTERM; returns its manifest entry.
 fn mailpit_asset(root: &Path, rel: &Path, version: &str) -> Value {
     let stage = root.join(format!("stage-mailpit-{version}"));
     fs::create_dir_all(&stage).unwrap();
     let script = format!(
         "#!/bin/sh\n\
-         if [ \"$1\" = version ]; then echo \"$0 v{version} compiled with go1.27.3 on darwin/amd64\"; exit 0; fi\n\
+         if [ \"$*\" = \"version --no-release-check\" ]; then echo \"$0 v{version} compiled with go1.27.3 on darwin/amd64\"; exit 0; fi\n\
+         if [ \"$1\" = version ]; then sleep 30; exit 0; fi\n\
          echo \"$@\" > \"$DEVID_HOME/mailpit-args\"\n\
          trap 'exit 0' TERM\n\
          while :; do sleep 0.1; done\n"

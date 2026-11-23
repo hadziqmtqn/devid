@@ -62,8 +62,10 @@ fn parse_version(text: &str) -> Option<String> {
 }
 
 /// Put a Mailpit binary in place (the release archive's `mailpit`) and record its version.
+/// `--no-release-check`: plain `mailpit version` also asks GitHub for Mailpit's latest release, so
+/// it needs the network and can outlast the probe's 5 s (a Linux release build failed on it).
 pub fn install(paths: &Paths, from: &Path) -> io::Result<String> {
-    let out = webserver::probe(from, &["version"])?;
+    let out = webserver::probe(from, &["version", "--no-release-check"])?;
     let version = parse_version(&String::from_utf8_lossy(&out.stdout))
         .ok_or_else(|| err(format!("{} does not look like Mailpit", from.display())))?;
     let target = bin(paths);
