@@ -2,7 +2,7 @@
 
 > Scope: Devid on Ubuntu LTS (the daemon, the CLI and the TUI), with `.test` DNS, HTTPS and ports 80/443 as on macOS (D-057)
 > Verified against: 2026-11-23 (v0.18.0; GitHub's `ubuntu-latest` is Ubuntu 26.04; spike run 45104513332; runtime release `2026.11.23-19`)
-> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". L1 to L4 done 2026-11-23, see each one's results; L5 ships in 0.19.0, after rc.1 and rc.2 on the owner's Ubuntu machine.
+> Status: accepted 2026-11-23 (D-057), with the owner's answers in "Owner's answers". **Done 2026-11-24:** Devid 0.19.0 runs on Linux. L1 to L4 were done on 2026-11-23, and L5 shipped as 0.19.0 on 2026-11-24 (see "L5 results").
 
 D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0 (D-046). On 2026-11-23 the owner chose Linux, not Windows, as the next platform. The research backs that order: Linux is Herd's most-voted request, and neither Herd nor ServBay runs on it (`docs/research/competitors-2026-11.md`).
 
@@ -320,6 +320,26 @@ The record is `docs/implementation-timeline/linux/2026-11-23-l4-release.md`.
   - The only new item was an empty `~/.pki/nssdb`, which Brave creates on its first run anyway.
 - **Then** rc.2 went back on, with the test site, for the update check: `devid self-update` from rc.2 to 0.19.0 once 0.19.0 is released.
 
+## L5 results (2026-11-24)
+
+- **Released:** 0.19.0 (#132, tag `v0.19.0`), with every target green on the first run. It is GitHub's Latest, and `devid-latest` carries `devid-linux-x86_64` and the new `install.sh`.
+- **On the owner's Ubuntu 24.04 Desktop machine** (the record is `docs/implementation-timeline/linux/2026-11-24-l5-release.md`):
+  - install through `install.sh` (rc.1, then rc.2);
+  - setup, including the certutil message and then the browsers' databases;
+  - a site over HTTPS in Brave and in Firefox, after #130;
+  - reboot, and uninstall with every file compared;
+  - `devid self-update` from rc.2 to 0.19.0, after which the site answered and doctor said "all good".
+- **Fixed on the way:**
+  - #129: Mailpit's version is read offline. Its online check failed rc.1's Linux build.
+  - #130: the CA goes into every Firefox profile, because Ubuntu's Firefox snap reads neither the system store nor `~/.pki/nssdb`. The root step also reloads units before restarting them.
+- **The docs:**
+  - the README (#132);
+  - devid-binaries' README (hadziqmtqn/devid-binaries#21);
+  - the guide's new `/docs/linux` page, its install, HTTPS and uninstall pages, the landing page and the roadmap (hadziqmtqn/devid-site#19).
+
+  Both PRs merge once 0.19.0 is out.
+- **The machine** keeps Devid 0.19.0 with the test site for later checks. Its passwordless sudo (`/etc/sudoers.d/devid-test`) stays or goes at the owner's call.
+
 ## Milestones
 
 | # | Milestone | Done when |
@@ -328,7 +348,7 @@ The record is `docs/implementation-timeline/linux/2026-11-23-l4-release.md`.
 | L2 | **Runtime for Linux** (devid-binaries): PHP 8.3–8.5, the extension catalog and nginx built for Linux; Linux mirrors of Caddy and Mailpit; Linux entries in the manifest | a runtime release holds `linux-x86_64` builds, and Devid 0.18 on macOS still updates from it (done 2026-11-23, release `2026.11.23-19`, see "L2 results") |
 | L3 | **Daemon on Linux:** the platform interface; the Linux helper (DNS, ports, CA); the systemd user unit; the PATH file; the `/proc` check; `devid doctor` | unit tests cover the Linux plans; on a runner, `devid setup` serves a site at `https://<site>.test` (curl and headless Chrome), and `devid uninstall` puts every changed file back (done 2026-11-23, #125, see "L3 results") |
 | L4 | **Install, update and CI:** `install.sh` and self-update on Linux; a Linux build in `release.yml`; `smoke.sh` on an Ubuntu runner | a dry run builds macOS and Linux and passes the smoke test on both (done 2026-11-23, dry run 45208363166, see "L4 results") |
-| L5 | **Docs and release 0.19.0:** README, the guide's requirements and install pages | released, after Claude installs it on the Xubuntu machine from `install.sh`, runs setup, opens a site in Chrome and Firefox, updates it and uninstalls it |
+| L5 | **Docs and release 0.19.0:** README, the guide's requirements and install pages | released, after Claude installs it on the Xubuntu machine from `install.sh`, runs setup, opens a site in Chrome and Firefox, updates it and uninstalls it (done 2026-11-24 on the Ubuntu 24.04 machine, with Brave for Chrome; see "L5 results") |
 
 L2 lands before L4, the way arm64 did for 0.14.0: the runtime release first, then Devid.
 
@@ -351,5 +371,12 @@ What the Xubuntu machine needs before Claude uses it:
 - **The app on Linux:** Tauri on WebKitGTK. The glib Dependabot alert dismissed on 2026-11-22 has to be looked at again then.
 - **arm64 Linux:** GitHub's arm64 Ubuntu runners make it cheap once x86_64 ships.
 - **Other distros:** Debian without systemd-resolved, Fedora (`update-ca-trust`) and Arch.
+  - On 2026-11-24 the owner named Arch-based distributions as a likely next target. That is not a decision yet.
+  - A plan would start with a spike on GitHub's runners (Arch under `systemd-nspawn` or QEMU), and end on a second Parallels VM on the old Mac, never the M1 (D-013).
+  - What differs from Ubuntu:
+    - DNS where systemd-resolved is off (NetworkManager);
+    - `update-ca-trust` for the system store;
+    - the `nftables` package, which may be missing;
+    - imagick's font paths (`/usr/share/fonts/TTF`).
 - **Apache on Linux.**
 - **Windows:** it starts after Linux ships (D-044).
