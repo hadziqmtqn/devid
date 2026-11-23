@@ -62,6 +62,9 @@ echo '<?php echo "e2e ", PHP_VERSION, " ", PHP_OS;' > "$T/$SITE/public/index.php
 "$D" link "$SITE" --path "$T/$SITE"
 getent hosts "$SITE.test" | grep -q '^127\.0\.0\.1 ' || fail "$SITE.test does not resolve through systemd-resolved"
 getent hosts example.org >/dev/null || fail "other names stopped resolving"
+# Devid reloads nginx with SIGHUP and replies at once (see smoke.sh); until the new workers run,
+# nginx does not know the site's name yet ("unrecognized name").
+for _ in $(seq 50); do curl -fs -o /dev/null "https://$SITE.test/" && break; sleep 0.2; done
 page="$(curl -fsS "https://$SITE.test/")" || fail "curl cannot reach https://$SITE.test/"
 echo "curl: $page"
 grep -q '^e2e 8\.[0-9.]* Linux$' <<<"$page" || fail "unexpected page: $page"
