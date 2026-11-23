@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-22
+> Verified against: 2026-11-23
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-057 | 2026-11-23 | proposed (Phase 12; narrows D-044) | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners |
 | D-056 | 2026-11-22 | accepted 2026-11-22 (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
 | D-055 | 2026-11-22 | accepted 2026-11-22 (the owner's request) | The app's site detail puts explanations in tooltips: an (i) after each title, the notes under the cards in their headings' tooltips; what needs action stays on the page, and a status is said once |
 | D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040); amended 2026-11-21 (O4) and 2026-11-22 (O5) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, on nginx, Caddy and Apache |
@@ -964,3 +965,29 @@ See ARCHITECTURE, "PHP runtime".
   - **Proxying Vite through the site's web server.** Vite's module paths and CSS URLs still point at Vite's own address, so the project's `base` would have to change.
 - **Plan:** `docs/roadmap/phase-11.md`.
 - **Status:** accepted by the owner on 2026-11-22 ("Ya, mulai V2"). V2 (the daemon and the clients) merged on 2026-11-22 (#117) and shipped in 0.18.0, released on 2026-11-22.
+
+## D-057: Linux starts with Ubuntu LTS, the CLI and the TUI (proposed 2026-11-23, Phase 12)
+
+- **Context:**
+  - D-044 puts Debian-based Linux after Apple silicon, which shipped in 0.14.0. On 2026-11-23 the owner chose Linux, not Windows, as the next platform.
+  - The daemon's core, the CLI and the TUI already build and pass every test on CI's Ubuntu runners. DNS, ports 80/443, CA trust, start at login, the runtime builds, install and self-update are macOS-only (`docs/roadmap/phase-12.md`, "Where things stand").
+  - A fully static musl PHP cannot load `.so` files, and Xdebug, pcov and the extension catalog are `.so` files (D-008, D-021).
+  - On Debian, systemd-resolved is a separate package, and installing it takes over `/etc/resolv.conf`. Ubuntu uses it by default.
+- **Proposal:**
+  - **Target:** Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI. Web servers: nginx and Caddy.
+  - **One root step** (`sudo devid helper apply`, undone by `devid uninstall`):
+    - systemd-resolved sends only `.test` to Devid's DNS port;
+    - an nftables table, loaded at boot by a system unit, redirects `127.0.0.1` and `[::1]` ports 80/443 to the web server's high ports;
+    - the Devid CA goes into the system store with `update-ca-certificates`, and browsers get it through NSS.
+  - **As the user:** a systemd user unit for the daemon, the PATH line in `~/.bashrc` for bash, and `~/.devid`.
+  - **Runtime:** PHP from static-php-cli's glibc targets, built for glibc 2.36 (Debian 12) and later, so `.so` extensions load. nginx and Devid itself as static musl builds.
+  - **Testing:** on GitHub's Ubuntu runners, which allow `sudo`, and a VPS for reboots. Never a VM on the owner's Mac (D-013).
+  - The spike (L1) confirms each part before any code lands.
+- **Not chosen:**
+  - **`net.ipv4.ip_unprivileged_port_start=80`:** every user's process could take a low port.
+  - **`setcap` on the web server:** lost at every update of the binary.
+  - **Debian first:** DNS without systemd-resolved needs its own answer. Debian follows Ubuntu.
+- **Not in Phase 12:** the app on Linux, arm64 Linux, Debian without systemd-resolved, Fedora, Arch, Apache on Linux, and Windows (D-044).
+- **Open for the owner:** Ubuntu or Debian first; who checks a Linux desktop before the release stops being a preview; the app in this phase or later.
+- **Plan:** `docs/roadmap/phase-12.md`.
+- **Status:** proposed 2026-11-23.
