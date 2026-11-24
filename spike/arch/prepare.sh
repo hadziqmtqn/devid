@@ -17,16 +17,26 @@ systemctl disable systemd-networkd.service systemd-networkd.socket systemd-netwo
   systemd-resolved.service || true
 systemctl enable NetworkManager.service
 rm -f /etc/resolv.conf
-# Run 2: after the reboot NetworkManager left eth0 down, so SSH never came back. cloud-init wrote
-# networkd's .network files on the first boot; they go, and eth0 gets an explicit connection.
+# Run 2: after the reboot SSH never came back, and the serial console showed eth0 down. That table
+# comes from cloud-init while NetworkManager is still starting, so it proved little; the explicit
+# connection for eth0 stays anyway, as cloud-init's networkd files would no longer apply.
 rm -f /etc/systemd/network/*.network
 mkdir -p /etc/NetworkManager/conf.d /etc/NetworkManager/system-connections
 printf '[device-spike-eth0]\nmatch-device=interface-name:eth0\nmanaged=1\n' >/etc/NetworkManager/conf.d/10-spike-eth0.conf
 printf '[connection]\nid=eth0\ntype=ethernet\ninterface-name=eth0\nautoconnect=true\n\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n' \
   >/etc/NetworkManager/system-connections/eth0.nmconnection
 chmod 600 /etc/NetworkManager/system-connections/eth0.nmconnection
-# The network's state on the serial console after the reboot, for when SSH does not come back.
-printf '%s\n' '[Unit]' 'After=NetworkManager.service' '[Service]' 'Type=oneshot' \
-  "ExecStart=/bin/sh -c 'sleep 20; ip -br addr; nmcli -t device; journalctl -b -u NetworkManager --no-pager | tail -25'" \
-  'StandardOutput=tty' 'TTYPath=/dev/ttyS0' '[Install]' 'WantedBy=multi-user.target' >/etc/systemd/system/spike-netinfo.service
+# Run 3: SSH again did not come back, and sshd never even started. The cloud image enables
+# systemd-time-wait-sync, and its pacman-init.service (Before=sshd.service, After=time-sync.target)
+# makes sshd wait for an NTP sync on every boot. A desktop install has neither, so the wait goes.
+systemctl disable systemd-time-wait-sync.service
+# The second boot's journal on the serial console, and the state of the network, the clock and
+# systemd's pending jobs half a minute in, for when SSH still does not come back.
+mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nForwardToConsole=yes\n' >/etc/systemd/journald.conf.d/spike-console.conf
+printf '%s\n' '[Unit]' 'After=NetworkManager.service' '[Service]' 'Type=simple' 'SyslogIdentifier=spike-netinfo' \
+  "ExecStart=/bin/sh -c 'sleep 30; systemctl list-jobs --no-pager; ip -br addr; ip route; nmcli -t device; ls -l /etc/resolv.conf; cat /etc/resolv.conf; timedatectl show -p NTPSynchronized; systemctl --no-pager status sshd | head -5'" \
+  '[Install]' 'WantedBy=multi-user.target' >/etc/systemd/system/spike-netinfo.service
 systemctl enable spike-netinfo.service
+set +x
+echo "before the reboot: sshd $(systemctl is-enabled sshd.service), time-wait-sync $(systemctl is-enabled systemd-time-wait-sync.service), NTP synchronized $(timedatectl show -p NTPSynchronized --value)"
