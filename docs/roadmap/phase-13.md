@@ -1,8 +1,8 @@
 # Phase 13 Plan: Arch-based Linux
 
 > Scope: Devid 0.19's Linux support (the daemon, the CLI and the TUI) extended from Ubuntu to Arch Linux and the distributions built on it
-> Verified against: 2026-11-24 (Devid 0.19.0 and 0.20.0-rc.1; Phase 12 done, see `phase-12.md`; spike run 45311846301; A2's Arch run 45318939599; A3's CI run 45351167579 and release dry run 45351179773; rc.1's release run 45377684962)
-> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"); question 6 was answered on the Arch machine the same day (see "A1.6 results"). **A2 done 2026-11-24** (see "A2 results"), with the desktop session's PATH fixed by #139. **A3 done 2026-11-24** (see "A3 results"). **A4:** 0.20.0-rc.1 passed on the owner's Arch, Ubuntu and CachyOS machines the same day (see "rc.1 on the machines"); 0.20.0 is next.
+> Verified against: 2026-11-25 (Devid 0.19.0, 0.20.0-rc.1 and 0.20.0; Phase 12 done, see `phase-12.md`; spike run 45311846301; A2's Arch run 45318939599; A3's CI run 45351167579 and release dry run 45351179773; rc.1's release run 45377684962; 0.20.0's release run 45431318726)
+> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"); question 6 was answered on the Arch machine the same day (see "A1.6 results"). **A2 done 2026-11-24** (see "A2 results"), with the desktop session's PATH fixed by #139. **A3 done 2026-11-24** (see "A3 results"). **Done 2026-11-25:** Devid 0.20.0 runs on Arch Linux and the distributions built on it. A4 shipped as 0.20.0 on 2026-11-24, after rc.1 on the owner's Arch, Ubuntu and CachyOS machines; the update and uninstall checks passed on 2026-11-25 (see "A4 results").
 
 On 2026-11-24, after 0.19.0 shipped Devid for Ubuntu, the owner named Arch-based distributions as a likely next target.
 
@@ -361,9 +361,34 @@ What rc.1 did there:
   - Empty folders remained: `~/.config/fish/conf.d`, `~/.config/systemd/user`, and `~/.pki/nssdb` with an empty database, which Ubuntu and Arch also keep.
 - **Unrelated:** CachyOS's `ananicy-cpp` crashed at every boot of this VM, before Devid was installed too, reading `/sys/devices/system/cpu/cpu2` from Parallels' CPU list.
 
-### Left for 0.20.0
+## A4 results (2026-11-25)
 
-- On the Arch and Ubuntu machines, `devid self-update` from rc.1 to 0.20.0, then uninstall, compared with the records from before.
+- **Released:** 0.20.0 (#142, tag `v0.20.0`, release run 45431318726), with every job green on the first run, `arch-e2e` included. It has been GitHub's Latest since 2026-11-24, and `devid-latest` carries it.
+- **On the machines** (the record is `docs/implementation-timeline/linux/2026-11-25-a4-release.md`):
+  - rc.1 on Arch Linux with KDE Plasma, Ubuntu 24.04 and CachyOS, as "rc.1 on the machines" describes;
+  - `devid self-update` from rc.1 to 0.20.0 on the Arch and Ubuntu machines:
+    - it checked the download's sha256 and ran setup, which found everything in place and needed no sudo;
+    - the daemon restarted on the new binary, the test sites answered, and doctor said "all good";
+    - nothing else changed;
+  - `devid uninstall --purge` on both machines, then a comparison:
+    - **Arch:** identical to the record from before rc.1. `/etc/resolv.conf` is NetworkManager's file again, and systemd-resolved and its sockets are off again.
+    - **Ubuntu:** identical to Phase 12's record from before Devid, apart from the empty `~/.pki/nssdb` that Phase 12 already left.
+    - **Both:** no Devid CA in the system store or the browsers' databases, and no nftables table.
+- **Fixed on the way:** #139, before rc.1 (see "A1.6 results"):
+  - the desktop session's PATH on Arch, through `~/.bash_profile`;
+  - Firefox's XDG profiles;
+  - the terminal.
+- **The docs:**
+  - the README and the bug template (#142);
+  - devid-binaries' README (hadziqmtqn/devid-binaries#24);
+  - the guide's `/docs/linux` page, its index, install, terminal and uninstall pages, the landing page and the roadmap (hadziqmtqn/devid-site#20).
+
+  Both PRs merge now that 0.20.0 is out.
+- **The machines:** Devid is uninstalled on all three.
+  - Only empty folders are left: `~/.pki/nssdb`, and on CachyOS also `~/.config/fish/conf.d` and `~/.config/systemd/user`.
+  - Whether each VM keeps its passwordless sudo file is the owner's call.
+  - The CachyOS VM can be deleted to free the old Mac's disk.
+- **Next:** database integration, Phase 14 (D-060).
 
 ## Where it is tested
 
@@ -385,7 +410,7 @@ What rc.1 did there:
 | A1 | **Spike** on GitHub's runners | the answers above are in this doc, and D-059 is accepted or changed to match them |
 | A2 | **The platform layer by capability:** CA through p11-kit, DNS per A1.1, nftables and prerequisite messages, fonts in devid-binaries, PATH per A1.6, and fish's `conf.d` file on every system | unit tests cover the Arch plans and fish next to the Ubuntu ones, a CLI test runs `devid path on` and `off` with fish as the login shell, and the Ubuntu `linux-e2e` still passes |
 | A3 | **CI:** an `arch-e2e` job, the twin of `linux-e2e`: setup, a site over HTTPS (curl and a browser), doctor, and uninstall with every file compared | it passes on every pull request, and release builds run it before publishing |
-| A4 | **Docs and release:** the guide's Linux page and the README name Arch and its prerequisites; a pre-release goes on the Arch machine first, as rc.1 did on Ubuntu | released, after Claude installs it on the Arch machine from `install.sh`, opens a site in Firefox and a Chromium browser, reboots, updates it and uninstalls it; and on CachyOS, the same install with fish as the shell, `php` found in a new terminal, a site in Firefox, and uninstall |
+| A4 | **Docs and release:** the guide's Linux page and the README name Arch and its prerequisites; a pre-release goes on the Arch machine first, as rc.1 did on Ubuntu | released, after Claude installs it on the Arch machine from `install.sh`, opens a site in Firefox and a Chromium browser, reboots, updates it and uninstalls it; and on CachyOS, the same install with fish as the shell, `php` found in a new terminal, a site in Firefox, and uninstall (done 2026-11-25 on the owner's Arch, Ubuntu and CachyOS machines; see "A4 results") |
 
 ## Owner's answers (2026-11-24)
 

@@ -8,3 +8,4 @@
 | 2026-11-24 | [Phase 12 L5: 0.19.0, tested on the owner's Ubuntu machine](2026-11-24-l5-release.md) |
 | 2026-11-24 | [Phase 13 A2: the Linux platform layer by capability, for Arch](2026-11-24-a2-platform.md) |
 | 2026-11-24 | [Phase 13 A3: arch-e2e in CI and before every release](2026-11-24-a3-ci.md) |
+| 2026-11-25 | [Phase 13 A4: 0.20.0, tested on the owner's Arch, Ubuntu and CachyOS machines](2026-11-25-a4-release.md) |
