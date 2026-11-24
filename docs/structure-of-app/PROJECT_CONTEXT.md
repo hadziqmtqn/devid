@@ -31,6 +31,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 - Phase 9 (accepted 2026-11-16, done in 0.15.0): Mail, a mail catcher that runs Mailpit (D-049).
 - Phase 10 (accepted 2026-11-21): dev servers on demand, started by a site's first request and stopped when idle (D-054). O2 shipped in 0.16.1; O3 to O5 (nginx, Caddy, Apache, the app and the TUI) in 0.17.0, released 2026-11-22.
 - Phase 11 (accepted 2026-11-22, done in 0.18.0): Laravel + Vite over HTTPS, so a Laravel site's Vite dev server works in Safari too (D-056).
+- Phase 12 (accepted 2026-11-23, done in 0.19.0): Linux, Ubuntu 24.04 and 26.04 on x86_64, with the CLI and the TUI (D-057).
 
 **Non-goals:**
 - Running databases from Devid. The owner uses DBngin for PostgreSQL and MySQL. Since D-058, `devid-binaries` builds MySQL, PostgreSQL and MongoDB for every Devid platform, but no Devid release installs or runs them yet.
@@ -53,6 +54,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 | 9 | Mail: Devid runs Mailpit, in two stages (D-049); plan in `docs/roadmap/phase-9.md` | done 2026-11-17: both stages, the inbox in the app included (D-051), released in v0.15.0; Mailpit ships in the runtime release since 2026.11.20-12 |
 | 10 | Dev servers on demand: a proxy site's command starts with its first request and stops when idle (D-054); plan in `docs/roadmap/phase-10.md` | done 2026-11-22: O2 in 0.16.1, O3 to O5 (nginx, Caddy, Apache, app, TUI) in 0.17.0, checked on the owner's devid-site |
 | 11 | Laravel + Vite over HTTPS: a Laravel site's commands get the site's certificate for Vite when `APP_URL` names the site (D-056); plan in `docs/roadmap/phase-11.md` | done 2026-11-23: V2 in 0.18.0 (released 2026-11-22), the guide page `/docs/laravel-vite`, installed on the owner's M1 |
+| 12 | Linux: Ubuntu 24.04 and 26.04 on x86_64, the CLI and the TUI (D-057); plan in `docs/roadmap/phase-12.md` | done 2026-11-24: L1 to L4 on 2026-11-23, and 0.19.0 released on 2026-11-24 after rc.1 and rc.2 on the owner's Ubuntu 24.04 machine (install, browsers, reboot, uninstall, self-update) |
 
 ## Open risks (Phase 1 must prove)
 

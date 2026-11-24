@@ -46,7 +46,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
 | D-058 | 2026-11-24 | accepted 2026-11-24 (supersedes D-006 in part) | Database binaries for every Devid platform: official MySQL and MongoDB builds mirrored, PostgreSQL built from source, in a release track of their own; Devid does not run them yet |
-| D-057 | 2026-11-23 | accepted 2026-11-23 (Phase 12; narrows D-044); L1 details 2026-11-23; L2 runtime 2026-11-23; L3 daemon 2026-11-23; L4 release build 2026-11-23 | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners and, for the desktop, on the owner's Xubuntu machine over SSH |
+| D-057 | 2026-11-23 | accepted 2026-11-23 (Phase 12; narrows D-044); L1 details 2026-11-23; L2 runtime 2026-11-23; L3 daemon 2026-11-23; L4 release build 2026-11-23; done in 0.19.0 2026-11-24 | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners and, for the desktop, on the owner's Xubuntu machine over SSH |
 | D-056 | 2026-11-22 | accepted 2026-11-22 (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
 | D-055 | 2026-11-22 | accepted 2026-11-22 (the owner's request) | The app's site detail puts explanations in tooltips: an (i) after each title, the notes under the cards in their headings' tooltips; what needs action stays on the page, and a status is said once |
 | D-054 | 2026-11-21 | accepted 2026-11-21 (Phase 10; amends D-036, D-040); amended 2026-11-21 (O4) and 2026-11-22 (O5) | Dev servers on demand: a proxy site can name one saved command that its first request starts (the request waits for it) and that stops after the site has been idle for a set time (10 min by default); off by default, on nginx, Caddy and Apache |
@@ -1036,6 +1036,11 @@ See ARCHITECTURE, "PHP runtime".
 - **L4 (2026-11-23), installing and updating on Linux:**
   - From the next release on, every devid release carries `devid-linux-x86_64`, a static musl binary built and tested on Ubuntu 24.04.
   - `install.sh` and self-update pick the binary for their own system. Linux on arm64 is refused until it has a build.
+- **L5 (2026-11-24): released in 0.19.0** (#132), after 0.19.0-rc.1 and rc.2 on the owner's Ubuntu 24.04 Desktop machine:
+  - install, setup, Brave and Firefox, reboot, and uninstall with every file compared;
+  - `devid self-update` to 0.19.0.
+
+  The guide's `/docs/linux` page and the READMEs went out with it. Arch-based distributions are a possible next target (owner, 2026-11-24), not yet a decision.
 - **Plan:** `docs/roadmap/phase-12.md`.
 - **Status:** accepted by the owner on 2026-11-23, answering the plan's three questions ("ubuntu dulu, berbasis Xubuntu"; "sesuai usulan kamu, dahulukan pondasi CLI dan TUI dulu baru ke desktop app linux").
 

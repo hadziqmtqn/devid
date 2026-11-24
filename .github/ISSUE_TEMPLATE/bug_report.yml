@@ -5,21 +5,21 @@ body:
   - type: markdown
     attributes:
       value: |
-        Devid is a personal project, provided as is. It is built and tested on Intel Macs with macOS 14 only, so replies may take a while.
+        Devid is a personal project, provided as is. It is tested by hand on an M1 Mac with macOS 26, an Intel Mac with macOS 14 and Ubuntu 24.04, so replies may take a while.
         This repository is public: remove anything private (user names, project names, domains, tokens) from what you paste.
   - type: input
     id: version
     attributes:
       label: Devid version
       description: Output of `devid --version`
-      placeholder: devid 0.18.0
+      placeholder: devid 0.19.0
     validations:
       required: true
   - type: input
     id: macos
     attributes:
-      label: macOS version and Mac
-      description: Output of `sw_vers -productVersion; uname -m` (x86_64 is Intel, arm64 is Apple silicon)
+      label: System
+      description: "macOS: output of `sw_vers -productVersion; uname -m` (x86_64 is Intel, arm64 is Apple silicon). Linux: output of `. /etc/os-release; echo $PRETTY_NAME; uname -m`"
       placeholder: 14.8, x86_64
     validations:
       required: true
