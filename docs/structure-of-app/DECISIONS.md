@@ -46,7 +46,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
 | D-060 | 2026-11-24 | accepted 2026-11-24 (an order; D-035 stands) | After Phase 13, the next phase wires D-058's databases into Devid; Node and Bun runtimes come later, in a phase of their own |
-| D-059 | 2026-11-24 | accepted 2026-11-24 (Phase 13; extends D-057) | Arch-based Linux: plain Arch first, then CachyOS and EndeavourOS; each part chosen by what the system has (p11-kit or Debian CA tools, systemd-resolved on or off), setup may turn systemd-resolved on and uninstall restores it, and fish gets a PATH file on every system; tested on GitHub's runners (Arch under QEMU/KVM) and a KDE Plasma VM on the old Mac |
+| D-059 | 2026-11-24 | accepted 2026-11-24 (Phase 13; extends D-057); done in 0.20.0 2026-11-24 | Arch-based Linux: plain Arch first, then CachyOS and EndeavourOS; each part chosen by what the system has (p11-kit or Debian CA tools, systemd-resolved on or off), setup may turn systemd-resolved on and uninstall restores it, and fish gets a PATH file on every system; tested on GitHub's runners (Arch under QEMU/KVM) and a KDE Plasma VM on the old Mac |
 | D-058 | 2026-11-24 | accepted 2026-11-24 (supersedes D-006 in part) | Database binaries for every Devid platform: official MySQL and MongoDB builds mirrored, PostgreSQL built from source, in a release track of their own; Devid does not run them yet |
 | D-057 | 2026-11-23 | accepted 2026-11-23 (Phase 12; narrows D-044); L1 details 2026-11-23; L2 runtime 2026-11-23; L3 daemon 2026-11-23; L4 release build 2026-11-23; done in 0.19.0 2026-11-24 | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners and, for the desktop, on the owner's Xubuntu machine over SSH |
 | D-056 | 2026-11-22 | accepted 2026-11-22 (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
@@ -1133,6 +1133,12 @@ See ARCHITECTURE, "PHP runtime".
   - **Fix:** bash gets its line in `~/.bash_profile` where that file exists, else in `~/.profile`. `environment.d` was not needed.
   - **Cleaning up:** `devid path off` and uninstall clean every startup file Devid may have written.
   - **Also fixed:** the CA goes to Firefox's XDG profiles (`~/.config/mozilla/firefox`, which Firefox 160 used), to the snap's and to Flathub's. Devid's terminal no longer tries Konsole's Flatpak, which ignores the folder it is given.
+- **A4 (2026-11-24 to 2026-11-25): released in 0.20.0** (#140 for rc.1, #142), after 0.20.0-rc.1 on the owner's three VMs on the old Mac:
+  - **Arch Linux with KDE Plasma:** install, Firefox and Chromium, a reboot, and `devid self-update` to 0.20.0. Uninstall was then identical to the state before.
+  - **Ubuntu 24.04:** rc.1 over 0.19.0, with only the version changing, then the update and uninstall.
+  - **CachyOS:** fish's PATH file in a new terminal and in the desktop session (Plasma Login Manager), Firefox, UFW left alone, and uninstall.
+
+  The guide's `/docs/linux` page and the READMEs went out with it. CachyOS confirmed A1's guess: it runs systemd-resolved, so setup only adds the drop-in there.
 
 ## D-060: after Phase 13, database integration comes before Node and Bun (accepted 2026-11-24)
 
