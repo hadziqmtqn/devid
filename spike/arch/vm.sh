@@ -18,8 +18,10 @@ wait_ssh() {
     "${SSH[@]}" true 2>/dev/null && return 0
     sleep 4
   done
-  echo "FAIL: no SSH to the VM; the end of its serial console:" >&2
-  tail -80 "$W/serial.log" >&2
+  echo "FAIL: no SSH to the VM. Its serial console, on sshd, the network and the clock:" >&2
+  tr -d '\r' <"$W/serial.log" | grep -aE 'spike-netinfo|sshd|OpenSSH|NetworkManager|eth0|timesyncd|time-wait|Time Sync|resolv' | tail -120 >&2
+  echo "... and its last lines:" >&2
+  tr -d '\r' <"$W/serial.log" | grep -av '^$' | tail -40 >&2
   return 1
 }
 
@@ -30,6 +32,8 @@ case "${1:?usage: vm.sh boot|ssh|copy|wait}" in
     echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
       sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
     sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+    # Run 3 spent five minutes installing QEMU; man-db's index rebuild is a known part of that.
+    sudo rm -f /var/lib/man-db/auto-update
     sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils >/dev/null
     ls -l /dev/kvm
     curl -fsSL --retry 3 -o "$W/arch.qcow2" "$IMAGE_URL"
