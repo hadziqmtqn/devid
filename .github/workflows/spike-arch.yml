@@ -1,0 +1,121 @@
+name: Spike Arch (Phase 13 A1)
+
+# Phase 13 A1 (docs/roadmap/phase-13.md): answers the spike's questions on an Arch Linux VM that runs
+# under QEMU/KVM on a GitHub Ubuntu runner, and looks at CachyOS's own image. It runs only on
+# spike/arch-* branches and publishes nothing; the scripts are in spike/arch/.
+
+on:
+  push:
+    branches: ['spike/arch-**']
+    paths-ignore: ['docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-arch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arch:
+    # Questions 1 to 5 and 7, and fish (A2), on a desktop-like Arch VM.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - name: Boot Arch's cloud image under QEMU/KVM
+        run: spike/arch/vm.sh boot
+      - name: Packages, and NetworkManager with systemd-resolved off, as on a desktop
+        run: |
+          spike/arch/vm.sh copy spike/arch/prepare.sh prepare.sh
+          spike/arch/vm.sh ssh 'sudo bash prepare.sh' 2>&1 | grep -vE '^(\+ |::|  |\(|downloading|checking|loading|installing|upgrading|resolving|looking|Packages|Total|Net|warning: .* is up to date)' | tail -30
+          spike/arch/vm.sh ssh 'sudo systemctl reboot' || true
+          spike/arch/vm.sh wait
+          spike/arch/vm.sh ssh 'systemctl is-active NetworkManager systemd-resolved; ls -l /etc/resolv.conf; cat /etc/resolv.conf'
+      - name: Devid 0.19.0 from its release, and the scripts
+        run: |
+          base=https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-v0.19.0
+          curl -fsSL -o devid "$base/devid-linux-x86_64"
+          curl -fsSL -o checksums.txt "$base/checksums.txt"
+          grep ' devid-linux-x86_64$' checksums.txt | sed 's/devid-linux-x86_64$/devid/' | sha256sum -c -
+          chmod +x devid
+          spike/arch/vm.sh copy devid devid
+          tar -C spike/arch -cf arch.tar . && spike/arch/vm.sh copy arch.tar arch.tar
+          spike/arch/vm.sh ssh 'mkdir -p spike && tar -C spike -xf arch.tar'
+      - name: A1 checks
+        run: spike/arch/vm.sh ssh 'bash spike/system.sh'
+      - name: Results
+        if: always()
+        run: |
+          spike/arch/vm.sh ssh 'cat a1-out/table.md' >>"$GITHUB_STEP_SUMMARY" || true
+          spike/arch/vm.sh ssh 'tar -C a1-out -czf - .' >a1-arch.tgz || true
+          tail -30 vm/serial.log || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: a1-arch
+          path: a1-arch.tgz
+
+  fonts-ubuntu:
+    # Question 5 on Ubuntu: the type.xml for both layouts must still work where 0.19's does.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core fonts-liberation >/dev/null
+      - name: Devid 0.19.0 with PHP 8.5 and imagick, in a throwaway home
+        run: |
+          base=https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-v0.19.0
+          curl -fsSL -o devid "$base/devid-linux-x86_64" && chmod +x devid
+          export DEVID_HOME="$RUNNER_TEMP/dv"
+          mkdir -p "$DEVID_HOME"
+          printf 'http_port = 28088\nhttps_port = 28443\ndns_port = 28535\nupdate_check_minutes = 0\n' >"$DEVID_HOME/config.toml"
+          ./devid daemon run >"$RUNNER_TEMP/daemon.log" 2>&1 &
+          for _ in $(seq 50); do ./devid status >/dev/null 2>&1 && break; sleep 0.2; done
+          ./devid php install 8.5
+          ./devid php ext install 8.5 imagick
+          echo "ETC=$(dirname "$(find "$DEVID_HOME" -name type.xml -path '*imagick*' | head -1)")" >>"$GITHUB_ENV"
+          echo "PHP=$DEVID_HOME/php/8.5/bin/php" >>"$GITHUB_ENV"
+      - name: The shipped type.xml and the one for both layouts
+        run: |
+          # PHP itself with Devid's ini: a php8.5 shim would set MAGICK_CONFIGURE_PATH to imagick's etc.
+          ini="$(dirname "$PHP")/../etc"
+          printf '#!/bin/bash\nPHPRC=%s PHP_INI_SCAN_DIR=%s/conf.d exec %s "$@"\n' "$ini" "$ini" "$PHP" >"$RUNNER_TEMP/php85" && chmod +x "$RUNNER_TEMP/php85"
+          spike/arch/fonts.sh draw "$ETC" "$RUNNER_TEMP/php85"
+          spike/arch/fonts.sh both "$ETC" "$RUNNER_TEMP/fonts"
+          spike/arch/fonts.sh draw "$RUNNER_TEMP/fonts" "$RUNNER_TEMP/php85"
+
+  cachyos:
+    # Question 8: what CachyOS changes. Its Docker image has no systemd running and no installer,
+    # so this reads packages and their files; the default shell for new users comes from its
+    # installer's settings.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - name: Find an image
+        run: |
+          for img in cachyos/cachyos:latest cachyos/cachyos-v3:latest; do
+            if docker pull -q "$img"; then echo "IMG=$img" >>"$GITHUB_ENV"; echo "using $img"; break; fi
+          done
+      - name: Packages, repositories, NSS, resolved, fish
+        if: env.IMG != ''
+        run: |
+          docker run --rm "$IMG" bash -c '
+            set -x
+            cat /etc/os-release
+            grep -E "^\[" /etc/pacman.conf
+            pacman -Q systemd networkmanager nss p11-kit ca-certificates nftables fish 2>&1
+            ls -l /usr/lib/libnssckbi.so; readlink -f /usr/lib/libnssckbi.so
+            cat /etc/default/useradd 2>/dev/null; getent passwd root
+            ls /usr/lib/systemd/system-preset/ /etc/systemd/system-preset/ 2>/dev/null
+            grep -rh -iE "resolved|NetworkManager" /usr/lib/systemd/system-preset/ /etc/systemd/system-preset/ 2>/dev/null
+            pacman -Sy >/dev/null 2>&1; pacman -Fy >/dev/null 2>&1
+            pacman -Si cachyos-settings cachyos-fish-config 2>&1 | grep -E "^(Repository|Name|Version|Description|Depends On)"
+            pacman -Fl cachyos-settings 2>/dev/null | grep -iE "resolv|networkmanager|systemd/|shell" | head -30
+            pacman -Fl cachyos-fish-config 2>/dev/null | head -20
+            pacman -Si ttf-dejavu ttf-liberation 2>&1 | grep -E "^(Repository|Name)"
+            pacman -Fl ttf-dejavu 2>/dev/null | grep -m2 DejaVuSans.ttf
+            pacman -Sl 2>/dev/null | cut -d" " -f1 | sort | uniq -c
+          '
