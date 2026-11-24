@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-059 | 2026-11-24 | accepted 2026-11-24 (Phase 13; extends D-057) | Arch-based Linux: plain Arch first, then CachyOS and EndeavourOS; each part chosen by what the system has (p11-kit or Debian CA tools, systemd-resolved on or off), setup may turn systemd-resolved on and uninstall restores it, and fish gets a PATH file on every system; tested on GitHub's runners (Arch under QEMU/KVM) and a KDE Plasma VM on the old Mac |
 | D-057 | 2026-11-23 | accepted 2026-11-23 (Phase 12; narrows D-044); L1 details 2026-11-23; L2 runtime 2026-11-23; L3 daemon 2026-11-23; L4 release build 2026-11-23; done in 0.19.0 2026-11-24 | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners and, for the desktop, on the owner's Xubuntu machine over SSH |
 | D-056 | 2026-11-22 | accepted 2026-11-22 (Phase 11) | Vite over HTTPS for Laravel sites: a PHP site's commands get `VITE_DEV_SERVER_KEY` and `VITE_DEV_SERVER_CERT` with the site's Devid certificate when the project's `.env` has `APP_URL` on the site's host and sets neither; otherwise the clients say how to fix `APP_URL` |
 | D-055 | 2026-11-22 | accepted 2026-11-22 (the owner's request) | The app's site detail puts explanations in tooltips: an (i) after each title, the notes under the cards in their headings' tooltips; what needs action stays on the page, and a status is said once |
@@ -1042,3 +1043,24 @@ See ARCHITECTURE, "PHP runtime".
   The guide's `/docs/linux` page and the READMEs went out with it. Arch-based distributions are a possible next target (owner, 2026-11-24), not yet a decision.
 - **Plan:** `docs/roadmap/phase-12.md`.
 - **Status:** accepted by the owner on 2026-11-23, answering the plan's three questions ("ubuntu dulu, berbasis Xubuntu"; "sesuai usulan kamu, dahulukan pondasi CLI dan TUI dulu baru ke desktop app linux").
+
+## D-059: Arch-based Linux, starting with plain Arch (proposed and accepted 2026-11-24, Phase 13)
+
+- **Context:**
+  - 0.19.0 brought Devid to Ubuntu (D-057). On 2026-11-24 the owner named Arch-based distributions as the next Linux target.
+  - Devid's binaries, units and certutil step already work there. Four parts depend on Ubuntu: systemd-resolved (off by default on Arch), `update-ca-certificates` (Arch uses p11-kit), the `nftables` package, and the font paths. A fifth comes with CachyOS, whose default shell is fish.
+- **Decision:**
+  - **Targets:** plain Arch Linux first ("Arch murni"), then CachyOS and EndeavourOS as derivative checks. Manjaro and others follow later.
+  - **One Linux implementation that picks each part by what the system has,** not by distribution name. `/etc/os-release` only names the system in messages.
+  - **DNS:** where systemd-resolved is off, setup may turn it on and point `/etc/resolv.conf` at its stub ("Aktifkan resolved"). Uninstall restores the file and the service's state. The spike (A1) must show that this works next to NetworkManager.
+  - **CA:** p11-kit's `trust anchor` where `update-ca-certificates` is missing. If Arch's NSS reads the system store, the certutil step can be skipped there.
+  - **fish:** a `~/.config/fish/conf.d/devid.fish` PATH file on every system, macOS included.
+  - **Testing:**
+    - GitHub's runners, with Arch under QEMU/KVM from its official cloud image;
+    - a KDE Plasma VM on the old Mac for the desktop checks;
+    - CachyOS in CI if possible, otherwise in a third VM used only for the final check.
+
+    Never on the M1 (D-013), and no VPS.
+  - **Order:** this phase next, then Windows (D-044). The Linux desktop app comes only on request, since the CLI and the TUI cover everything it does. The owner left the order and the VM's desktop to Claude's proposal.
+- **Plan:** `docs/roadmap/phase-13.md`.
+- **Status:** accepted by the owner on 2026-11-24 ("Terima, mulai A1"), with "Arch murni", "Aktifkan resolved", and "masukkan CachyOS dan dukungan fish ke rencana".

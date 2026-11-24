@@ -2,7 +2,7 @@
 
 > Scope: Devid 0.19's Linux support (the daemon, the CLI and the TUI) extended from Ubuntu to Arch Linux and the distributions built on it
 > Verified against: 2026-11-24 (Devid 0.19.0; Phase 12 done, see `phase-12.md`)
-> Status: proposed 2026-11-24, at the owner's request ("tulis rencana untuk Arch-based"), with the owner's answers in "Owner's answers". It becomes D-059 once accepted; D-058 is taken by the database binaries (#133).
+> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". A1 is in progress.
 
 On 2026-11-24, after 0.19.0 shipped Devid for Ubuntu, the owner named Arch-based distributions as a likely next target.
 
@@ -35,7 +35,7 @@ These parts of 0.19 do not depend on Ubuntu:
 | PATH for the desktop | `~/.profile`, read at login | Arch's `~/.bash_profile` reads `~/.bashrc`, and a desktop session may not read `~/.profile` | A1.6 |
 | Prerequisites | `sudo apt install curl libnss3-tools` | `sudo pacman -S --needed nss nftables`, if anything | A1.4 |
 
-## Proposal (D-059, proposed)
+## Proposal (D-059)
 
 - **Target:** plain Arch Linux (rolling, x86_64) with systemd, the owner's choice. Then two derivatives as checks:
   - **CachyOS** (the owner's addition):
