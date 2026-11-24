@@ -431,8 +431,11 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
         })?;
     }
     let rcs: Vec<String> = install::rc_files().iter().map(|rc| rc.display().to_string()).collect();
+    // Every file Devid may have written goes clean, so the note names the files that changed.
     step(dry_run, &format!("remove Devid's PATH line from {}", rcs.join(" and ")), || {
-        install::set_on_path(paths, false).map(|_| String::new()).map_err(|e| e.to_string())
+        install::set_on_path(paths, false)
+            .map(|changed| changed.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "))
+            .map_err(|e| e.to_string())
     })?;
     let target = if purge { paths.home.clone() } else { install::bin_dir(paths) };
     step(dry_run, &format!("delete {}", target.display()), || {

@@ -327,13 +327,18 @@ fn prerequisites_on(exists: impl Fn(&str) -> bool, resolved: bool, network_manag
 }
 
 /// The startup files that put `~/.devid/bin` on PATH (D-053), for the login shell:
-/// - bash (the default): ~/.bashrc, which the terminal's non-login shells read; and ~/.profile,
-///   which the desktop session reads at login, so editors started from the menu find `php`. A new
-///   ~/.bash_profile would stop bash from reading ~/.profile.
+/// - bash (the default): ~/.bashrc, which the terminal's non-login shells read; and the file a login
+///   shell reads, which is how the desktop session starts, so editors opened from the menu find
+///   `php`. That is ~/.bash_profile where it exists (Arch's /etc/skel has one), else ~/.profile
+///   (Debian and Ubuntu). On Arch, SDDM starts Plasma through `bash --login`, which reads only
+///   ~/.bash_profile, and the ~/.bashrc it sources returns early in a non-interactive shell (Phase
+///   13 A1.6). A new ~/.bash_profile would stop bash from reading ~/.profile, so Devid never makes one.
 /// - zsh: ~/.zshenv and ~/.zshrc, as on macOS.
 pub fn rc_files_for(shell: &str, home: &Path) -> Vec<PathBuf> {
     if shell.ends_with("zsh") {
         vec![home.join(".zshenv"), home.join(".zshrc")]
+    } else if home.join(".bash_profile").is_file() {
+        vec![home.join(".bashrc"), home.join(".bash_profile")]
     } else {
         vec![home.join(".bashrc"), home.join(".profile")]
     }
@@ -422,8 +427,17 @@ fn nssdb() -> PathBuf {
     user_home().join(".pki/nssdb")
 }
 
-/// Where Firefox keeps its profiles: Mozilla's own builds, and Ubuntu's snap.
-const FIREFOX_PROFILES: [&str; 2] = [".mozilla/firefox", "snap/firefox/common/.mozilla/firefox"];
+/// Where Firefox keeps its profiles, in Mozilla's older layout and in the XDG one that newer Firefox
+/// uses for new profiles (Firefox 160 on Arch made `~/.config/mozilla/firefox`, Phase 13 A4): in the
+/// home folder, in Ubuntu's snap, and in Flathub's Flatpak, which Discover installs on Arch's KDE.
+const FIREFOX_PROFILES: [&str; 6] = [
+    ".mozilla/firefox",
+    ".config/mozilla/firefox",
+    "snap/firefox/common/.mozilla/firefox",
+    "snap/firefox/common/.config/mozilla/firefox",
+    ".var/app/org.mozilla.firefox/.mozilla/firefox",
+    ".var/app/org.mozilla.firefox/config/mozilla/firefox",
+];
 
 /// Every Firefox profile under `home` that has a certificate database. Each profile keeps its own,
 /// and Ubuntu's Firefox snap reads nothing else: on the Ubuntu 24.04 machine it rejected a site that
@@ -591,26 +605,39 @@ fn in_path(name: &str) -> Option<PathBuf> {
     std::env::split_paths(&path).map(|d| d.join(name)).find(|c| c.is_file())
 }
 
-/// The terminal to open and its arguments, for `dir`; `found` says which programs exist.
-fn terminal_for(dir: &str, terminal_env: Option<String>, found: impl Fn(&str) -> bool) -> (String, Vec<String>) {
+/// The terminal to open and its arguments, for `dir`; `found` says which programs exist. A Flatpak
+/// terminal is not on the list: Konsole's (`org.kde.konsole`, which Discover installs on Arch's KDE)
+/// starts its shell in the home folder whatever folder it is given (Phase 13 A4).
+fn terminal_for(
+    dir: &str,
+    terminal_env: Option<String>,
+    found: impl Fn(&str) -> bool,
+) -> Option<(String, Vec<String>)> {
     let mut defaults = std::iter::once("x-terminal-emulator".to_string()).chain(terminal_env.filter(|t| !t.is_empty()));
     if let Some(t) = defaults.find(|t| found(t)) {
-        return (t, vec![]);
+        return Some((t, vec![]));
     }
-    match TERMINALS.iter().find(|(t, _)| found(t)) {
-        Some((t, "")) => (t.to_string(), vec![]),
-        Some((t, flag)) => (t.to_string(), vec![flag.to_string(), dir.to_string()]),
-        // Spawning it fails and names the missing program.
-        None => ("x-terminal-emulator".into(), vec![]),
-    }
+    TERMINALS.iter().find(|(t, _)| found(t)).map(|(t, flag)| match *flag {
+        "" => (t.to_string(), vec![]),
+        flag => (t.to_string(), vec![flag.to_string(), dir.to_string()]),
+    })
+}
+
+fn no_terminal(pacman: bool) -> String {
+    format!(
+        "no terminal that opens in a folder was found: install one ({}) or set $TERMINAL; a Flatpak \
+         terminal starts in the home folder",
+        install_hint(pacman, "gnome-terminal", "konsole")
+    )
 }
 
 /// Opens the desktop's terminal in `dir`.
-pub fn terminal_command(dir: &str) -> Command {
-    let (program, args) = terminal_for(dir, std::env::var("TERMINAL").ok(), |t| in_path(t).is_some());
+pub fn terminal_command(dir: &str) -> Result<Command, String> {
+    let (program, args) = terminal_for(dir, std::env::var("TERMINAL").ok(), |t| in_path(t).is_some())
+        .ok_or_else(|| no_terminal(pacman()))?;
     let mut cmd = Command::new(program);
     cmd.args(args).current_dir(dir);
-    cmd
+    Ok(cmd)
 }
 
 /// Apache on macOS is the system httpd, and Linux has none to borrow (D-057).
@@ -836,19 +863,22 @@ mod tests {
         let only = |names: &'static [&'static str]| move |t: &str| names.contains(&t);
         assert_eq!(
             terminal_for("/p", None, only(&["x-terminal-emulator", "konsole"])),
-            ("x-terminal-emulator".into(), vec![])
+            Some(("x-terminal-emulator".into(), vec![]))
         );
-        assert_eq!(terminal_for("/p", Some("foot".into()), only(&["foot", "konsole"])), ("foot".into(), vec![]));
+        assert_eq!(terminal_for("/p", Some("foot".into()), only(&["foot", "konsole"])), Some(("foot".into(), vec![])));
         assert_eq!(
             terminal_for("/p", None, only(&["konsole", "gnome-terminal"])),
-            ("konsole".into(), vec!["--workdir".into(), "/p".into()])
+            Some(("konsole".into(), vec!["--workdir".into(), "/p".into()]))
         );
         assert_eq!(
             terminal_for("/p", Some(String::new()), only(&["kgx"])),
-            ("kgx".into(), vec!["--working-directory".into(), "/p".into()])
+            Some(("kgx".into(), vec!["--working-directory".into(), "/p".into()]))
         );
-        assert_eq!(terminal_for("/p", None, only(&["xterm"])), ("xterm".into(), vec![]));
-        assert_eq!(terminal_for("/p", None, only(&[])).0, "x-terminal-emulator", "spawning names what is missing");
+        assert_eq!(terminal_for("/p", None, only(&["xterm"])), Some(("xterm".into(), vec![])));
+        // Arch's KDE with only Discover's Flatpak Konsole: no terminal, and a message that says why.
+        assert_eq!(terminal_for("/p", None, only(&["org.kde.konsole"])), None);
+        assert!(no_terminal(true).contains("`sudo pacman -S --needed konsole`"));
+        assert!(no_terminal(false).contains("`sudo apt install gnome-terminal`"));
     }
 
     #[test]
@@ -863,10 +893,16 @@ mod tests {
 
     #[test]
     fn bash_gets_bashrc_and_profile_zsh_gets_zshenv_and_zshrc() {
-        let home = Path::new("/home/me");
-        assert_eq!(rc_files_for("/bin/bash", home), [home.join(".bashrc"), home.join(".profile")]);
-        assert_eq!(rc_files_for("", home), [home.join(".bashrc"), home.join(".profile")], "bash is the default");
-        assert_eq!(rc_files_for("/usr/bin/zsh", home), [home.join(".zshenv"), home.join(".zshrc")]);
+        let home = std::env::temp_dir().join(format!("devid-rc-linux-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+        assert_eq!(rc_files_for("/bin/bash", &home), [home.join(".bashrc"), home.join(".profile")]);
+        assert_eq!(rc_files_for("", &home), [home.join(".bashrc"), home.join(".profile")], "bash is the default");
+        assert_eq!(rc_files_for("/usr/bin/zsh", &home), [home.join(".zshenv"), home.join(".zshrc")]);
+        // Arch's /etc/skel: bash's login shells read ~/.bash_profile and never ~/.profile (A1.6).
+        fs::write(home.join(".bash_profile"), "[[ -f ~/.bashrc ]] && . ~/.bashrc\n").unwrap();
+        assert_eq!(rc_files_for("/usr/bin/bash", &home), [home.join(".bashrc"), home.join(".bash_profile")]);
+        fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
@@ -903,8 +939,11 @@ mod tests {
         for (dir, db) in [
             (".mozilla/firefox/abc.default-release", true),
             (".mozilla/firefox/Crash Reports", false),
+            // Firefox 160 on Arch (Phase 13 A4).
+            (".config/mozilla/firefox/m1bhyes5.default-release", true),
             ("snap/firefox/common/.mozilla/firefox/xyz.default", true),
             ("snap/firefox/common/.mozilla/firefox/Profile Groups", false),
+            (".var/app/org.mozilla.firefox/config/mozilla/firefox/fp.default-release", true),
         ] {
             fs::create_dir_all(home.join(dir)).unwrap();
             if db {
@@ -914,10 +953,12 @@ mod tests {
         assert_eq!(
             firefox_profiles(&home),
             [
+                home.join(".config/mozilla/firefox/m1bhyes5.default-release"),
                 home.join(".mozilla/firefox/abc.default-release"),
-                home.join("snap/firefox/common/.mozilla/firefox/xyz.default")
+                home.join(".var/app/org.mozilla.firefox/config/mozilla/firefox/fp.default-release"),
+                home.join("snap/firefox/common/.mozilla/firefox/xyz.default"),
             ],
-            "Mozilla's and the snap's profiles, not their other folders"
+            "the profiles in each layout, not their other folders"
         );
         assert!(firefox_profiles(&home.join("nobody")).is_empty());
         assert_eq!(databases_note(0), "~/.pki/nssdb");
