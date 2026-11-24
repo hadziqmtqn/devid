@@ -114,8 +114,12 @@ fn xml_unescape(s: &str) -> String {
 }
 
 /// The user's login shell from the user database. The daemon runs under launchd, whose
-/// environment need not have SHELL; $SHELL is the fallback.
+/// environment need not have SHELL; $SHELL is the fallback. DEVID_LOGIN_SHELL comes first, for the
+/// tests and for anyone whose account names a shell they do not use.
 fn login_shell() -> String {
+    if let Some(shell) = std::env::var("DEVID_LOGIN_SHELL").ok().filter(|s| !s.is_empty()) {
+        return shell;
+    }
     let mut buf = vec![0 as libc::c_char; 4096];
     // SAFETY: getpwuid_r (thread-safe, the daemon has threads) fills `pw` with strings that point
     // into `buf`, which outlives the read; `found` is null when there is no record.
@@ -132,18 +136,37 @@ fn login_shell() -> String {
     shell.filter(|s| !s.is_empty()).or_else(|| std::env::var("SHELL").ok()).unwrap_or_default()
 }
 
-/// The startup files that put `~/.devid/bin` on PATH (D-053) for the login shell; which ones
-/// depends on the OS (`platform::rc_files_for`).
+/// The startup files that put `~/.devid/bin` on PATH (D-053) for the login shell.
 pub fn rc_files() -> Vec<PathBuf> {
-    crate::platform::rc_files_for(&login_shell(), &user_home())
+    rc_files_for(&login_shell(), &user_home())
 }
 
-pub fn rc_line(paths: &Paths) -> String {
-    format!("export PATH=\"{}:$PATH\" {RC_MARKER}", bin_dir(paths).display())
+/// fish gets a file of Devid's own in conf.d on every OS, which fish reads in every shell,
+/// interactive or not (D-059); bash and zsh get the OS's files (`platform::rc_files_for`).
+pub fn rc_files_for(shell: &str, home: &Path) -> Vec<PathBuf> {
+    if shell.ends_with("fish") {
+        vec![home.join(".config/fish/conf.d/devid.fish")]
+    } else {
+        crate::platform::rc_files_for(shell, home)
+    }
 }
 
-/// Whether `rc` has this exact PATH line.
-pub fn rc_has_line(rc: &Path, line: &str) -> bool {
+/// The PATH line for one startup file: `fish_add_path` in fish's, `export PATH` in the others.
+pub fn rc_line(paths: &Paths, rc: &Path) -> String {
+    let bin = bin_dir(paths).display().to_string();
+    if rc.extension().is_some_and(|e| e == "fish") {
+        // --move puts it first even when PATH already has it further on; --path changes PATH itself,
+        // so fish writes no universal variable (Phase 13 A1).
+        let quoted = format!("'{}'", bin.replace('\\', "\\\\").replace('\'', "\\'"));
+        format!("fish_add_path --global --move --path {quoted} {RC_MARKER}")
+    } else {
+        format!("export PATH=\"{bin}:$PATH\" {RC_MARKER}")
+    }
+}
+
+/// Whether `rc` has this install's exact PATH line.
+pub fn rc_has_line(paths: &Paths, rc: &Path) -> bool {
+    let line = rc_line(paths, rc);
     fs::read_to_string(rc).is_ok_and(|t| t.lines().any(|l| l == line))
 }
 
@@ -156,10 +179,9 @@ pub fn commands() -> Vec<&'static str> {
 /// (D-053). A terminal that is already open keeps its PATH until a new one opens. Returns the
 /// files that changed.
 pub fn set_on_path(paths: &Paths, on: bool) -> io::Result<Vec<PathBuf>> {
-    let line = rc_line(paths);
     let mut changed = Vec::new();
     for rc in rc_files() {
-        let did = if on { ensure_rc_line(&rc, &line) } else { remove_rc_line(&rc) };
+        let did = if on { ensure_rc_line(&rc, &rc_line(paths, &rc)) } else { remove_rc_line(&rc) };
         if did.map_err(|e| err(format!("{}: {e}", rc.display())))? {
             changed.push(rc);
         }
@@ -180,6 +202,10 @@ pub fn ensure_rc_line(rc: &Path, line: &str) -> io::Result<bool> {
     }
     new.push_str(line);
     new.push('\n');
+    if let Some(dir) = rc.parent() {
+        // fish's conf.d may not exist yet.
+        fs::create_dir_all(dir)?;
+    }
     fs::write(rc, new)?;
     Ok(true)
 }
@@ -290,7 +316,7 @@ mod tests {
         let rc = dir.join(".zshrc");
         fs::write(&rc, "export FOO=1\nexport PATH=\"/x:$PATH\"").unwrap(); // no trailing newline
         let paths = Paths { home: PathBuf::from("/Users/me/.devid") };
-        let line = rc_line(&paths);
+        let line = rc_line(&paths, &rc);
         assert_eq!(line, "export PATH=\"/Users/me/.devid/bin:$PATH\" # added by devid");
 
         assert!(ensure_rc_line(&rc, &line).unwrap());
@@ -307,6 +333,33 @@ mod tests {
         assert!(remove_rc_line(&own).unwrap());
         assert!(!own.exists());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// fish (D-059): Devid's own file in conf.d, on every OS, made with its folder and deleted again.
+    #[test]
+    fn fish_gets_its_own_conf_d_file() {
+        let home = std::env::temp_dir().join(format!("devid-fish-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        let rcs = rc_files_for("/usr/bin/fish", &home);
+        assert_eq!(rcs, [home.join(".config/fish/conf.d/devid.fish")]);
+        assert_eq!(rc_files_for("/bin/bash", &home), crate::platform::rc_files_for("/bin/bash", &home));
+
+        let paths = Paths { home: PathBuf::from("/home/me/.devid") };
+        let fish = &rcs[0];
+        let line = rc_line(&paths, fish);
+        assert_eq!(line, "fish_add_path --global --move --path '/home/me/.devid/bin' # added by devid");
+        assert!(!rc_has_line(&paths, fish));
+        assert!(ensure_rc_line(fish, &line).unwrap(), "conf.d is made too");
+        assert!(rc_has_line(&paths, fish));
+        assert_eq!(fs::read_to_string(fish).unwrap(), format!("{line}\n"));
+        assert!(remove_rc_line(fish).unwrap());
+        assert!(!fish.exists(), "Devid's own file goes");
+        let odd = Paths { home: PathBuf::from("/home/o'neil/.devid") };
+        assert_eq!(
+            rc_line(&odd, fish),
+            r"fish_add_path --global --move --path '/home/o\'neil/.devid/bin' # added by devid"
+        );
+        fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

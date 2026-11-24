@@ -52,3 +52,56 @@ fn add_to_path_from_the_daemon_and_the_cli() {
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// fish as the login shell (D-059): `devid path on` makes Devid's own file in fish's conf.d, on
+/// every OS, and `devid path off` deletes it. DEVID_LOGIN_SHELL stands in for the user database.
+#[test]
+fn fish_gets_a_conf_d_file_of_its_own() {
+    let root = temp_root("devid-fish-it");
+    let home = root.join("home");
+    let user = root.join("user");
+    fs::create_dir_all(&user).unwrap();
+    let cli = |args: &[&str]| {
+        std::process::Command::new(BIN)
+            .args(args)
+            .env("DEVID_HOME", &home)
+            .env("HOME", &user)
+            .env("DEVID_LOGIN_SHELL", "/usr/bin/fish")
+            .output()
+            .unwrap()
+    };
+    let out_text = |out: &std::process::Output| String::from_utf8_lossy(&out.stdout).into_owned();
+    let conf = user.join(".config/fish/conf.d/devid.fish");
+    let line = format!("fish_add_path --global --move --path '{}' # added by devid", home.join("bin").display());
+
+    assert!(out_text(&cli(&["path"])).contains("devid path on"));
+    let out = cli(&["path", "on"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out_text(&out).contains("devid.fish"), "{}", out_text(&out));
+    assert!(cli(&["path", "on"]).status.success(), "idempotent");
+    assert_eq!(fs::read_to_string(&conf).unwrap(), format!("{line}\n"));
+    let entries: Vec<_> = fs::read_dir(&user).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(entries, [".config"], "no bash or zsh file for a fish user");
+    assert!(out_text(&cli(&["path"])).contains("new terminals get Devid's commands"));
+
+    // A real fish, where there is one, puts Devid's bin first even when PATH has it last.
+    let fish = ["/usr/bin/fish", "/opt/homebrew/bin/fish", "/usr/local/bin/fish"]
+        .into_iter()
+        .find(|f| fs::metadata(f).is_ok());
+    if let Some(fish) = fish {
+        let out = std::process::Command::new(fish)
+            .args(["-c", "echo $PATH[1]"])
+            .env("HOME", &user)
+            .env_remove("XDG_CONFIG_HOME")
+            .env("PATH", format!("/usr/bin:/bin:{}", home.join("bin").display()))
+            .output()
+            .unwrap();
+        assert_eq!(out_text(&out).trim(), home.join("bin").display().to_string(), "{}", stderr(&out));
+    }
+
+    let out = cli(&["path", "off"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!conf.exists(), "Devid's own file goes");
+    assert!(out_text(&cli(&["path"])).contains("devid path on"));
+    fs::remove_dir_all(&root).unwrap();
+}

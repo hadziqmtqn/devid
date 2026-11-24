@@ -1,9 +1,10 @@
 //! The one-time root setup (D-002, D-013). Run through `sudo devid helper apply …`; every other
 //! part of Devid runs as the owner. This file holds what both systems share: the plan, its
 //! validation, and `apply`. Which files and commands each system needs is in platform/: on macOS
-//! /etc/resolver, a pf anchor and the System keychain; on Linux systemd-resolved, an nftables table
-//! and the system CA store (D-057). `uninstall` reverses each. The CA is name-constrained to
-//! `.<tld>` (see ca.rs), so trusting it cannot vouch for any real domain.
+//! /etc/resolver, a pf anchor and the System keychain; on Linux systemd-resolved (turned on where it
+//! is off, D-059), an nftables table and the system CA store (D-057). `uninstall` reverses each.
+//! The CA is name-constrained to `.<tld>` (see ca.rs), so trusting it cannot vouch for any real
+//! domain.
 
 use crate::sites;
 use std::{
@@ -31,6 +32,11 @@ pub enum Action {
     Copy { from: PathBuf, to: PathBuf },
     /// Remove a file, restoring `<path>.devid-backup` if present.
     Remove { path: PathBuf, restore_backup: bool },
+    /// Make `path` a symlink to `target`. What was there, a file or a link, is kept as
+    /// `<path>.devid-backup`, once: a later run never replaces that backup with Devid's own link.
+    Link { path: PathBuf, target: PathBuf },
+    /// Put `<path>.devid-backup` back in place of whatever `path` is now; nothing if there is none.
+    Restore { path: PathBuf },
     /// Run a command; `ok_to_fail` for best-effort cleanup steps.
     Run { program: String, args: Vec<String>, ok_to_fail: bool },
 }
@@ -52,6 +58,10 @@ impl Action {
             Action::Run { program, args, .. } => {
                 format!("run {program}{}", args.iter().map(|a| format!(" {a}")).collect::<String>())
             }
+            Action::Link { path, target } => {
+                format!("link {} to {} (backing up what is there)", path.display(), target.display())
+            }
+            Action::Restore { path } => format!("put back {0} from {0}.devid-backup", path.display()),
         }
     }
 }
@@ -92,8 +102,13 @@ pub fn uninstall_actions(plan: &Plan) -> Vec<Action> {
     crate::platform::uninstall_actions(plan)
 }
 
-fn backup_path(path: &Path) -> PathBuf {
+pub fn backup_path(path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.devid-backup", path.display()))
+}
+
+/// Whether anything is at `path`, a dangling symlink included (`Path::exists` follows links).
+pub fn present(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
 }
 
 /// Execute actions in order; stops at the first failure that is not `ok_to_fail`.
@@ -120,12 +135,32 @@ pub fn apply(actions: &[Action], mut log: impl FnMut(&str)) -> io::Result<()> {
                 fs::copy(from, to)?;
                 fs::set_permissions(to, fs::Permissions::from_mode(0o644))?;
             }
+            // Links count as present, dangling or not: a backup that is a link to a missing file
+            // still goes back, rather than the path being removed.
             Action::Remove { path, restore_backup } => {
                 let backup_file = backup_path(path);
-                if *restore_backup && backup_file.exists() {
+                if *restore_backup && present(&backup_file) {
                     fs::rename(&backup_file, path)?;
-                } else if path.exists() {
+                } else if present(path) {
                     fs::remove_file(path)?;
+                }
+            }
+            Action::Link { path, target } => {
+                let backup_file = backup_path(path);
+                if present(path) {
+                    if present(&backup_file) {
+                        fs::remove_file(path)?;
+                    } else {
+                        // rename keeps a link a link, and a file's content and mode.
+                        fs::rename(path, &backup_file)?;
+                    }
+                }
+                std::os::unix::fs::symlink(target, path)?;
+            }
+            Action::Restore { path } => {
+                let backup_file = backup_path(path);
+                if present(&backup_file) {
+                    fs::rename(&backup_file, path)?;
                 }
             }
             Action::Run { program, args, ok_to_fail } => {
@@ -200,6 +235,50 @@ mod tests {
 
         let failing = Action::Run { program: "/usr/bin/false".into(), args: vec![], ok_to_fail: false };
         assert!(apply(&[failing], |_| {}).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// /etc/resolv.conf on Arch (D-059): a regular file NetworkManager writes, or a link. Linking it
+    /// to systemd-resolved's stub and putting it back must keep its type and content exactly.
+    #[test]
+    fn link_backs_up_once_and_restore_puts_back_a_file_or_a_link() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("devid-helper-link-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let conf = dir.join("resolv.conf");
+        let stub = dir.join("stub-resolv.conf");
+        fs::write(&stub, "nameserver 127.0.0.53\n").unwrap();
+        let link = Action::Link { path: conf.clone(), target: stub.clone() };
+        let restore = Action::Restore { path: conf.clone() };
+
+        fs::write(&conf, "# Generated by NetworkManager\nnameserver 10.0.2.3\n").unwrap();
+        apply(std::slice::from_ref(&link), |_| {}).unwrap();
+        apply(std::slice::from_ref(&link), |_| {}).unwrap(); // a second setup keeps the first backup
+        assert_eq!(fs::read_link(&conf).unwrap(), stub);
+        assert_eq!(
+            fs::read_to_string(backup_path(&conf)).unwrap(),
+            "# Generated by NetworkManager\nnameserver 10.0.2.3\n"
+        );
+        apply(std::slice::from_ref(&restore), |_| {}).unwrap();
+        assert!(!fs::symlink_metadata(&conf).unwrap().is_symlink(), "a regular file again");
+        assert_eq!(fs::read_to_string(&conf).unwrap(), "# Generated by NetworkManager\nnameserver 10.0.2.3\n");
+        assert!(!present(&backup_path(&conf)));
+        apply(std::slice::from_ref(&restore), |_| {}).unwrap(); // no backup: nothing changes
+        assert!(conf.is_file());
+
+        // A link, even one whose target is gone, goes back as that same link.
+        fs::remove_file(&conf).unwrap();
+        symlink("/nonexistent/resolv.conf", &conf).unwrap();
+        apply(std::slice::from_ref(&link), |_| {}).unwrap();
+        assert_eq!(fs::read_link(backup_path(&conf)).unwrap(), Path::new("/nonexistent/resolv.conf"));
+        apply(&[Action::Remove { path: conf.clone(), restore_backup: true }], |_| {}).unwrap();
+        assert_eq!(fs::read_link(&conf).unwrap(), Path::new("/nonexistent/resolv.conf"), "not deleted");
+
+        // Nothing there: the link is made, and there is nothing to put back.
+        fs::remove_file(&conf).unwrap();
+        apply(&[link, restore], |_| {}).unwrap();
+        assert_eq!(fs::read_link(&conf).unwrap(), stub);
         fs::remove_dir_all(&dir).unwrap();
     }
 }

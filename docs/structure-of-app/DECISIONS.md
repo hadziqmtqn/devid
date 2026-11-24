@@ -1122,6 +1122,12 @@ See ARCHITECTURE, "PHP runtime".
   - **Browsers:** Arch's Chromium and Firefox read the system store through p11-kit. **Changed:** the certutil step stays on Arch as well, instead of being skipped. It covers browsers from outside Arch's repositories and does not clash with the system store.
   - **The rest:** 0.19's nftables unit works unchanged once `nftables` is installed. One `type.xml` serves both font layouts, with Liberation in `/usr/share/fonts/liberation/`. fish's `conf.d` file works as designed. CachyOS gives its installer's user fish and most likely runs resolved.
   - **Still open:** PATH in a desktop session (A1.6), on the KDE Plasma machine.
+- **A2 (2026-11-24, #137; Arch run 45318939599):** the Linux platform layer picks each part by what the system has, and Ubuntu's steps are unchanged.
+  - **CA:** **changed from A1's plan:** p11-kit's anchors folder (`/etc/ca-certificates/trust-source/anchors/devid-ca.crt`) and `update-ca-trust extract`, not `trust anchor`. That way uninstall does not need the user's CA file.
+  - **DNS:** setup turns systemd-resolved on only where it is off and NetworkManager runs. It notes this in `/etc/devid-resolved.state`, and keeps the old `/etc/resolv.conf` as `/etc/resolv.conf.devid-backup`. Uninstall puts the file back and stops resolved with its sockets.
+  - **fish:** `~/.config/fish/conf.d/devid.fish` on every OS. `DEVID_LOGIN_SHELL` overrides the login shell, for tests.
+  - **0.19's dry-run bug** is fixed. Messages name pacman's packages on Arch, and opening a terminal finds konsole and GNOME's terminals.
+  - **Fonts:** devid-binaries#23 lists both layouts in `type-linux.xml`.
 
 ## D-060: after Phase 13, database integration comes before Node and Bun (accepted 2026-11-24)
 

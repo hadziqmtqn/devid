@@ -29,16 +29,19 @@ pub(crate) mod tests {
     use crate::helper::Action;
     use std::path::PathBuf;
 
-    /// Uninstall removes every file install writes or copies.
+    /// Uninstall removes every file install writes or copies, and puts back every file it links.
     pub fn uninstall_removes_every_file(install: &[Action], uninstall: &[Action]) {
         let written = install.iter().filter_map(|a| match a {
-            Action::Write { path, .. } => Some(path),
+            Action::Write { path, .. } | Action::Link { path, .. } => Some(path),
             Action::Copy { to, .. } => Some(to),
             _ => None,
         });
         let removed: Vec<&PathBuf> = uninstall
             .iter()
-            .filter_map(|a| if let Action::Remove { path, .. } = a { Some(path) } else { None })
+            .filter_map(|a| match a {
+                Action::Remove { path, .. } | Action::Restore { path } => Some(path),
+                _ => None,
+            })
             .collect();
         for path in written {
             assert!(removed.contains(&path), "{} is cleaned up by uninstall", path.display());

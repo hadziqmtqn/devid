@@ -1,6 +1,10 @@
-//! Linux, Ubuntu first (D-057, Phase 12 L1): systemd-resolved for `.<tld>`, an nftables table
-//! loaded by a system unit for ports 80/443, the system CA store, `certutil` for Chrome's own
-//! database, and a systemd user unit for the daemon.
+//! Linux (D-057, D-059): systemd-resolved for `.<tld>`, an nftables table loaded by a system unit
+//! for ports 80/443, the system CA store, `certutil` for the browsers' own databases, and a systemd
+//! user unit for the daemon. Ubuntu came first; Arch differs in two parts, and each is picked by
+//! what the system has (`System`), not by its name:
+//! - the CA store: Debian's `update-ca-certificates`, or p11-kit's anchors and `update-ca-trust`;
+//! - DNS: where systemd-resolved is off, the root step turns it on, points /etc/resolv.conf at its
+//!   stub and restarts NetworkManager, and uninstall puts each back (Phase 13 A1).
 
 use super::Check;
 use crate::{
@@ -29,17 +33,103 @@ pub const SERVICE: &str = "systemd user unit devid.service";
 pub const DESKTOP_APP: bool = false;
 
 pub const RESOLVED_DROPIN: &str = "/etc/systemd/resolved.conf.d/devid.conf";
+/// Written when the root step turns systemd-resolved on, so uninstall knows to turn it off again.
+pub const RESOLVED_STATE: &str = "/etc/devid-resolved.state";
+pub const RESOLV_CONF: &str = "/etc/resolv.conf";
+/// systemd-resolved's stub, relative as in systemd's own tmpfiles.d link.
+const STUB: &str = "../run/systemd/resolve/stub-resolv.conf";
 pub const NFT_FILE: &str = "/etc/devid-ports.nft";
 pub const PORTS_UNIT: &str = "/etc/systemd/system/devid-ports.service";
+/// The CA's copy for Debian's `update-ca-certificates`.
 pub const CA_FILE: &str = "/usr/local/share/ca-certificates/devid-ca.crt";
+/// The CA's copy for p11-kit's `update-ca-trust` (Arch).
+pub const CA_ANCHOR: &str = "/etc/ca-certificates/trust-source/anchors/devid-ca.crt";
 pub const CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
 const SYSTEMCTL: &str = "/usr/bin/systemctl";
 const NFT: &str = "/usr/sbin/nft";
 const UPDATE_CA: &str = "/usr/sbin/update-ca-certificates";
+const UPDATE_CA_TRUST: &str = "/usr/bin/update-ca-trust";
+const TRUST_SOURCE: &str = "/etc/ca-certificates/trust-source";
+const PACMAN: &str = "/usr/bin/pacman";
 const UNIT: &str = "devid.service";
 const NSS_NICKNAME: &str = "Devid Local CA";
-const NO_CERTUTIL: &str = "Chrome and Firefox do not trust https://*.test yet: install certutil (`sudo apt install \
-     libnss3-tools`), then run `devid setup` again";
+const RESOLVED_STATE_NOTE: &str = "# Devid turned systemd-resolved on and pointed /etc/resolv.conf at its stub (D-059).\n\
+     # `devid uninstall` turns it off again and puts back /etc/resolv.conf.devid-backup.\n";
+
+/// What the root step depends on (D-059): read from the system by `detect`, or set by a test.
+#[derive(Debug, Clone, PartialEq)]
+pub struct System {
+    /// The CA store is p11-kit's (Arch), where Debian's `update-ca-certificates` is missing.
+    pub p11kit: bool,
+    /// systemd-resolved runs: on Ubuntu and CachyOS by default, not on a stock Arch desktop (A1).
+    pub resolved_active: bool,
+    /// The root step turned systemd-resolved on earlier (RESOLVED_STATE).
+    pub resolved_ours: bool,
+    /// The sockets that start systemd-resolved. They stop with it, or the next lookup through
+    /// nss-resolve starts it again (A1).
+    pub resolved_sockets: Vec<String>,
+    /// /etc/resolv.conf.devid-backup exists.
+    pub resolv_backup: bool,
+    /// /etc/resolv.conf is a link to systemd-resolved's stub.
+    pub resolv_stub: bool,
+}
+
+fn systemctl_ok(args: &[&str]) -> bool {
+    Command::new(SYSTEMCTL).args(args).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
+impl System {
+    pub fn detect() -> System {
+        let sockets = Command::new(SYSTEMCTL)
+            .args(["show", "--property=TriggeredBy", "--value", "systemd-resolved.service"])
+            .stderr(Stdio::null())
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().map(String::from).collect())
+            .unwrap_or_default();
+        System {
+            p11kit: !Path::new(UPDATE_CA).exists()
+                && Path::new(UPDATE_CA_TRUST).exists()
+                && Path::new(TRUST_SOURCE).is_dir(),
+            resolved_active: systemctl_ok(&["is-active", "--quiet", "systemd-resolved"]),
+            resolved_ours: Path::new(RESOLVED_STATE).exists(),
+            resolved_sockets: sockets,
+            resolv_backup: crate::helper::present(&crate::helper::backup_path(Path::new(RESOLV_CONF))),
+            resolv_stub: fs::read_link(RESOLV_CONF).is_ok_and(|t| t.ends_with("systemd/resolve/stub-resolv.conf")),
+        }
+    }
+
+    /// Where the CA's copy goes.
+    fn ca_copy(&self) -> &'static str {
+        if self.p11kit { CA_ANCHOR } else { CA_FILE }
+    }
+
+    /// The command that rebuilds the system bundle from the copies, after adding or removing one.
+    fn update_ca(&self, removing: bool) -> Action {
+        match (self.p11kit, removing) {
+            (true, _) => run(UPDATE_CA_TRUST, &["extract"], removing),
+            (false, false) => run(UPDATE_CA, &[], false),
+            (false, true) => run(UPDATE_CA, &["--fresh"], true),
+        }
+    }
+}
+
+/// Whether pacman is the package manager (Arch and its derivatives), for the install commands in
+/// messages; apt otherwise.
+fn pacman() -> bool {
+    Path::new(PACMAN).exists()
+}
+
+/// The command that installs packages: `apt` names for Debian and Ubuntu, `arch` names for pacman.
+fn install_hint(pacman: bool, apt: &str, arch: &str) -> String {
+    if pacman { format!("`sudo pacman -S --needed {arch}`") } else { format!("`sudo apt install {apt}`") }
+}
+
+fn no_certutil(pacman: bool) -> String {
+    format!(
+        "Chrome and Firefox do not trust https://*.test yet: install certutil ({}), then run `devid setup` again",
+        install_hint(pacman, "libnss3-tools", "nss")
+    )
+}
 
 /// The Linux devid binary in a devid release (self-update, install.sh): a static musl build (L4).
 pub const DEVID_ASSET: &str = if cfg!(target_arch = "aarch64") { "devid-linux-arm64" } else { "devid-linux-x86_64" };
@@ -101,34 +191,77 @@ fn run(program: &str, args: &[&str], ok_to_fail: bool) -> Action {
 }
 
 pub fn install_actions(plan: &Plan) -> Vec<Action> {
-    vec![
+    install_actions_on(plan, &System::detect())
+}
+
+pub fn install_actions_on(plan: &Plan, sys: &System) -> Vec<Action> {
+    let turn_on = !sys.resolved_active;
+    let mut actions = Vec::new();
+    if turn_on {
+        // First: if a later step fails, uninstall still turns systemd-resolved off again.
+        actions.push(Action::Write { path: RESOLVED_STATE.into(), content: RESOLVED_STATE_NOTE.into(), backup: false });
+    }
+    actions.extend([
         Action::Write { path: RESOLVED_DROPIN.into(), content: resolved_dropin(plan), backup: true },
         Action::Write { path: NFT_FILE.into(), content: nft_rules(plan), backup: false },
         Action::Write { path: PORTS_UNIT.into(), content: ports_unit(), backup: false },
         // Before any restart: systemctl warns about unit files changed on disk otherwise, as after
         // the Ubuntu 24.04 machine's upgrade (0.19.0-rc.1).
         run(SYSTEMCTL, &["daemon-reload"], false),
-        run(SYSTEMCTL, &["restart", "systemd-resolved"], false),
+    ]);
+    if turn_on {
+        actions.push(run(SYSTEMCTL, &["enable", "systemd-resolved.service"], false));
+    }
+    actions.push(run(SYSTEMCTL, &["restart", "systemd-resolved"], false));
+    if turn_on {
+        // NetworkManager hands its own servers to systemd-resolved once /etc/resolv.conf points at
+        // the stub, which it checks when it starts (A1).
+        actions.push(Action::Link { path: RESOLV_CONF.into(), target: STUB.into() });
+        actions.push(run(SYSTEMCTL, &["try-restart", "NetworkManager.service"], false));
+    }
+    actions.extend([
         run(SYSTEMCTL, &["enable", "devid-ports.service"], false),
         // restart, not start: a running unit must load changed ports.
         run(SYSTEMCTL, &["restart", "devid-ports.service"], false),
-        Action::Copy { from: plan.ca_cert.clone(), to: CA_FILE.into() },
-        run(UPDATE_CA, &[], false),
-    ]
+        Action::Copy { from: plan.ca_cert.clone(), to: sys.ca_copy().into() },
+        sys.update_ca(false),
+    ]);
+    actions
 }
 
-pub fn uninstall_actions(_plan: &Plan) -> Vec<Action> {
-    vec![
+pub fn uninstall_actions(plan: &Plan) -> Vec<Action> {
+    uninstall_actions_on(plan, &System::detect())
+}
+
+pub fn uninstall_actions_on(_plan: &Plan, sys: &System) -> Vec<Action> {
+    let mut actions = vec![
         // Stopping runs the unit's ExecStop, which deletes the table.
         run(SYSTEMCTL, &["disable", "--now", "devid-ports.service"], true),
         Action::Remove { path: PORTS_UNIT.into(), restore_backup: false },
         run(SYSTEMCTL, &["daemon-reload"], true),
         Action::Remove { path: NFT_FILE.into(), restore_backup: false },
         Action::Remove { path: RESOLVED_DROPIN.into(), restore_backup: true },
-        run(SYSTEMCTL, &["restart", "systemd-resolved"], true),
-        Action::Remove { path: CA_FILE.into(), restore_backup: false },
-        run(UPDATE_CA, &["--fresh"], true),
-    ]
+    ];
+    if sys.resolved_ours {
+        // Back to how setup found it (A1). /etc/resolv.conf is never left missing: at the next boot
+        // systemd's tmpfiles.d would link a missing one to the stub of a resolver that is off.
+        if sys.resolv_backup {
+            actions.push(Action::Restore { path: RESOLV_CONF.into() });
+        } else if sys.resolv_stub {
+            // Nothing was there before Devid's link: NetworkManager writes a new file when it restarts.
+            actions.push(Action::Remove { path: RESOLV_CONF.into(), restore_backup: false });
+        }
+        let mut args: Vec<String> = ["disable", "--now", "systemd-resolved.service"].map(String::from).into();
+        args.extend(sys.resolved_sockets.iter().cloned());
+        actions.push(Action::Run { program: SYSTEMCTL.into(), args, ok_to_fail: true });
+        actions.push(run(SYSTEMCTL, &["try-restart", "NetworkManager.service"], true));
+        actions.push(Action::Remove { path: RESOLVED_STATE.into(), restore_backup: false });
+    } else {
+        actions.push(run(SYSTEMCTL, &["restart", "systemd-resolved"], true));
+    }
+    actions.push(Action::Remove { path: sys.ca_copy().into(), restore_backup: false });
+    actions.push(sys.update_ca(true));
+    actions
 }
 
 /// The base64 body of a PEM certificate, without its armor or line breaks, for comparing copies.
@@ -143,9 +276,11 @@ fn bundle_has(bundle: &str, ca_pem: &str) -> bool {
 }
 
 pub fn system_status(plan: &Plan) -> Vec<(&'static str, bool)> {
-    let resolver = fs::read_to_string(RESOLVED_DROPIN).is_ok_and(|c| c == resolved_dropin(plan));
+    let sys = System::detect();
+    // The drop-in does nothing while systemd-resolved is off (a stock Arch desktop, A1).
+    let resolver = sys.resolved_active && fs::read_to_string(RESOLVED_DROPIN).is_ok_and(|c| c == resolved_dropin(plan));
     let ports = redirect_installed(plan) && fs::read_to_string(PORTS_UNIT).is_ok_and(|c| c == ports_unit());
-    let trusted = match (fs::read_to_string(&plan.ca_cert), fs::read_to_string(CA_FILE)) {
+    let trusted = match (fs::read_to_string(&plan.ca_cert), fs::read_to_string(sys.ca_copy())) {
         (Ok(ca), Ok(copy)) => ca == copy && fs::read_to_string(CA_BUNDLE).is_ok_and(|b| bundle_has(&b, &ca)),
         _ => false,
     };
@@ -157,21 +292,35 @@ pub fn redirect_installed(plan: &Plan) -> bool {
     fs::read_to_string(NFT_FILE).is_ok_and(|c| c == nft_rules(plan))
 }
 
-/// What the root step needs, checked before `sudo`: the tools, and systemd-resolved running.
+/// What the root step needs, checked before `sudo`: the tools, and a resolver it can use.
 pub fn prerequisites() -> Result<(), String> {
-    let missing: Vec<&str> = [(SYSTEMCTL, "systemd"), (NFT, "nftables"), (UPDATE_CA, "ca-certificates")]
+    prerequisites_on(
+        |path| Path::new(path).exists(),
+        systemctl_ok(&["is-active", "--quiet", "systemd-resolved"]),
+        systemctl_ok(&["is-active", "--quiet", "NetworkManager"]),
+    )
+}
+
+fn prerequisites_on(exists: impl Fn(&str) -> bool, resolved: bool, network_manager: bool) -> Result<(), String> {
+    let ca_tool = exists(UPDATE_CA) || (exists(UPDATE_CA_TRUST) && exists(TRUST_SOURCE));
+    let missing: Vec<&str> = [(exists(SYSTEMCTL), "systemd"), (exists(NFT), "nftables"), (ca_tool, "ca-certificates")]
         .into_iter()
-        .filter(|(path, _)| !Path::new(path).exists())
+        .filter(|(there, _)| !there)
         .map(|(_, package)| package)
         .collect();
     if !missing.is_empty() {
-        return Err(format!("the system setup needs {0}: `sudo apt install {0}`", missing.join(" ")));
+        let packages = missing.join(" ");
+        return Err(format!(
+            "the system setup needs {packages}: {}",
+            install_hint(exists(PACMAN), &packages, &packages)
+        ));
     }
-    let resolved =
-        Command::new(SYSTEMCTL).args(["is-active", "--quiet", "systemd-resolved"]).status().is_ok_and(|s| s.success());
-    if !resolved {
-        return Err("systemd-resolved does not run, and Devid sends .test lookups through it (D-057); \
-             Ubuntu runs it by default"
+    // With systemd-resolved off, setup turns it on (D-059); NetworkManager then hands it the
+    // network's own servers. Without NetworkManager nothing would.
+    if !resolved && !network_manager {
+        return Err("Devid sends .test lookups through systemd-resolved (D-057), which does not run here, and \
+             setup turns it on only next to NetworkManager (D-059). Turn systemd-resolved on and point \
+             /etc/resolv.conf at its stub, then run `devid setup` again"
             .into());
     }
     Ok(())
@@ -290,10 +439,10 @@ fn firefox_profiles(home: &Path) -> Vec<PathBuf> {
     profiles
 }
 
-/// certutil, from libnss3-tools; not installed by default.
+/// certutil: Debian's libnss3-tools (not installed by default), Arch's nss (which Firefox and
+/// Chromium depend on).
 fn certutil() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join("certutil")).find(|c| c.is_file())
+    in_path("certutil")
 }
 
 fn certutil_run(certutil: &Path, db: &Path, args: &[&str]) -> Result<String, String> {
@@ -334,8 +483,10 @@ pub fn browser_trust_needed() -> bool {
     true
 }
 
-/// The browsers ignore the system store on Linux, and the CA goes into their own NSS databases, as
-/// the user, the way mkcert does it (owner's choice, 2026-11-23):
+/// The browsers ignore the system store on Ubuntu, and the CA goes into their own NSS databases, as
+/// the user, the way mkcert does it (owner's choice, 2026-11-23). Arch's own Firefox and Chromium
+/// read the system store through p11-kit, but browsers from elsewhere (Chrome and Brave from the
+/// AUR) do not, so Arch gets this step too (D-059, A1):
 /// - Chrome and the other Chromium browsers (Brave, Edge) share `~/.pki/nssdb` (L1), which setup
 ///   creates if it is missing;
 /// - every Firefox profile that exists has its own (see `firefox_profiles`). A profile Firefox
@@ -344,7 +495,7 @@ pub fn browser_trust_needed() -> bool {
 /// Returns where it went.
 pub fn browser_trust(ca: &Path) -> Option<Result<String, String>> {
     Some((|| {
-        let certutil = certutil().ok_or(NO_CERTUTIL)?;
+        let certutil = certutil().ok_or_else(|| no_certutil(pacman()))?;
         let chrome = nssdb();
         if !chrome.join("cert9.db").exists() {
             fs::create_dir_all(&chrome).map_err(|e| format!("{}: {e}", chrome.display()))?;
@@ -379,19 +530,21 @@ fn nss_has(certutil: &Path, db: &Path, ca: &str) -> bool {
         .is_ok_and(|pem| pem_body(&pem).contains(&pem_body(ca)))
 }
 
-const DEJAVU: &str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+/// DejaVu Sans where Debian and Arch keep it (devid-binaries' type-linux.xml lists both layouts).
+const DEJAVU: [&str; 2] = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf"];
 
 /// Checks only Linux needs: the browsers' trust (Chrome's database, and each Firefox profile), and
 /// imagick's fonts (devid-binaries' type-linux.xml).
 pub fn os_checks(paths: &Paths) -> Vec<Check> {
     let ca = fs::read_to_string(ca::ca_cert(paths)).unwrap_or_default();
     let firefox = firefox_profiles(&user_home());
+    let pacman = pacman();
     let mut checks = Vec::new();
     match certutil() {
         None => checks.push((
             false,
             "Chrome and Firefox trust the Devid CA".to_string(),
-            "install libnss3-tools (`sudo apt install libnss3-tools`), then run `devid setup`".to_string(),
+            format!("install certutil ({}), then run `devid setup`", install_hint(pacman, "libnss3-tools", "nss")),
         )),
         Some(c) => {
             checks.push((
@@ -412,18 +565,51 @@ pub fn os_checks(paths: &Paths) -> Vec<Check> {
     let imagick = php::installed(paths).iter().any(|v| phpext::installed(paths, v).iter().any(|e| e.name == "imagick"));
     if imagick {
         checks.push((
-            Path::new(DEJAVU).is_file(),
+            DEJAVU.iter().any(|f| Path::new(f).is_file()),
             "imagick has its fonts (DejaVu)".into(),
-            "`sudo apt install fonts-dejavu-core fonts-liberation`".into(),
+            install_hint(pacman, "fonts-dejavu-core fonts-liberation", "ttf-dejavu ttf-liberation"),
         ));
     }
     checks
 }
 
-/// Opens the desktop's terminal in `dir` (Debian's x-terminal-emulator alternative).
+/// Terminals and how each is told its folder, after Debian's x-terminal-emulator alternative and
+/// $TERMINAL, which start in the current folder: KDE's and GNOME's first (Arch has no alternative).
+const TERMINALS: [(&str, &str); 8] = [
+    ("konsole", "--workdir"),
+    ("gnome-terminal", "--working-directory"),
+    ("kgx", "--working-directory"),
+    ("xfce4-terminal", "--working-directory"),
+    ("alacritty", "--working-directory"),
+    ("kitty", "--directory"),
+    ("foot", "--working-directory"),
+    ("xterm", ""),
+];
+
+fn in_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).map(|d| d.join(name)).find(|c| c.is_file())
+}
+
+/// The terminal to open and its arguments, for `dir`; `found` says which programs exist.
+fn terminal_for(dir: &str, terminal_env: Option<String>, found: impl Fn(&str) -> bool) -> (String, Vec<String>) {
+    let mut defaults = std::iter::once("x-terminal-emulator".to_string()).chain(terminal_env.filter(|t| !t.is_empty()));
+    if let Some(t) = defaults.find(|t| found(t)) {
+        return (t, vec![]);
+    }
+    match TERMINALS.iter().find(|(t, _)| found(t)) {
+        Some((t, "")) => (t.to_string(), vec![]),
+        Some((t, flag)) => (t.to_string(), vec![flag.to_string(), dir.to_string()]),
+        // Spawning it fails and names the missing program.
+        None => ("x-terminal-emulator".into(), vec![]),
+    }
+}
+
+/// Opens the desktop's terminal in `dir`.
 pub fn terminal_command(dir: &str) -> Command {
-    let mut cmd = Command::new("x-terminal-emulator");
-    cmd.current_dir(dir);
+    let (program, args) = terminal_for(dir, std::env::var("TERMINAL").ok(), |t| in_path(t).is_some());
+    let mut cmd = Command::new(program);
+    cmd.args(args).current_dir(dir);
     cmd
 }
 
@@ -509,10 +695,43 @@ mod tests {
         assert!(unit.contains("RemainAfterExit=yes") && unit.contains("WantedBy=multi-user.target"));
     }
 
+    /// Ubuntu: systemd-resolved runs and Debian's CA tool is there (0.19's steps, unchanged).
+    fn ubuntu() -> System {
+        System {
+            p11kit: false,
+            resolved_active: true,
+            resolved_ours: false,
+            resolved_sockets: vec![],
+            resolv_backup: false,
+            resolv_stub: true,
+        }
+    }
+
+    /// A stock Arch desktop before setup (A1): NetworkManager writes /etc/resolv.conf, resolved is off.
+    fn arch() -> System {
+        System { p11kit: true, resolved_active: false, resolv_stub: false, ..ubuntu() }
+    }
+
+    /// The same Arch machine after setup turned resolved on.
+    fn arch_after_setup() -> System {
+        System {
+            resolved_active: true,
+            resolved_ours: true,
+            resolved_sockets: vec!["systemd-resolved-varlink.socket".into(), "systemd-resolved-monitor.socket".into()],
+            resolv_backup: true,
+            resolv_stub: true,
+            ..arch()
+        }
+    }
+
+    fn described(actions: &[Action]) -> Vec<String> {
+        actions.iter().map(Action::describe).collect()
+    }
+
     #[test]
     fn install_and_uninstall() {
         let p = plan();
-        let install = install_actions(&p);
+        let install = install_actions_on(&p, &ubuntu());
         assert!(install.contains(&Action::Copy { from: p.ca_cert.clone(), to: CA_FILE.into() }));
         let runs: Vec<String> =
             install.iter().filter_map(|a| if let Action::Run { .. } = a { Some(a.describe()) } else { None }).collect();
@@ -526,15 +745,110 @@ mod tests {
                 "run /usr/sbin/update-ca-certificates",
             ]
         );
+        assert!(!described(&install).iter().any(|a| a.contains("resolv.conf") || a.contains(RESOLVED_STATE)));
         // The CA copy comes before update-ca-certificates, the unit after the rules it loads.
         let at = |want: &str| install.iter().position(|a| a.describe().starts_with(want)).unwrap();
         assert!(at("copy") < at("run /usr/sbin/update-ca-certificates"));
         assert!(at("write /etc/devid-ports.nft") < at("run /usr/bin/systemctl restart devid-ports"));
-        let uninstall = uninstall_actions(&p);
+        let uninstall = uninstall_actions_on(&p, &ubuntu());
         super::super::tests::uninstall_removes_every_file(&install, &uninstall);
         assert!(uninstall.contains(&Action::Remove { path: RESOLVED_DROPIN.into(), restore_backup: true }));
         assert!(uninstall.iter().any(|a| a.describe() == "run /usr/sbin/update-ca-certificates --fresh"));
         assert!(uninstall.iter().any(|a| a.describe() == "run /usr/bin/systemctl disable --now devid-ports.service"));
+        assert!(uninstall.iter().any(|a| a.describe() == "run /usr/bin/systemctl restart systemd-resolved"));
+    }
+
+    /// Arch (D-059, A1): the CA through p11-kit's anchors, and systemd-resolved turned on with
+    /// /etc/resolv.conf linked to its stub; uninstall puts back the file and turns resolved and its
+    /// sockets off.
+    #[test]
+    fn arch_turns_resolved_on_and_uninstall_turns_it_off() {
+        let p = plan();
+        let install = install_actions_on(&p, &arch());
+        let steps = described(&install);
+        assert_eq!(steps[0], format!("write {RESOLVED_STATE}"), "noted first, for an uninstall after a failure");
+        let at = |want: &str| steps.iter().position(|s| s == want).unwrap_or_else(|| panic!("{want}: {steps:#?}"));
+        let enable = at("run /usr/bin/systemctl enable systemd-resolved.service");
+        let restart = at("run /usr/bin/systemctl restart systemd-resolved");
+        let link = at("link /etc/resolv.conf to ../run/systemd/resolve/stub-resolv.conf (backing up what is there)");
+        let network = at("run /usr/bin/systemctl try-restart NetworkManager.service");
+        assert!(at("write /etc/systemd/resolved.conf.d/devid.conf (backing up an existing file)") < restart);
+        assert!(enable < restart && restart < link && link < network, "{steps:#?}");
+        assert!(install.contains(&Action::Copy { from: p.ca_cert.clone(), to: CA_ANCHOR.into() }));
+        assert!(
+            at(&format!("copy {} to {CA_ANCHOR}", p.ca_cert.display())) < at("run /usr/bin/update-ca-trust extract")
+        );
+        assert!(!steps.iter().any(|s| s.contains("update-ca-certificates")));
+
+        // A second setup, with resolved already on, keeps 0.19's steps: no second link or note.
+        let again = described(&install_actions_on(&p, &arch_after_setup()));
+        assert!(!again.iter().any(|s| s.contains("resolv.conf") || s.contains(RESOLVED_STATE)), "{again:#?}");
+
+        let uninstall = uninstall_actions_on(&p, &arch_after_setup());
+        super::super::tests::uninstall_removes_every_file(&install, &uninstall);
+        let undo = described(&uninstall);
+        let at = |want: &str| undo.iter().position(|s| s == want).unwrap_or_else(|| panic!("{want}: {undo:#?}"));
+        let back = at("put back /etc/resolv.conf from /etc/resolv.conf.devid-backup");
+        let off = at("run /usr/bin/systemctl disable --now systemd-resolved.service systemd-resolved-varlink.socket \
+             systemd-resolved-monitor.socket");
+        let network = at("run /usr/bin/systemctl try-restart NetworkManager.service");
+        let note = at(&format!("remove {RESOLVED_STATE}"));
+        assert!(back < off && off < network && network < note, "{undo:#?}");
+        assert!(!undo.iter().any(|s| s == "run /usr/bin/systemctl restart systemd-resolved"));
+        assert!(uninstall.contains(&Action::Remove { path: CA_ANCHOR.into(), restore_backup: false }));
+        assert!(undo.iter().any(|s| s == "run /usr/bin/update-ca-trust extract"));
+
+        // Devid's link with nothing saved behind it goes, and NetworkManager writes a new file;
+        // with neither, /etc/resolv.conf is left alone. Never `remove` with a restore that finds none.
+        let no_backup = System { resolv_backup: false, ..arch_after_setup() };
+        assert!(
+            uninstall_actions_on(&p, &no_backup)
+                .contains(&Action::Remove { path: RESOLV_CONF.into(), restore_backup: false })
+        );
+        let foreign = System { resolv_backup: false, resolv_stub: false, ..arch_after_setup() };
+        assert!(!described(&uninstall_actions_on(&p, &foreign)).iter().any(|s| s.contains("/etc/resolv.conf")));
+    }
+
+    #[test]
+    fn prerequisites_name_the_packages_for_apt_or_pacman() {
+        let ubuntu = |p: &str| [SYSTEMCTL, NFT, UPDATE_CA].contains(&p);
+        assert_eq!(prerequisites_on(ubuntu, true, false), Ok(()));
+        let arch = |p: &str| [SYSTEMCTL, NFT, UPDATE_CA_TRUST, TRUST_SOURCE, PACMAN].contains(&p);
+        assert_eq!(prerequisites_on(arch, false, true), Ok(()), "setup turns resolved on next to NetworkManager");
+        let no_nft = |p: &str| p != NFT && arch(p);
+        assert_eq!(
+            prerequisites_on(no_nft, true, true).unwrap_err(),
+            "the system setup needs nftables: `sudo pacman -S --needed nftables`"
+        );
+        let bare = |p: &str| p == SYSTEMCTL;
+        assert_eq!(
+            prerequisites_on(bare, true, true).unwrap_err(),
+            "the system setup needs nftables ca-certificates: `sudo apt install nftables ca-certificates`"
+        );
+        let err = prerequisites_on(arch, false, false).unwrap_err();
+        assert!(err.contains("does not run here") && err.contains("NetworkManager"), "{err}");
+        assert!(no_certutil(true).contains("`sudo pacman -S --needed nss`"));
+        assert!(no_certutil(false).contains("`sudo apt install libnss3-tools`"));
+    }
+
+    #[test]
+    fn the_terminal_is_found_and_told_its_folder() {
+        let only = |names: &'static [&'static str]| move |t: &str| names.contains(&t);
+        assert_eq!(
+            terminal_for("/p", None, only(&["x-terminal-emulator", "konsole"])),
+            ("x-terminal-emulator".into(), vec![])
+        );
+        assert_eq!(terminal_for("/p", Some("foot".into()), only(&["foot", "konsole"])), ("foot".into(), vec![]));
+        assert_eq!(
+            terminal_for("/p", None, only(&["konsole", "gnome-terminal"])),
+            ("konsole".into(), vec!["--workdir".into(), "/p".into()])
+        );
+        assert_eq!(
+            terminal_for("/p", Some(String::new()), only(&["kgx"])),
+            ("kgx".into(), vec!["--working-directory".into(), "/p".into()])
+        );
+        assert_eq!(terminal_for("/p", None, only(&["xterm"])), ("xterm".into(), vec![]));
+        assert_eq!(terminal_for("/p", None, only(&[])).0, "x-terminal-emulator", "spawning names what is missing");
     }
 
     #[test]

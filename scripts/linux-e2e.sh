@@ -1,10 +1,12 @@
 #!/bin/bash
-# Devid on Linux end to end (Phase 12 L3, D-057), for a GitHub Ubuntu runner: `devid setup` with the
-# real root step (sudo, systemd-resolved, nftables, the CA store), Chrome's database and the systemd
-# user unit; a Firefox profile's own database (as Ubuntu's Firefox snap keeps one); a linked site
-# over https://<site>.test through ports 80/443, for curl and headless
-# Chrome; then `devid uninstall --purge`, after which every file setup touched must be as before.
-# It changes the system, so it is for throwaway runners only, never a workstation.
+# Devid on Linux end to end (Phase 12 L3, D-057; Arch, D-059), for a GitHub Ubuntu runner or an Arch
+# VM set up like a desktop (spike/arch/prepare.sh): `devid setup` with the real root step (sudo,
+# systemd-resolved, nftables, the CA store), Chrome's database and the systemd user unit; a Firefox
+# profile's own database; a linked site over https://<site>.test through ports 80/443, for curl and
+# headless Chrome or Chromium; then `devid uninstall --purge`, after which every file setup touched,
+# /etc/resolv.conf and systemd-resolved's state must be as before. On Arch, setup turns
+# systemd-resolved on and uninstall turns it off again.
+# It changes the system, so it is for throwaway runners and VMs only, never a workstation.
 # Usage: scripts/linux-e2e.sh <path to devid>
 set -euo pipefail
 DEVID="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
@@ -15,13 +17,22 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # The files setup may change. Their hashes (or absence) must match again after uninstall.
 FILES=(
-  "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.config/systemd/user/devid.service"
+  "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.config/fish/conf.d/devid.fish"
+  "$HOME/.config/systemd/user/devid.service"
   /etc/systemd/resolved.conf.d/devid.conf /etc/devid-ports.nft /etc/systemd/system/devid-ports.service
-  /usr/local/share/ca-certificates/devid-ca.crt /etc/ssl/certs/ca-certificates.crt
+  /etc/devid-resolved.state /etc/resolv.conf.devid-backup
+  /usr/local/share/ca-certificates/devid-ca.crt /etc/ca-certificates/trust-source/anchors/devid-ca.crt
+  /etc/ssl/certs/ca-certificates.crt
 )
 snapshot() {
   for f in "${FILES[@]}"; do
     if [ -e "$f" ]; then sha256sum "$f"; else echo "absent $f"; fi
+  done
+  # /etc/resolv.conf as a link or as content, and whether systemd-resolved and the sockets that
+  # start it are enabled and running.
+  if [ -L /etc/resolv.conf ]; then echo "resolv.conf -> $(readlink /etc/resolv.conf)"; else echo "resolv.conf $(sha256sum </etc/resolv.conf)"; fi
+  for unit in systemd-resolved.service systemd-resolved-varlink.socket systemd-resolved-monitor.socket; do
+    echo "$unit $(systemctl is-enabled "$unit" 2>&1 || true) $(systemctl is-active "$unit" 2>&1 || true)"
   done
   # The browsers' databases: each certificate, prefixed with its database, without certutil's
   # header. Setup may create Chrome's itself (Chrome would on its first run), and uninstall leaves it
@@ -32,9 +43,14 @@ snapshot() {
     fi
   done
 }
-# A Firefox profile as Ubuntu's snap keeps it, with its own certificate database: the snap reads
-# nothing else, so setup must add the CA there and uninstall take it out.
-FIREFOX="$HOME/snap/firefox/common/.mozilla/firefox/e2e.default"
+# A Firefox profile with its own certificate database, where each system's Firefox keeps it. Ubuntu's
+# snap reads nothing else, so setup must add the CA there and uninstall take it out.
+if command -v pacman >/dev/null; then
+  FIREFOX="$HOME/.mozilla/firefox/e2e.default"
+else
+  FIREFOX="$HOME/snap/firefox/common/.mozilla/firefox/e2e.default"
+fi
+CHROME="$(command -v google-chrome || command -v chromium || true)"
 
 finish() {
   status=$?
@@ -87,9 +103,10 @@ grep -q '^e2e 8\.[0-9.]* Linux$' <<<"$page" || fail "unexpected page: $page"
 curl -fsS -o /dev/null "http://$SITE.test/" || fail "port 80 does not reach the web server"
 
 # A fresh profile, as a new user's browser would have; Chrome still reads ~/.pki/nssdb.
-dom="$(google-chrome --headless=new --disable-gpu --user-data-dir="$T/chrome" --dump-dom "https://$SITE.test/" 2>/dev/null)"
-echo "chrome: $(tr -d '\n' <<<"$dom" | cut -c1-200)"
-grep -q 'e2e 8\.' <<<"$dom" || fail "headless Chrome did not load https://$SITE.test/ (a certificate error?)"
+[ -n "$CHROME" ] || fail "no Chrome or Chromium to open the site with"
+dom="$("$CHROME" --headless=new --disable-gpu --user-data-dir="$T/chrome" --dump-dom "https://$SITE.test/" 2>/dev/null)"
+echo "$(basename "$CHROME"): $(tr -d '\n' <<<"$dom" | cut -c1-200)"
+grep -q 'e2e 8\.' <<<"$dom" || fail "headless $(basename "$CHROME") did not load https://$SITE.test/ (a certificate error?)"
 
 step "devid doctor"
 # A new terminal would have ~/.devid/bin on PATH; this shell started before setup.
