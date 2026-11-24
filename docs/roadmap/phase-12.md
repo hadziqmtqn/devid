@@ -371,7 +371,7 @@ What the Xubuntu machine needs before Claude uses it:
 - **The app on Linux:** Tauri on WebKitGTK. The glib Dependabot alert dismissed on 2026-11-22 has to be looked at again then.
 - **arm64 Linux:** GitHub's arm64 Ubuntu runners make it cheap once x86_64 ships.
 - **Other distros:** Debian without systemd-resolved, Fedora (`update-ca-trust`) and Arch.
-  - On 2026-11-24 the owner named Arch-based distributions as a likely next target. That is not a decision yet.
+  - On 2026-11-24 the owner named Arch-based distributions as a likely next target. That is not a decision yet. The plan is `phase-13.md` (proposed).
   - A plan would start with a spike on GitHub's runners (Arch under `systemd-nspawn` or QEMU), and end on a second Parallels VM on the old Mac, never the M1 (D-013).
   - What differs from Ubuntu:
     - DNS where systemd-resolved is off (NetworkManager);
