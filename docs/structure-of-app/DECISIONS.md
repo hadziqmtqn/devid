@@ -1086,4 +1086,5 @@ See ARCHITECTURE, "PHP runtime".
 - **Status:** accepted on 2026-11-24. The scripts and workflow are on the `db-binaries` branch of `devid-binaries`.
   - The MD5 of every pinned MySQL archive matched Oracle's download pages on 2026-11-24.
   - Every macOS arm64 archive (MySQL 8.4.13 and 9.7.4, PostgreSQL 15 to 19, MongoDB 7.0 to 9.0, mongosh 2.14.3) was built and smoke-tested on the owner's M1.
-  - Intel macOS and Linux run only in CI.
+  - CI (hadziqmtqn/devid-binaries#22) built and smoke-tested every archive on its own runner: macOS Intel and Apple silicon, and Ubuntu 24.04.
+  - On the owner's Ubuntu 24.04 VM (2 cores, 2 GB RAM, Devid 0.19.0 installed), every Linux archive passed `db-smoke.sh`, one at a time and without sudo; `mysqld` loaded the libaio and libnuma in its archive. Nothing was left on the VM.
