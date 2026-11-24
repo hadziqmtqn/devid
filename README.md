@@ -1,10 +1,10 @@
 # Devid
 
-Devid is a local development environment for Laravel, PHP and Node.js on Macs with Apple silicon (M series) or Intel, and on Linux (Ubuntu, x86_64). Every project folder you park or link gets its own `https://<name>.test` address with a trusted certificate. Devid ships PHP and the web servers prebuilt, so it needs no Homebrew, no Docker and no virtual machine. You use it from the command line, from a terminal UI (TUI) or, on macOS, from the menu-bar desktop app.
+Devid is a local development environment for Laravel, PHP and Node.js on Macs with Apple silicon (M series) or Intel, and on Linux (Ubuntu and Arch, x86_64). Every project folder you park or link gets its own `https://<name>.test` address with a trusted certificate. Devid ships PHP and the web servers prebuilt, so it needs no Homebrew, no Docker and no virtual machine. You use it from the command line, from a terminal UI (TUI) or, on macOS, from the menu-bar desktop app.
 
 **Website and guide:** [devid.bekenweb.com](https://devid.bekenweb.com), with the user guide at [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs).
 
-> **Status:** v0.19, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). Linux builds (since v0.19, D-057) go through setup, a site over HTTPS and uninstall on GitHub's Ubuntu runners before each release, and were tested by hand on Ubuntu 24.04 Desktop. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
+> **Status:** v0.20, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). Linux builds (Ubuntu since v0.19, D-057; Arch since v0.20, D-059) go through setup, a site over HTTPS and uninstall on Ubuntu and on Arch on GitHub's runners before each release, and were tested by hand on Ubuntu 24.04 Desktop, Arch Linux with KDE Plasma and CachyOS. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
 
 ```sh
 devid park ~/Projects                  # every subfolder becomes <folder>.test
@@ -55,10 +55,17 @@ The CLI and TUI only:
 curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
 ```
 
-On Linux (Ubuntu 24.04 or 26.04, x86_64), install curl and certutil first, then use the same command:
+On Linux (x86_64), install curl and certutil first, then use the same command. On Ubuntu 24.04 or 26.04:
 
 ```sh
 sudo apt install curl libnss3-tools
+curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
+```
+
+On Arch Linux and the distributions built on it, such as CachyOS (nftables too, which plain Arch may lack):
+
+```sh
+sudo pacman -S --needed curl nss nftables
 curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
 ```
 
@@ -69,7 +76,7 @@ Devid is an open-source personal project, provided as is. The macOS builds are a
 | | |
 |---|---|
 | macOS | Mac with Apple silicon (M series) or Intel, macOS 12 or newer. Tested by hand on an M1 with macOS 26 Tahoe and on Intel with macOS 14 Sonoma |
-| Linux | Ubuntu 24.04 or 26.04 on x86_64, with systemd-resolved (Ubuntu's default), `curl` and `libnss3-tools`. The CLI and the TUI; no desktop app and no Apache yet. Tested by hand on Ubuntu 24.04 Desktop |
+| Linux | x86_64 with systemd: Ubuntu 24.04 or 26.04 with `curl` and `libnss3-tools`, or Arch Linux and the distributions built on it with `curl`, `nss` and `nftables`. Where systemd-resolved is off, as on a plain Arch install, setup turns it on and needs NetworkManager. The CLI and the TUI; no desktop app and no Apache yet. Tested by hand on Ubuntu 24.04 Desktop, Arch Linux (KDE Plasma) and CachyOS (KDE Plasma, fish) |
 | Setup | Admin password, once: `.test` DNS, Devid's CA and ports 80/443 |
 | Ports | 80 and 443 free (stop Valet first) |
 | Not included | Databases (use a tool such as DBngin), and Node.js: Devid uses yours |
@@ -94,6 +101,7 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 - Dev servers on demand: a site's first visit starts its dev server, and Devid stops it when the site has been idle, on nginx, Caddy and Apache (D-054).
 - Laravel and Vite: Vite started from Devid serves HTTPS with the site's certificate, so a Laravel page works in Safari too, hot reload included (D-056).
 - Linux: Ubuntu 24.04 and 26.04 on x86_64, with the CLI and the TUI. `.test` goes through systemd-resolved and ports 80/443 through nftables, and Devid's CA is trusted by the system, Chrome and Firefox (D-057).
+- Arch Linux: Arch and the distributions built on it, such as CachyOS, on x86_64. Setup turns systemd-resolved on where it is off and trusts Devid's CA through p11-kit, and fish gets its own PATH file, as bash and zsh do (D-059).
 
 **Next**
 
@@ -103,7 +111,7 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 **Later**
 
 - Windows (D-044). It is the largest effort: it needs its own PHP builds and has no php-fpm.
-- More of Linux: the desktop app, arm64, and Debian and other distributions (D-057).
+- More of Linux: the desktop app, arm64, and Debian, Fedora and other distributions (D-057, D-059).
 - Developer tools: a dump viewer.
 
 **Out of scope:** databases (use a tool such as DBngin), and Docker- or VM-based setups.
