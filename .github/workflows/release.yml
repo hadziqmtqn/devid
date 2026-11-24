@@ -12,7 +12,7 @@ name: Release devid
 # Each version is built for Intel (x86_64) and Apple silicon (arm64) on its own runner (D-044), and
 # for Linux x86_64 as a static musl binary on Ubuntu (D-057, Phase 12 L4). Each one is smoke-tested
 # with the real PHP and nginx before anything is published; the Linux one also goes through a real
-# `devid setup` and uninstall (linux-e2e.sh).
+# `devid setup` and uninstall (linux-e2e.sh), on Ubuntu and on Arch (D-059, Phase 13 A3).
 on:
   push:
     tags: ["v*"]
@@ -128,8 +128,34 @@ jobs:
           path: dist/devid-linux-x86_64
           if-no-files-found: error
 
+  arch-e2e:
+    # The Linux binary that ships, on Arch set up like a desktop, in a VM on the runner (D-059,
+    # Phase 13 A3): setup turns systemd-resolved on and trusts the CA through p11-kit, and uninstall
+    # puts both back.
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: devid-linux-x86_64
+          path: dist
+      # Artifacts lose the executable bit.
+      - run: chmod +x dist/devid-linux-x86_64
+      - name: Boot Arch, set up like a desktop
+        run: scripts/arch-vm.sh boot
+        timeout-minutes: 15
+      - name: Setup, a site over HTTPS, and uninstall on Arch
+        run: scripts/arch-vm.sh e2e dist/devid-linux-x86_64
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: arch-vm-serial-log
+          path: vm/serial.log
+
   publish:
-    needs: [build, build-linux]
+    needs: [build, build-linux, arch-e2e]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
