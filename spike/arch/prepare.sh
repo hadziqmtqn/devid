@@ -16,7 +16,12 @@ python -m venv /opt/selenium
 systemctl disable systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service \
   systemd-resolved.service || true
 systemctl enable NetworkManager.service
+# Run 4: with /etc/resolv.conf gone, systemd-tmpfiles (systemd-resolve.conf, `L!`) put back the
+# link to systemd-resolved's stub at boot, and NetworkManager left DNS to a resolved that was not
+# running: nothing resolved, and the clock never synced (what held sshd in run 3). A desktop
+# install has the filesystem package's regular file, which NetworkManager writes.
 rm -f /etc/resolv.conf
+printf '# Resolver configuration file.\n# See resolv.conf(5) for details.\n' >/etc/resolv.conf
 # Run 2: after the reboot SSH never came back, and the serial console showed eth0 down. That table
 # comes from cloud-init while NetworkManager is still starting, so it proved little; the explicit
 # connection for eth0 stays anyway, as cloud-init's networkd files would no longer apply.
