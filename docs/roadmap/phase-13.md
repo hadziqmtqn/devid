@@ -1,8 +1,8 @@
 # Phase 13 Plan: Arch-based Linux
 
 > Scope: Devid 0.19's Linux support (the daemon, the CLI and the TUI) extended from Ubuntu to Arch Linux and the distributions built on it
-> Verified against: 2026-11-24 (Devid 0.19.0; Phase 12 done, see `phase-12.md`; spike run 45311846301)
-> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"), except question 6, which needs the Arch machine.
+> Verified against: 2026-11-24 (Devid 0.19.0; Phase 12 done, see `phase-12.md`; spike run 45311846301; A2's Arch run 45318939599)
+> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"), except question 6, which needs the Arch machine. **A2 done 2026-11-24** (see "A2 results"), except PATH in a desktop session, which waits for question 6.
 
 On 2026-11-24, after 0.19.0 shipped Devid for Ubuntu, the owner named Arch-based distributions as a likely next target.
 
@@ -139,6 +139,67 @@ All on GitHub's runners first. The Arch machine (see "Where it is tested") is on
   - A1.6, PATH in a desktop session, on the KDE Plasma machine the owner sets up on the old Mac;
   - CachyOS's resolved and NSS, on its A4 machine;
   - Chrome and Brave from the AUR, on the Arch machine.
+
+## A2 results (2026-11-24)
+
+PR #137 (branch `arch-a2`) and hadziqmtqn/devid-binaries#23 (branch `arch-fonts`).
+
+### What shipped
+
+- **The root step by capability.** `platform/linux.rs` reads what the system has into `System`, which the tests set directly. Ubuntu's steps are unchanged.
+  - **CA:** where Debian's `update-ca-certificates` is missing and p11-kit's store is there, the CA is copied to `/etc/ca-certificates/trust-source/anchors/devid-ca.crt`, then `update-ca-trust extract` runs. Uninstall removes the copy and extracts again. A1 had tried `trust anchor --store`. The anchors folder is p11-kit's other documented way, and its uninstall does not need the user's CA file, which `trust anchor --remove` reads and which may have changed or gone by then.
+  - **DNS, where systemd-resolved is off:**
+    1. `/etc/devid-resolved.state` comes first, so an uninstall after a failed step still turns resolved off;
+    2. the drop-in, as on Ubuntu;
+    3. `systemctl enable systemd-resolved.service`, then the restart;
+    4. `/etc/resolv.conf` is linked to `../run/systemd/resolve/stub-resolv.conf`, with what was there, a file or a link, kept as `/etc/resolv.conf.devid-backup`;
+    5. `systemctl try-restart NetworkManager.service`, so NetworkManager hands its servers to resolved.
+
+    A second setup with resolved on takes Ubuntu's steps and keeps the first backup. Uninstall, with the note:
+    - puts the backup back. If Devid's link had nothing behind it, it removes the link and NetworkManager writes a new file, so `/etc/resolv.conf` is never left missing;
+    - runs `disable --now` on resolved and the sockets that start it (from `TriggeredBy`);
+    - restarts NetworkManager and removes the note.
+
+    Setup only turns resolved on when it is off, so the note stands for "disabled and inactive", the state of a stock install for the service and its sockets alike.
+  - **Status:** "resolver" also needs systemd-resolved to run.
+  - **Helper:**
+    - `Link` (with a backup made once) and `Restore` are new;
+    - `Remove` treats a dangling link as present, so a backup that is a link goes back instead of the path being deleted.
+- **Before sudo:**
+  - systemd, nftables and either CA tool, with `sudo pacman -S --needed …` where pacman is the package manager;
+  - with resolved off, NetworkManager must run. Elsewhere setup says to turn resolved on by hand.
+- **Hints and checks:** certutil (`nss`) and the fonts (`ttf-dejavu ttf-liberation`) are named for pacman, and the DejaVu check finds Arch's path.
+- **Opening a terminal:** after Debian's `x-terminal-emulator` and `$TERMINAL`, konsole, gnome-terminal, kgx, xfce4-terminal, alacritty, kitty, foot and xterm, each with its own working-folder option.
+- **fish, on every OS:** `~/.config/fish/conf.d/devid.fish` with `fish_add_path --global --move --path '<bin>' # added by devid`, as A1 tried it.
+  - Each startup file now has its own PATH line: `rc_line(paths, rc)` and `rc_has_line(paths, rc)`.
+  - `devid path`, doctor, the app's Add to PATH and uninstall use them.
+  - `DEVID_LOGIN_SHELL` overrides the login shell, for the tests.
+- **The 0.19 bug:** the dry runs of `setup` and `helper install` work before the daemon has made the CA.
+- **`scripts/linux-e2e.sh` on Arch too:** it compares `/etc/resolv.conf` (link or content) and whether resolved and its two sockets are enabled and active, takes Firefox's profile from where each system keeps it, and uses Chromium where Chrome is missing.
+- **Fonts (devid-binaries#23):** `type-linux.xml` lists each of its nine fonts in both layouts. Users get them with the runtime release that follows its merge.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| macOS, the owner's Mac | `cargo fmt --check` and `cargo clippy --all-targets -D warnings` pass. `cargo test --no-fail-fast` with a test HOME: everything passes but `passwd_home_matches_home`, which fails only because HOME is replaced. `~/.zshrc` and `~/.zshenv` unchanged |
+| New tests | the Ubuntu, Arch and after-setup action lists and their order; uninstall with and without a backup; the prerequisite messages; the terminal choice; `Link` and `Restore` on files and links, dangling ones too; fish's file and line; `devid path on` and `off` with fish as the login shell; the dry runs before the CA exists |
+| Arch, run 45318939599 on the throwaway `spike/arch-a2` branch | This branch's musl build on an Arch VM under QEMU/KVM, set up like a desktop (NetworkManager, systemd-resolved off): <ul><li>the dry runs showed the Arch plan before anything ran;</li><li>`linux-e2e.sh` installed PHP 8.5.13 and nginx;</li><li>curl and headless Chromium got "e2e 8.5.13 Linux" from `https://e2e.test/`;</li><li>doctor said "all good";</li><li>after `uninstall --purge` the snapshot matched: `/etc/resolv.conf` is NetworkManager's file again, resolved and both sockets are disabled and inactive, and the anchors folder is empty.</li></ul>The job took about 3.5 minutes: 47 s to build with a warm cache, 67 s to boot, 58 s for packages and a reboot, and the e2e itself |
+| CI on #137 | `rust`, `gui` and the Ubuntu `linux-e2e` |
+
+### Found on the way
+
+- **Arch's bash startup files** (for A1.6):
+  - `/etc/skel` gives every user a `~/.bash_profile`, so bash login shells never read `~/.profile`;
+  - its `~/.bashrc` returns early in non-interactive shells, before Devid's line at the end.
+
+  A desktop session that starts through a non-interactive login shell would miss `~/.devid/bin`. The KDE Plasma machine shows whether Plasma's does.
+- **`systemctl disable --now` with the sockets named** still prints "its triggering units are still active" for the service, before the sockets stop. Afterwards all three are inactive.
+
+### Not in A2
+
+- PATH in a desktop session (A1.6, and `environment.d` if it is needed) waits for the KDE Plasma machine.
+- The `arch-e2e` job in CI is A3, built from `spike/arch/vm.sh`, `prepare.sh` and this e2e.
 
 ## Where it is tested
 
