@@ -383,7 +383,7 @@ What rc.1 did there:
   - devid-binaries' README (hadziqmtqn/devid-binaries#24);
   - the guide's `/docs/linux` page, its index, install, terminal and uninstall pages, the landing page and the roadmap (hadziqmtqn/devid-site#20).
 
-  Both PRs merge now that 0.20.0 is out.
+  Both merged with the release on 2026-11-24, and the guide's live `/docs/linux` page names Arch and CachyOS.
 - **The machines:** Devid is uninstalled on all three.
   - Only empty folders are left: `~/.pki/nssdb`, and on CachyOS also `~/.config/fish/conf.d` and `~/.config/systemd/user`.
   - Whether each VM keeps its passwordless sudo file is the owner's call.
