@@ -15,3 +15,5 @@ The workflow's `fonts-ubuntu` job checks the two-layout `type.xml` on Ubuntu too
 Question 6 (PATH in a desktop session) needs the KDE Plasma machine, not CI.
 
 The results go in `docs/roadmap/phase-13.md`, "A1 results".
+
+CI's `arch-e2e` jobs (A3) use `scripts/arch-vm.sh`, which joins `vm.sh` and the parts of `prepare.sh` that `scripts/linux-e2e.sh` needs.

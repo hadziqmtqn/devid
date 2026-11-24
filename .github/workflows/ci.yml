@@ -66,3 +66,32 @@ jobs:
           key: musl
       - run: cargo build --release --target x86_64-unknown-linux-musl --bin devid
       - run: scripts/linux-e2e.sh target/x86_64-unknown-linux-musl/release/devid
+
+  arch-e2e:
+    # The same end to end on Arch (Phase 13 A3, D-059), in a VM on the runner: Arch's cloud image
+    # under QEMU/KVM, set up like a desktop install (NetworkManager, systemd-resolved off). There
+    # setup turns systemd-resolved on and trusts the CA through p11-kit, and uninstall must put
+    # /etc/resolv.conf and systemd-resolved back as they were. About five minutes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: sudo rm -f /var/lib/man-db/auto-update && sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends musl-tools
+        timeout-minutes: 10
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl --bin devid
+      - name: Boot Arch, set up like a desktop
+        run: scripts/arch-vm.sh boot
+        timeout-minutes: 15
+      - name: Setup, a site over HTTPS, and uninstall on Arch
+        run: scripts/arch-vm.sh e2e target/x86_64-unknown-linux-musl/release/devid
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: arch-vm-serial-log
+          path: vm/serial.log
