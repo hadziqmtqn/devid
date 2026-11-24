@@ -1,8 +1,9 @@
-name: Spike Arch (Phase 13 A1)
+name: Spike Arch (Phase 13 A2 check)
 
-# Phase 13 A1 (docs/roadmap/phase-13.md): answers the spike's questions on an Arch Linux VM that runs
-# under QEMU/KVM on a GitHub Ubuntu runner, and looks at CachyOS's own image. It runs only on
-# spike/arch-* branches and publishes nothing; the scripts are in spike/arch/.
+# Phase 13 A2 (docs/roadmap/phase-13.md), checked on Arch before its pull request: this branch's
+# devid, built here, runs scripts/linux-e2e.sh on an Arch VM set up like a desktop install
+# (spike/arch/prepare.sh: NetworkManager, systemd-resolved off). Only on spike/arch-* branches;
+# it publishes nothing.
 
 on:
   push:
@@ -15,7 +16,6 @@ permissions:
 
 defaults:
   run:
-    # -o pipefail: run 1's package step failed inside a pipe and the job went on.
     shell: bash
 
 concurrency:
@@ -23,12 +23,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  arch:
-    # Questions 1 to 5 and 7, and fish (A2), on a desktop-like Arch VM.
+  arch-e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: sudo rm -f /var/lib/man-db/auto-update && sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends musl-tools >/dev/null
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl --bin devid
       - name: Boot Arch's cloud image under QEMU/KVM
         run: spike/arch/vm.sh boot
       - name: Packages, and NetworkManager with systemd-resolved off, as on a desktop
@@ -37,105 +44,23 @@ jobs:
           spike/arch/vm.sh ssh 'sudo bash prepare.sh' 2>&1 | sed -nE '/^(\+ |::|  |\(|.*downloading|checking|loading|installing|upgrading|resolving|looking|Packages|Total|Net)/!p' | tail -30
           spike/arch/vm.sh ssh 'sudo systemctl reboot' || true
           spike/arch/vm.sh wait
-          spike/arch/vm.sh ssh 'systemctl is-active NetworkManager systemd-resolved; ls -l /etc/resolv.conf; cat /etc/resolv.conf; timedatectl show -p NTPSynchronized; getent hosts archlinux.org || echo "no DNS"'
-      - name: Devid 0.19.0 from its release, and the scripts
+          spike/arch/vm.sh ssh 'systemctl is-active NetworkManager systemd-resolved; ls -l /etc/resolv.conf; cat /etc/resolv.conf'
+      - name: This branch's devid and the e2e script
         run: |
-          base=https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-v0.19.0
-          curl -fsSL -o devid "$base/devid-linux-x86_64"
-          curl -fsSL -o checksums.txt "$base/checksums.txt"
-          grep ' devid-linux-x86_64$' checksums.txt | sed 's/devid-linux-x86_64$/devid/' | sha256sum -c -
-          chmod +x devid
-          spike/arch/vm.sh copy devid devid
-          tar -C spike/arch -cf arch.tar . && spike/arch/vm.sh copy arch.tar arch.tar
-          spike/arch/vm.sh ssh 'mkdir -p spike && tar -C spike -xf arch.tar'
-      - name: A1 checks
-        run: spike/arch/vm.sh ssh 'bash spike/system.sh'
-      - name: Results
+          spike/arch/vm.sh copy target/x86_64-unknown-linux-musl/release/devid devid
+          spike/arch/vm.sh copy scripts/linux-e2e.sh linux-e2e.sh
+          spike/arch/vm.sh ssh 'chmod +x devid && ./devid --version'
+      - name: The dry runs before anything ran (0.19 stopped at "no Devid CA yet")
+        run: spike/arch/vm.sh ssh './devid helper install --dry-run && ./devid setup --dry-run'
+      - name: linux-e2e.sh on Arch
+        run: spike/arch/vm.sh ssh 'bash linux-e2e.sh ./devid'
+      - name: The state after uninstall
         if: always()
         run: |
-          spike/arch/vm.sh ssh 'cat a1-out/table.md' >>"$GITHUB_STEP_SUMMARY" || true
-          spike/arch/vm.sh ssh 'tar -C a1-out -czf - .' >a1-arch.tgz || true
+          spike/arch/vm.sh ssh 'ls -l /etc/resolv.conf* /etc/devid-resolved.state 2>&1; cat /etc/resolv.conf; systemctl is-enabled systemd-resolved; systemctl is-active systemd-resolved systemd-resolved-varlink.socket systemd-resolved-monitor.socket; ls /etc/ca-certificates/trust-source/anchors/' || true
           tail -30 vm/serial.log || true
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: a1-arch
-          path: |
-            a1-arch.tgz
-            vm/serial.log
-
-  fonts-ubuntu:
-    # Question 5 on Ubuntu: the type.xml for both layouts must still work where 0.19's does.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core fonts-liberation >/dev/null
-      - name: Devid 0.19.0 with PHP 8.5 and imagick, in a throwaway home
-        run: |
-          base=https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-v0.19.0
-          curl -fsSL -o devid "$base/devid-linux-x86_64" && chmod +x devid
-          export DEVID_HOME="$RUNNER_TEMP/dv"
-          mkdir -p "$DEVID_HOME"
-          printf 'http_port = 28088\nhttps_port = 28443\ndns_port = 28535\nupdate_check_minutes = 0\n' >"$DEVID_HOME/config.toml"
-          ./devid daemon run >"$RUNNER_TEMP/daemon.log" 2>&1 &
-          for _ in $(seq 50); do ./devid status >/dev/null 2>&1 && break; sleep 0.2; done
-          ./devid php install 8.5
-          ./devid php ext install 8.5 imagick
-          echo "ETC=$(dirname "$(find "$DEVID_HOME" -name type.xml -path '*imagick*' | head -1)")" >>"$GITHUB_ENV"
-          echo "PHP=$DEVID_HOME/php/8.5/bin/php" >>"$GITHUB_ENV"
-      - name: The shipped type.xml and the one for both layouts
-        run: |
-          # PHP itself with Devid's ini: a php8.5 shim would set MAGICK_CONFIGURE_PATH to imagick's etc.
-          ini="$(dirname "$PHP")/../etc"
-          printf '#!/bin/bash\nPHPRC=%s PHP_INI_SCAN_DIR=%s/conf.d exec %s "$@"\n' "$ini" "$ini" "$PHP" >"$RUNNER_TEMP/php85" && chmod +x "$RUNNER_TEMP/php85"
-          spike/arch/fonts.sh draw "$ETC" "$RUNNER_TEMP/php85"
-          spike/arch/fonts.sh both "$ETC" "$RUNNER_TEMP/fonts"
-          spike/arch/fonts.sh draw "$RUNNER_TEMP/fonts" "$RUNNER_TEMP/php85"
-
-  cachyos:
-    # Question 8: what CachyOS changes. Its Docker image has no systemd running and no installer,
-    # so this reads packages and their files; the default shell for new users comes from its
-    # installer's settings.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    continue-on-error: true
-    steps:
-      - name: Find an image
-        run: |
-          for img in cachyos/cachyos:latest cachyos/cachyos-v3:latest; do
-            if docker pull -q "$img"; then echo "IMG=$img" >>"$GITHUB_ENV"; echo "using $img"; break; fi
-          done
-      - name: Packages, repositories, NSS, resolved, fish
-        if: env.IMG != ''
-        run: |
-          docker run --rm "$IMG" bash -c '
-            set -x
-            cat /etc/os-release
-            grep -E "^\[" /etc/pacman.conf
-            pacman -Q systemd networkmanager nss p11-kit ca-certificates nftables fish 2>&1
-            ls -l /usr/lib/libnssckbi.so; readlink -f /usr/lib/libnssckbi.so
-            cat /etc/default/useradd 2>/dev/null; getent passwd root
-            ls /usr/lib/systemd/system-preset/ /etc/systemd/system-preset/ 2>/dev/null
-            grep -rh -iE "resolved|NetworkManager" /usr/lib/systemd/system-preset/ /etc/systemd/system-preset/ 2>/dev/null
-            pacman -Sy >/dev/null 2>&1; pacman -Fy >/dev/null 2>&1
-            pacman -Si cachyos-settings cachyos-fish-config 2>&1 | grep -E "^(Repository|Name|Version|Description|Depends On)"
-            pacman -Fl cachyos-settings 2>/dev/null | grep -iE "resolv|networkmanager|systemd/|shell" | head -30
-            pacman -Fl cachyos-fish-config 2>/dev/null | head -20
-            pacman -Si ttf-dejavu ttf-liberation 2>&1 | grep -E "^(Repository|Name)"
-            pacman -Fl ttf-dejavu 2>/dev/null | grep -m2 DejaVuSans.ttf
-            pacman -Sl 2>/dev/null | cut -d" " -f1 | sort | uniq -c
-            # What cachyos-settings sets for NetworkManager DNS, read from the package itself.
-            pacman -Sw --noconfirm cachyos-settings >/dev/null 2>&1
-            pkg=$(ls /var/cache/pacman/pkg/cachyos-settings-*.pkg.tar.zst | head -1)
-            bsdtar -xOf "$pkg" usr/lib/NetworkManager/conf.d/dns.conf
-          '
-      - name: The login shell CachyOS's installer gives the user
-        if: env.IMG != ''
-        run: |
-          # No package carries the installer's settings (run 3), so they come from its repository:
-          # the users module creates the user with bash, then shell-setup runs chsh.
-          src=https://raw.githubusercontent.com/CachyOS/cachyos-calamares/cachyos/src
-          curl -fsSL "$src/modules/users/users.conf" | grep -A1 '^user:'
-          curl -fsSL "$src/modules/shellprocess/shellprocess.conf" | grep -n 'shell-setup'
-          curl -fsSL "$src/scripts/shell-setup"
+          name: a2-arch-serial
+          path: vm/serial.log
