@@ -283,6 +283,27 @@ For the other shells:
 - **The terminal:** with no terminal that opens in a folder, the TUI names one to install. It no longer waits for the terminal to close.
 - **`linux-e2e.sh`** checks that a non-interactive login shell puts `~/.devid/bin` first, on Ubuntu and on Arch.
 
+## A4 plan (2026-11-24)
+
+- **0.20.0-rc.1 first, as a pre-release,** as 0.19.0 went.
+  - It is not GitHub's Latest, so `devid-latest`, `devid self-update` and every install stay on 0.19.0.
+  - Its release notes name Arch, and say that setup turns systemd-resolved on where it is off.
+- **On the Arch KDE Plasma machine** (see "A1.6 results"; clean again after #139's run), Claude, over SSH:
+  - installs rc.1 with `DEVID_VERSION=0.20.0-rc.1` through `install.sh`, runs setup, and links a site;
+  - the owner opens it in Firefox and Chromium, logs out and in, and reboots;
+  - Claude checks the desktop session's PATH, systemd-resolved, the ports unit and the user unit after the reboot.
+- **On the Ubuntu 24.04 machine,** which still runs 0.19.0 with a test site:
+  - rc.1 goes over 0.19.0, as an update would;
+  - setup must take Ubuntu's steps as before (systemd-resolved already on, `update-ca-certificates`);
+  - the PATH lines stay in `~/.bashrc` and `~/.profile`, and the Firefox snap's profile keeps the CA.
+- **CachyOS** (KDE Plasma, fish): the owner sets up a third VM on the old Mac, switched off between uses. There:
+  - the same install, with fish as the shell;
+  - `php` found in a new terminal and from the menu;
+  - a site in Firefox, and uninstall.
+- **Then 0.20.0,** with the README and the guide's Linux page naming Arch.
+  - The guide also says that Flatpak apps cannot see Devid's commands, and that Discover's Flatpak Konsole cannot open in a folder.
+  - On both machines, `devid self-update` goes from rc.1 to 0.20.0, and uninstall is compared with the state before.
+
 ## Where it is tested
 
 - **GitHub's runners**, free in a public repository. They carry the spike and then every pull request, like `linux-e2e` for Ubuntu. GitHub has no Arch runners, so Arch runs on an Ubuntu runner, in one of two ways:
