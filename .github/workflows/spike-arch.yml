@@ -123,4 +123,15 @@ jobs:
             pacman -Si ttf-dejavu ttf-liberation 2>&1 | grep -E "^(Repository|Name)"
             pacman -Fl ttf-dejavu 2>/dev/null | grep -m2 DejaVuSans.ttf
             pacman -Sl 2>/dev/null | cut -d" " -f1 | sort | uniq -c
+            # What cachyos-settings sets for NetworkManager DNS, read from the package itself.
+            pacman -Sw --noconfirm cachyos-settings >/dev/null 2>&1
+            pkg=$(ls /var/cache/pacman/pkg/cachyos-settings-*.pkg.tar.zst | head -1)
+            bsdtar -xOf "$pkg" usr/lib/NetworkManager/conf.d/dns.conf
+            # The default shell of a new user: the installer'"'"'s users module, if a package carries it.
+            pacman -Fx "calamares.*users\.conf$" 2>/dev/null | head -10
+            for p in $(pacman -Fqx "calamares.*users\.conf$" 2>/dev/null | sort -u | head -3); do
+              pacman -Sw --noconfirm "${p#*/}" >/dev/null 2>&1
+              f=$(ls /var/cache/pacman/pkg/"${p#*/}"-*.pkg.tar.zst 2>/dev/null | head -1)
+              [ -n "$f" ] && bsdtar -xOf "$f" --include="*users.conf" | grep -iE "shell|^user" | head -10
+            done
           '

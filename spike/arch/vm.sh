@@ -19,7 +19,7 @@ wait_ssh() {
     sleep 4
   done
   echo "FAIL: no SSH to the VM; the end of its serial console:" >&2
-  tail -40 "$W/serial.log" >&2
+  tail -80 "$W/serial.log" >&2
   return 1
 }
 
