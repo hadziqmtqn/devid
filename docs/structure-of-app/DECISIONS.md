@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-060 | 2026-11-24 | accepted 2026-11-24 (an order; D-035 stands) | After Phase 13, the next phase wires D-058's databases into Devid; Node and Bun runtimes come later, in a phase of their own |
 | D-059 | 2026-11-24 | accepted 2026-11-24 (Phase 13; extends D-057) | Arch-based Linux: plain Arch first, then CachyOS and EndeavourOS; each part chosen by what the system has (p11-kit or Debian CA tools, systemd-resolved on or off), setup may turn systemd-resolved on and uninstall restores it, and fish gets a PATH file on every system; tested on GitHub's runners (Arch under QEMU/KVM) and a KDE Plasma VM on the old Mac |
 | D-058 | 2026-11-24 | accepted 2026-11-24 (supersedes D-006 in part) | Database binaries for every Devid platform: official MySQL and MongoDB builds mirrored, PostgreSQL built from source, in a release track of their own; Devid does not run them yet |
 | D-057 | 2026-11-23 | accepted 2026-11-23 (Phase 12; narrows D-044); L1 details 2026-11-23; L2 runtime 2026-11-23; L3 daemon 2026-11-23; L4 release build 2026-11-23; done in 0.19.0 2026-11-24 | Linux comes as Ubuntu 24.04 and 26.04 LTS on x86_64, with the CLI and the TUI: systemd-resolved for `.test`, an nftables redirect for ports 80/443, the system CA store plus NSS, a systemd user unit, and glibc PHP builds so `.so` extensions load; tested on GitHub's Ubuntu runners and, for the desktop, on the owner's Xubuntu machine over SSH |
@@ -1121,3 +1122,30 @@ See ARCHITECTURE, "PHP runtime".
   - **Browsers:** Arch's Chromium and Firefox read the system store through p11-kit. **Changed:** the certutil step stays on Arch as well, instead of being skipped. It covers browsers from outside Arch's repositories and does not clash with the system store.
   - **The rest:** 0.19's nftables unit works unchanged once `nftables` is installed. One `type.xml` serves both font layouts, with Liberation in `/usr/share/fonts/liberation/`. fish's `conf.d` file works as designed. CachyOS gives its installer's user fish and most likely runs resolved.
   - **Still open:** PATH in a desktop session (A1.6), on the KDE Plasma machine.
+
+## D-060: after Phase 13, database integration comes before Node and Bun (accepted 2026-11-24)
+
+- **Context:**
+  - D-058 builds MySQL, PostgreSQL and MongoDB for every Devid platform, but no Devid release installs or runs them. Linux has no DBngin.
+  - D-035 leaves Node to the user: commands get nvm's Node for their folder (its `.nvmrc`, else nvm's default alias), and otherwise whatever Node or Bun the login shell's `PATH` has. Devid ships neither.
+  - On 2026-11-24 the owner asked when Node and Bun binaries would fit.
+- **Decision:**
+  - The phase after Phase 13 (Arch, D-059) wires D-058's databases into Devid: installing them, running them under the daemon's supervisor, their data folders and ports, and the CLI, the TUI and the app.
+  - Node and Bun runtimes come later, in a phase of their own. Until then D-035 stands.
+- **Why databases first:**
+  - Their binaries are ready and tested (D-058), and Linux and Arch users have no DBngin.
+  - Whoever runs a Node dev server in Devid already has Node.
+- **For the Node and Bun phase (found 2026-11-24):**
+  - **Node lines:** 22 (maintenance until 2027-04-30), 24 (until 2028-04-30) and 26 (Active LTS since 2026-10-28).
+  - **macOS:** Node 24 and 26 need macOS 13.5; only Node 22 runs on macOS 11 and later, while Devid targets macOS 12.
+  - **Intel Macs:** Node 26 rates Intel macOS Tier 2 until early 2028, Node's main branch rates it Experimental, and Node 27's alpha builds have no Intel macOS build.
+  - **pnpm and Yarn:** Node 26 no longer bundles Corepack (Node 24 does), so they need a source of their own.
+  - **Bun:** 1.4.5 has baseline builds for CPUs without AVX2, which fits the Nehalem floor of Devid's Linux runtime.
+  - **The work:** Node, Bun and Deno publish official builds with checksums, so mirroring them is small. The phase's work is in Devid:
+    - choosing a version per project (`.nvmrc`, `.node-version`, `engines` and `packageManager` in `package.json`, Bun's lockfile);
+    - living beside nvm, fnm and Volta without fighting over `PATH`;
+    - shims for `node`, `npm`, `npx` and `bun` (D-053), and a place for global packages;
+    - the Devid CA through `NODE_EXTRA_CA_CERTS`, updates and uninstall.
+  - **Cost:** no idle RAM, only disk (about 40 to 70 MB per version), so it fits D-052 whenever it comes.
+- **Owner's answer (2026-11-24):** "Integrasi database dulu".
+- **Status:** accepted on 2026-11-24. No plan yet: the database phase gets its roadmap file when Phase 13 closes.
