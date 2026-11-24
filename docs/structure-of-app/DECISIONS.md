@@ -1064,3 +1064,9 @@ See ARCHITECTURE, "PHP runtime".
   - **Order:** this phase next, then Windows (D-044). The Linux desktop app comes only on request, since the CLI and the TUI cover everything it does. The owner left the order and the VM's desktop to Claude's proposal.
 - **Plan:** `docs/roadmap/phase-13.md`.
 - **Status:** accepted by the owner on 2026-11-24 ("Terima, mulai A1"), with "Arch murni", "Aktifkan resolved", and "masukkan CachyOS dan dukungan fish ke rencana".
+- **A1 (2026-11-24), on an Arch VM under QEMU/KVM on GitHub's runners (spike run 45311846301):** the decision holds, with these details:
+  - **DNS:** turning systemd-resolved on works next to NetworkManager, with 0 queries outside `.test` reaching Devid. Undoing it restores `/etc/resolv.conf` and stops resolved together with its sockets, which otherwise restart it. `/etc/resolv.conf` must never be left missing: at the next boot systemd's tmpfiles links it to resolved's stub.
+  - **CA:** `trust anchor --store` and `--remove` work, and the bundle comes back byte for byte.
+  - **Browsers:** Arch's Chromium and Firefox read the system store through p11-kit. **Changed:** the certutil step stays on Arch as well, instead of being skipped. It covers browsers from outside Arch's repositories and does not clash with the system store.
+  - **The rest:** 0.19's nftables unit works unchanged once `nftables` is installed. One `type.xml` serves both font layouts, with Liberation in `/usr/share/fonts/liberation/`. fish's `conf.d` file works as designed. CachyOS gives its installer's user fish and most likely runs resolved.
+  - **Still open:** PATH in a desktop session (A1.6), on the KDE Plasma machine.
