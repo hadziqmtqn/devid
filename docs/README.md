@@ -1,10 +1,10 @@
 # Devid Documentation
 
 > Scope: entry point for all Devid docs
-> Verified against: 2026-11-23 (v0.18.0)
+> Verified against: 2026-11-24 (v0.20.0)
 > Status: current
 
-Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, no VM). These docs record the plans, the decisions and how the code in `crates/` works. To contribute, start with [CONTRIBUTING.md](../CONTRIBUTING.md).
+Devid is a native local PHP development app for macOS and Linux (Herd-like, no Homebrew, no VM). These docs record the plans, the decisions and how the code in `crates/` works. To contribute, start with [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Start here
 
@@ -24,7 +24,7 @@ Devid is a native local PHP development app for macOS (Herd-like, no Homebrew, n
 - [Phase 10 plan](roadmap/phase-10.md): dev servers on demand, started by a site's first request and stopped when idle (D-054, accepted 2026-11-21; O2 in 0.16.1; O3 to O5 in 0.17.0, released 2026-11-22).
 - [Phase 11 plan](roadmap/phase-11.md): Laravel + Vite over HTTPS, so a Laravel site's Vite dev server works in Safari too (D-056, accepted 2026-11-22; done in 0.18.0, released 2026-11-22).
 - [Phase 12 plan](roadmap/phase-12.md): Linux, starting with Ubuntu 24.04 and 26.04 LTS on x86_64 with the CLI and the TUI (D-057, accepted 2026-11-23; done in 0.19.0, released 2026-11-24).
-- [Phase 13 plan](roadmap/phase-13.md): Arch-based Linux, extending 0.19's Linux support from Ubuntu to Arch and its derivatives (D-059, accepted 2026-11-24; A1 to A3 done the same day, and the desktop PATH check on the Arch KDE machine; A4 next).
+- [Phase 13 plan](roadmap/phase-13.md): Arch-based Linux, extending 0.19's Linux support from Ubuntu to Arch and its derivatives (D-059, accepted 2026-11-24; A1 to A3 done the same day, and 0.20.0-rc.1 passed on the owner's Arch, Ubuntu and CachyOS machines; shipping in 0.20.0).
 - [Implementation timeline](implementation-timeline/README.md): one record per merged milestone.
 
 ## Research

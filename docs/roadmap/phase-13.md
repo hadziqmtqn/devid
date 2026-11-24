@@ -1,8 +1,8 @@
 # Phase 13 Plan: Arch-based Linux
 
 > Scope: Devid 0.19's Linux support (the daemon, the CLI and the TUI) extended from Ubuntu to Arch Linux and the distributions built on it
-> Verified against: 2026-11-24 (Devid 0.19.0; Phase 12 done, see `phase-12.md`; spike run 45311846301; A2's Arch run 45318939599; A3's CI run 45351167579 and release dry run 45351179773)
-> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"); question 6 was answered on the Arch machine the same day (see "A1.6 results"). **A2 done 2026-11-24** (see "A2 results"), with the desktop session's PATH fixed by #139. **A3 done 2026-11-24** (see "A3 results").
+> Verified against: 2026-11-24 (Devid 0.19.0 and 0.20.0-rc.1; Phase 12 done, see `phase-12.md`; spike run 45311846301; A2's Arch run 45318939599; A3's CI run 45351167579 and release dry run 45351179773; rc.1's release run 45377684962)
+> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"); question 6 was answered on the Arch machine the same day (see "A1.6 results"). **A2 done 2026-11-24** (see "A2 results"), with the desktop session's PATH fixed by #139. **A3 done 2026-11-24** (see "A3 results"). **A4:** 0.20.0-rc.1 passed on the owner's Arch, Ubuntu and CachyOS machines the same day (see "rc.1 on the machines"); 0.20.0 is next.
 
 On 2026-11-24, after 0.19.0 shipped Devid for Ubuntu, the owner named Arch-based distributions as a likely next target.
 
@@ -303,6 +303,67 @@ For the other shells:
 - **Then 0.20.0,** with the README and the guide's Linux page naming Arch.
   - The guide also says that Flatpak apps cannot see Devid's commands, and that Discover's Flatpak Konsole cannot open in a folder.
   - On both machines, `devid self-update` goes from rc.1 to 0.20.0, and uninstall is compared with the state before.
+
+## rc.1 on the machines (2026-11-24)
+
+The release run (45377684962) passed every job the first time, `arch-e2e` included, and published `devid-v0.20.0-rc.1` as a pre-release.
+
+### Arch Linux with KDE Plasma
+
+- **Install:** `install.sh` with `DEVID_VERSION=0.20.0-rc.1`, on the machine left clean by #139's run.
+  - The PATH line went to `~/.bashrc` and `~/.bash_profile`.
+  - The CA went to the system store through p11-kit, to `~/.pki/nssdb` and to the Firefox profile in `~/.config/mozilla/firefox`.
+  - `https://hello.test` served, and doctor said "all good".
+- **The owner** opened the site in Firefox and Chromium, then restarted the machine. After the reboot, over SSH:
+  - `plasmashell` and `systemctl --user show-environment` had `~/.devid/bin` first;
+  - systemd-resolved, `devid-ports.service` with its nftables table, and the user unit were running, and no unit had failed;
+  - the site served, and doctor said "all good".
+- **Browsers:** Chromium showed the site as secure. Firefox's window was caught mid-redraw in the owner's screenshot. Its profile held the CA, and Firefox run headless with a copy of that profile's certificates loaded the page without a warning.
+
+### Ubuntu 24.04, over 0.19.0
+
+- **Install:** `install.sh` put rc.1 over 0.19.0, as an update would.
+  - Setup found the PATH lines in `~/.bashrc` and `~/.profile` and the system setup already in place, so it ran no sudo.
+  - It restarted the daemon on the new binary.
+- **Compared with the state before:** only the version changed.
+  - The startup files, the units, the resolved drop-in, the nftables file, the CA file and the system bundle matched byte for byte.
+  - No `~/.bash_profile` appeared, and the Firefox snap's profile kept the CA.
+- **Ubuntu's steps:** `devid helper install --dry-run` lists the same steps as 0.19, with systemd-resolved left as it is and `update-ca-certificates` for the CA.
+- **Afterwards:** doctor said "all good", and the test site kept serving.
+
+### CachyOS with KDE Plasma and fish
+
+The owner installed CachyOS from its 2026-11-23 ISO (Calamares, Limine) in a third Parallels VM. It differs from the Arch machine in four ways:
+- **fish** is the login shell, from the installer's "CachyOS shell configuration".
+- **Plasma Login Manager** (6.8.3) replaces SDDM. Its `wayland-session` script has SDDM's fish branch: it sources `/etc/profile` and `~/.profile`, then exports what `fish --login` sets.
+- **systemd-resolved is on.** NetworkManager has `dns=systemd-resolved` and writes a regular `/etc/resolv.conf` naming the stub (127.0.0.53), and `nsswitch.conf` asks resolved too.
+- **UFW is on** and denies incoming connections. The owner allowed SSH for the test.
+
+It also has Firefox 160 (profile in `~/.config/mozilla/firefox`), a native Konsole, `nss`, `nftables` and `update-ca-trust`, and no Chromium.
+
+What rc.1 did there:
+- **Setup:**
+  - The PATH line went to `~/.config/fish/conf.d/devid.fish`.
+  - The system step added the drop-in and restarted systemd-resolved, and left `/etc/resolv.conf` alone.
+  - The CA went in through p11-kit, `~/.pki/nssdb` and the Firefox profile.
+  - UFW needed nothing, since Devid's traffic stays on 127.0.0.1.
+- **Checks:**
+  - A fish login shell and a new interactive fish found Devid's `php`.
+  - `https://hello.test` served, and doctor said "all good".
+  - The owner opened the site in Firefox without a warning, and no exception was stored.
+- **After a restart and a login:**
+  - `plasmashell`, `systemctl --user show-environment`, and Konsole opened from the menu all had `~/.devid/bin` first.
+  - `php -v` in that Konsole ran Devid's PHP 8.5.13.
+- **Uninstall (`devid uninstall --purge`):** compared with the record from before setup:
+  - Every file matched byte for byte: `.bashrc`, `.bash_profile`, `.zshrc`, `config.fish`, the CA bundle and `nsswitch.conf`.
+  - `/etc/resolv.conf` was untouched, and the units, sockets and UFW rules were as before.
+  - No Devid CA, nftables table or file was left.
+  - Empty folders remained: `~/.config/fish/conf.d`, `~/.config/systemd/user`, and `~/.pki/nssdb` with an empty database, which Ubuntu and Arch also keep.
+- **Unrelated:** CachyOS's `ananicy-cpp` crashed at every boot of this VM, before Devid was installed too, reading `/sys/devices/system/cpu/cpu2` from Parallels' CPU list.
+
+### Left for 0.20.0
+
+- On the Arch and Ubuntu machines, `devid self-update` from rc.1 to 0.20.0, then uninstall, compared with the records from before.
 
 ## Where it is tested
 
