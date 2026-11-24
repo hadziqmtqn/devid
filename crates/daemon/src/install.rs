@@ -164,6 +164,19 @@ pub fn rc_line(paths: &Paths, rc: &Path) -> String {
     }
 }
 
+/// Every startup file Devid may have put its line in, for each shell: taking Devid off PATH cleans
+/// them all, so a login shell changed since setup, or a ~/.bash_profile that took over from
+/// ~/.profile (as 0.19 wrote it on Arch, Phase 13 A1.6), leaves no line behind.
+pub fn all_rc_files(home: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> =
+        ["/bin/bash", "/bin/zsh", "/usr/bin/fish"].iter().flat_map(|shell| rc_files_for(shell, home)).collect();
+    // bash's two login files, whichever one rc_files_for picks now.
+    files.extend([home.join(".bash_profile"), home.join(".profile")]);
+    files.sort();
+    files.dedup();
+    files
+}
+
 /// Whether `rc` has this install's exact PATH line.
 pub fn rc_has_line(paths: &Paths, rc: &Path) -> bool {
     let line = rc_line(paths, rc);
@@ -180,7 +193,8 @@ pub fn commands() -> Vec<&'static str> {
 /// files that changed.
 pub fn set_on_path(paths: &Paths, on: bool) -> io::Result<Vec<PathBuf>> {
     let mut changed = Vec::new();
-    for rc in rc_files() {
+    let files = if on { rc_files() } else { all_rc_files(&user_home()) };
+    for rc in files {
         let did = if on { ensure_rc_line(&rc, &rc_line(paths, &rc)) } else { remove_rc_line(&rc) };
         if did.map_err(|e| err(format!("{}: {e}", rc.display())))? {
             changed.push(rc);
@@ -360,6 +374,20 @@ mod tests {
             r"fish_add_path --global --move --path '/home/o\'neil/.devid/bin' # added by devid"
         );
         fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// Taking Devid off PATH cleans every file it may have written, whatever the shell is now.
+    #[test]
+    fn every_startup_file_devid_may_have_written() {
+        let home = Path::new("/home/me");
+        let mut want = vec![".bash_profile", ".config/fish/conf.d/devid.fish", ".profile", ".zshenv", ".zshrc"];
+        // Devid writes ~/.bashrc only on Linux; macOS's bash gets ~/.bash_profile.
+        if cfg!(not(target_os = "macos")) {
+            want.push(".bashrc");
+        }
+        let mut want: Vec<PathBuf> = want.into_iter().map(|f| home.join(f)).collect();
+        want.sort();
+        assert_eq!(all_rc_files(home), want);
     }
 
     #[test]

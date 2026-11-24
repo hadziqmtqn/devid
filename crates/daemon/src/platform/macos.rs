@@ -293,10 +293,10 @@ pub fn os_checks(_paths: &Paths) -> Vec<Check> {
 }
 
 /// Opens a Terminal window in `dir`.
-pub fn terminal_command(dir: &str) -> Command {
+pub fn terminal_command(dir: &str) -> Result<Command, String> {
     let mut cmd = Command::new("open");
     cmd.args(["-a", "Terminal"]).arg(dir);
-    cmd
+    Ok(cmd)
 }
 
 /// Every web server runs on macOS (Apache through the system httpd).

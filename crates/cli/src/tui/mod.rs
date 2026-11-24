@@ -60,6 +60,34 @@ fn load_extensions(app: &mut App, paths: &Paths, version: &str) {
     }
 }
 
+/// Opens a terminal in `path` without waiting for it: macOS's `open` returns at once, but most Linux
+/// terminals run until their window closes, and the TUI would wait with them. A failure within half a
+/// second is reported; after that a thread reaps the terminal when it closes.
+fn open_terminal(path: &str) -> (String, bool) {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    let spawned = platform::terminal_command(path)
+        .and_then(|mut cmd| cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string()));
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(e) => return (e, true),
+    };
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if !status.success() => return (format!("failed ({status})"), true),
+            Ok(Some(_)) => break,
+            Ok(None) if start.elapsed() > Duration::from_millis(500) => {
+                std::thread::spawn(move || child.wait());
+                break;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => return (e.to_string(), true),
+        }
+    }
+    (format!("opened a terminal in {path}"), false)
+}
+
 /// Carry out an effect; the result becomes the message line.
 fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
     use std::process::{Command, Stdio};
@@ -78,9 +106,7 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
             Err(e) => (e, true),
         },
         Effect::OpenUrl(url) => run(Command::new(platform::OPEN_COMMAND).arg(&url), format!("opened {url}")),
-        Effect::OpenTerminal(path) => {
-            run(&mut platform::terminal_command(&path), format!("opened a terminal in {path}"))
-        }
+        Effect::OpenTerminal(path) => open_terminal(&path),
         Effect::Update { check } => match request(paths, &Request::Update { check }) {
             Ok(v) => {
                 let changes: Vec<String> = v["changes"]

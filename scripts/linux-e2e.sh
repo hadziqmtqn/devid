@@ -17,7 +17,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # The files setup may change. Their hashes (or absence) must match again after uninstall.
 FILES=(
-  "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.config/fish/conf.d/devid.fish"
+  "$HOME/.bashrc" "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.zshenv" "$HOME/.zshrc"
+  "$HOME/.config/fish/conf.d/devid.fish"
   "$HOME/.config/systemd/user/devid.service"
   /etc/systemd/resolved.conf.d/devid.conf /etc/devid-ports.nft /etc/systemd/system/devid-ports.service
   /etc/devid-resolved.state /etc/resolv.conf.devid-backup
@@ -44,9 +45,10 @@ snapshot() {
   done
 }
 # A Firefox profile with its own certificate database, where each system's Firefox keeps it. Ubuntu's
-# snap reads nothing else, so setup must add the CA there and uninstall take it out.
+# snap reads nothing else, so setup must add the CA there and uninstall take it out. Arch's Firefox
+# makes new profiles in the XDG folder (Firefox 160 did, Phase 13 A4).
 if command -v pacman >/dev/null; then
-  FIREFOX="$HOME/.mozilla/firefox/e2e.default"
+  FIREFOX="$HOME/.config/mozilla/firefox/e2e.default"
 else
   FIREFOX="$HOME/snap/firefox/common/.mozilla/firefox/e2e.default"
 fi
@@ -79,6 +81,10 @@ D="$HOME/.devid/bin/devid"
 [ -x "$D" ] || fail "setup did not install $D"
 systemctl --user is-active --quiet devid.service || fail "the user unit does not run"
 grep -qx "export PATH=\"$HOME/.devid/bin:\$PATH\" # added by devid" "$HOME/.bashrc" || fail "no PATH line in ~/.bashrc"
+# A desktop session starts through a login shell that is not interactive (SDDM runs Plasma through
+# `bash --login`), and editors opened from the menu inherit its PATH (Phase 13 A1.6).
+first="$(env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin bash --login -c 'echo "${PATH%%:*}"')"
+[ "$first" = "$HOME/.devid/bin" ] || fail "a login shell's PATH starts with $first, not ~/.devid/bin"
 "$D" helper status
 certutil -d "sql:$FIREFOX" -L -n "Devid Local CA" >/dev/null || fail "setup left the CA out of the Firefox profile"
 

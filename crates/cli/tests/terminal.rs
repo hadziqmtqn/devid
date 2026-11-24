@@ -53,6 +53,58 @@ fn add_to_path_from_the_daemon_and_the_cli() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// bash on Arch (Phase 13 A1.6): /etc/skel gives every user a ~/.bash_profile, so bash's login
+/// shells, the desktop session's among them, never read ~/.profile. `devid path on` writes
+/// ~/.bash_profile and ~/.bashrc, and `devid path off` also cleans the ~/.profile line 0.19 left.
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn bash_with_a_bash_profile_gets_its_line_there() {
+    let root = temp_root("devid-bash-profile-it");
+    let home = root.join("home");
+    let user = root.join("user");
+    fs::create_dir_all(&user).unwrap();
+    let skel_profile = "#\n# ~/.bash_profile\n#\n\n[[ -f ~/.bashrc ]] && . ~/.bashrc\n";
+    let skel_rc = "# If not running interactively, don't do anything\n[[ $- != *i* ]] && return\n";
+    fs::write(user.join(".bash_profile"), skel_profile).unwrap();
+    fs::write(user.join(".bashrc"), skel_rc).unwrap();
+    let line = format!("export PATH=\"{}:$PATH\" # added by devid", home.join("bin").display());
+    fs::write(user.join(".profile"), format!("{line}\n")).unwrap();
+    let cli = |args: &[&str]| {
+        std::process::Command::new(BIN)
+            .args(args)
+            .env("DEVID_HOME", &home)
+            .env("HOME", &user)
+            .env("DEVID_LOGIN_SHELL", "/usr/bin/bash")
+            .output()
+            .unwrap()
+    };
+    let text = |out: &std::process::Output| String::from_utf8_lossy(&out.stdout).into_owned();
+
+    let out = cli(&["path", "on"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(text(&out).contains(".bash_profile"), "{}", text(&out));
+    assert_eq!(fs::read_to_string(user.join(".bash_profile")).unwrap(), format!("{skel_profile}{line}\n"));
+    assert_eq!(fs::read_to_string(user.join(".bashrc")).unwrap(), format!("{skel_rc}{line}\n"));
+    assert!(text(&cli(&["path"])).contains("new terminals get Devid's commands"));
+
+    // A bash login shell that is not interactive, as SDDM starts Plasma, gets Devid's bin first.
+    let out = std::process::Command::new("bash")
+        .args(["--login", "-c", "echo \"${PATH%%:*}\""])
+        .env_clear()
+        .env("HOME", &user)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(text(&out).trim(), home.join("bin").display().to_string(), "{}", stderr(&out));
+
+    let out = cli(&["path", "off"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(fs::read_to_string(user.join(".bash_profile")).unwrap(), skel_profile);
+    assert_eq!(fs::read_to_string(user.join(".bashrc")).unwrap(), skel_rc);
+    assert!(!user.join(".profile").exists(), "0.19's ~/.profile held only Devid's line");
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// fish as the login shell (D-059): `devid path on` makes Devid's own file in fish's conf.d, on
 /// every OS, and `devid path off` deletes it. DEVID_LOGIN_SHELL stands in for the user database.
 #[test]
