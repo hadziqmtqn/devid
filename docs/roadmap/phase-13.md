@@ -2,7 +2,7 @@
 
 > Scope: Devid 0.19's Linux support (the daemon, the CLI and the TUI) extended from Ubuntu to Arch Linux and the distributions built on it
 > Verified against: 2026-11-24 (Devid 0.19.0; Phase 12 done, see `phase-12.md`)
-> Status: proposed 2026-11-24, at the owner's request ("tulis rencana untuk Arch-based"). It becomes D-059 once accepted; D-058 is taken by the database binaries (#133). The phase number and the order against the Linux desktop app and Windows (D-044) are the owner's call.
+> Status: proposed 2026-11-24, at the owner's request ("tulis rencana untuk Arch-based"), with the owner's answers in "Owner's answers". It becomes D-059 once accepted; D-058 is taken by the database binaries (#133).
 
 On 2026-11-24, after 0.19.0 shipped Devid for Ubuntu, the owner named Arch-based distributions as a likely next target.
 
@@ -36,7 +36,7 @@ These parts of 0.19 do not depend on Ubuntu:
 
 ## Proposal (D-059, proposed)
 
-- **Target:** Arch Linux (rolling, x86_64) with systemd. Then EndeavourOS, the closest derivative, as a second check.
+- **Target:** plain Arch Linux (rolling, x86_64) with systemd, the owner's choice. Then EndeavourOS, the closest derivative, as a second check.
   - Manjaro lags Arch's packages and has its own defaults, so it follows later.
   - CachyOS and others are covered as far as they behave like Arch, without being promised.
 - **Detect capabilities, not distribution names.** `platform/linux.rs` keeps one Linux implementation and picks each part by what the system has:
@@ -49,7 +49,7 @@ These parts of 0.19 do not depend on Ubuntu:
   - one root step at setup, which `devid uninstall` undoes, with any file Devid replaces backed up first;
   - everything else as the user;
   - no new resident process.
-- **DNS where systemd-resolved is off:** chosen after A1.1. The options, from least to most change to the system:
+- **DNS where systemd-resolved is off:** the owner allows option 2, turning systemd-resolved on, if A1.1 confirms it works and uninstall restores the system. The options, from least to most change to the system:
   1. **NetworkManager's dnsmasq plugin:** a drop-in that routes `.test` to Devid. It needs the `dnsmasq` package and changes how NetworkManager resolves every name.
   2. **Turning systemd-resolved on**, as Ubuntu has it: enable the service and point `/etc/resolv.conf` at its stub. This works with NetworkManager, but changes the system's resolver. Uninstall would put back the file and the service's state.
   3. **Refusing with a message:** setup stops and links a guide page that explains option 2 for the user to do by hand.
@@ -74,7 +74,9 @@ All on GitHub's runners first. The Arch machine (see "Where it is tested") is on
 - **GitHub's runners**, free in a public repository. They carry the spike and then every pull request, like `linux-e2e` for Ubuntu. GitHub has no Arch runners, so Arch runs on an Ubuntu runner, in one of two ways:
   - **A VM:** Arch's official cloud image under QEMU with KVM, booted with an SSH key through cloud-init. This is the closest to a real install: its own systemd, NetworkManager and resolver.
   - **A container with systemd:** `systemd-nspawn --boot` on Arch's root filesystem. It is lighter, but it shares the runner's network, so it cannot answer the DNS question.
-- **A second Parallels VM on the old Mac**, beside the Ubuntu one: Arch with GNOME or KDE, set up by the owner, and reached over SSH like the Ubuntu machine. It is for the real browsers, logging in and out, and reboots.
+- **A second Parallels VM on the old Mac**, beside the Ubuntu one: Arch with KDE Plasma, set up by the owner, and reached over SSH like the Ubuntu machine. It is for the real browsers, logging in and out, and reboots.
+  - KDE is the most common desktop among Arch users.
+  - Its tray and Wayland session differ from the GNOME that Ubuntu already covers.
 - **Not used:**
   - the M1, where D-013 rules out VMs and RAM is tight;
   - a VPS, which has no desktop and costs money every month.
@@ -88,12 +90,12 @@ All on GitHub's runners first. The Arch machine (see "Where it is tested") is on
 | A3 | **CI:** an `arch-e2e` job, the twin of `linux-e2e`: setup, a site over HTTPS (curl and a browser), doctor, and uninstall with every file compared | it passes on every pull request, and release builds run it before publishing |
 | A4 | **Docs and release:** the guide's Linux page and the README name Arch and its prerequisites; a pre-release goes on the Arch machine first, as rc.1 did on Ubuntu | released, after Claude installs it on the Arch machine from `install.sh`, opens a site in Firefox and a Chromium browser, reboots, updates it and uninstalls it |
 
-## Questions for the owner
+## Owner's answers (2026-11-24)
 
-1. **Which Arch first:** plain Arch, as proposed, or a derivative you use (EndeavourOS, Manjaro, CachyOS)?
-2. **DNS where systemd-resolved is off:** may setup change the system's resolver (option 2), or should it only show how (option 3)? This waits for A1's answers, but your preference shapes the spike.
-3. **The machine:** a second Parallels VM on the old Mac, with GNOME or KDE?
-4. **Order:** this phase before or after the Linux desktop app, and before Windows (D-044)?
+1. **Plain Arch first** ("Arch murni"), then EndeavourOS as the derivative check.
+2. **DNS:** where systemd-resolved is off, setup may turn it on and point `/etc/resolv.conf` at its stub (option 2), with the old file and the service's state restored by uninstall. A1.1 still has to show that it works next to NetworkManager.
+3. **The machine's desktop:** no preference. Claude proposes KDE Plasma (see "Where it is tested").
+4. **Order:** no preference. Claude proposes this phase next, then Windows (D-044), and the Linux desktop app only when users ask for it: the CLI and the TUI already cover everything the app does.
 
 ## Not in this phase
 
