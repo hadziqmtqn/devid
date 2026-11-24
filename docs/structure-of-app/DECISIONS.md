@@ -1129,6 +1129,10 @@ See ARCHITECTURE, "PHP runtime".
   - **0.19's dry-run bug** is fixed. Messages name pacman's packages on Arch, and opening a terminal finds konsole and GNOME's terminals.
   - **Fonts:** devid-binaries#23 lists both layouts in `type-linux.xml`.
 - **A3 (2026-11-24, #138):** `scripts/arch-vm.sh` boots Arch's cloud image under QEMU/KVM on a GitHub runner, set up like a desktop. `linux-e2e.sh` runs there in CI's `arch-e2e` job on every pull request. In `release.yml`, an `arch-e2e` job runs it on the Linux binary that ships, and `publish` waits for that job.
+- **A1.6 (2026-11-24, #139), on the owner's Arch KDE Plasma VM:** with 0.19's lines, the desktop session had no `~/.devid/bin`. SDDM starts Plasma through `bash --login`, which reads only `~/.bash_profile`, and that file's `~/.bashrc` returns early when the shell is not interactive.
+  - **Fix:** bash gets its line in `~/.bash_profile` where that file exists, else in `~/.profile`. `environment.d` was not needed.
+  - **Cleaning up:** `devid path off` and uninstall clean every startup file Devid may have written.
+  - **Also fixed:** the CA goes to Firefox's XDG profiles (`~/.config/mozilla/firefox`, which Firefox 160 used), to the snap's and to Flathub's. Devid's terminal no longer tries Konsole's Flatpak, which ignores the folder it is given.
 
 ## D-060: after Phase 13, database integration comes before Node and Bun (accepted 2026-11-24)
 

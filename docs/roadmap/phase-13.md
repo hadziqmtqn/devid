@@ -2,7 +2,7 @@
 
 > Scope: Devid 0.19's Linux support (the daemon, the CLI and the TUI) extended from Ubuntu to Arch Linux and the distributions built on it
 > Verified against: 2026-11-24 (Devid 0.19.0; Phase 12 done, see `phase-12.md`; spike run 45311846301; A2's Arch run 45318939599; A3's CI run 45351167579 and release dry run 45351179773)
-> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"), except question 6, which needs the Arch machine. **A2 done 2026-11-24** (see "A2 results"), except PATH in a desktop session, which waits for question 6. **A3 done 2026-11-24** (see "A3 results").
+> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"); question 6 was answered on the Arch machine the same day (see "A1.6 results"). **A2 done 2026-11-24** (see "A2 results"), with the desktop session's PATH fixed by #139. **A3 done 2026-11-24** (see "A3 results").
 
 On 2026-11-24, after 0.19.0 shipped Devid for Ubuntu, the owner named Arch-based distributions as a likely next target.
 
@@ -232,6 +232,56 @@ PR #138 (branch `arch-a3`).
 
 - **Every pull request** gets one more Linux job, which standard runners in a public repository run for free (D-043). At about 8 minutes, it is now the slowest job, so a pull request's checks take about 8 minutes instead of 2 (run 45351167579).
 - **A release:** `arch-e2e` takes about 3 minutes after `build-linux`. In the dry run it ended at 07:58, before the Intel macOS build, which ended at 08:01, so `publish` did not start any later.
+
+## A1.6 results (2026-11-24)
+
+### The machine
+
+The owner's Arch Linux VM in Parallels on the old Mac, reached over SSH on the local network:
+- **Installed with `archinstall`:** profile Desktop with KDE Plasma (6.8.3, Wayland, SDDM), NetworkManager, the `linux` kernel (7.3.5), zram swap, and `openssh firefox chromium`.
+- **4 GB of memory.** The first 942 MiB were too little.
+- **The network starts bridged, NAT does not work:** under Parallels' Shared network the VM got `10.211.55.x`, which only the old Mac reaches.
+- **What `archinstall` left:** systemd-resolved off and a regular `/etc/resolv.conf` that NetworkManager writes, as A1 assumed. `nftables` was already there as a dependency of `iptables`.
+- **No apps of its own:** the KDE profile installs Plasma, Discover and Flatpak but no apps. The owner then got Konsole and Dolphin from Discover, which installed them as Flatpaks.
+
+Devid ran from the build of main in release dry run 45351179773, with `devid setup` for real:
+- resolved was turned on and `/etc/resolv.conf` linked to its stub;
+- NetworkManager restarted without dropping SSH;
+- the CA went in through p11-kit, then PHP 8.5.13 and nginx were installed;
+- `https://hello.test` served, doctor said "all good", and Firefox and Chromium opened the site without a warning.
+
+### The answer
+
+**No: with 0.19's lines, apps opened from the menu do not see `~/.devid/bin`.**
+- SDDM starts Plasma through `/usr/share/sddm/scripts/wayland-session`, which for bash runs `exec $SHELL --login`.
+- That shell is not interactive, so it reads `~/.bash_profile` (Arch's `/etc/skel` gives every user one) and never `~/.profile`.
+- `~/.bash_profile` sources `~/.bashrc`, which returns at its first line (`[[ $- != *i* ]] && return`), before Devid's line at the end.
+
+| Logged in with | PATH of `plasmashell` and `systemctl --user show-environment` |
+|---|---|
+| Devid's line in `~/.bashrc` and `~/.profile` (0.19, and A2) | no `~/.devid/bin` |
+| the same line also at the end of `~/.bash_profile` | `/home/khadziq/.devid/bin` first |
+
+A new Konsole tab found Devid's `php` either way, since an interactive shell reads `~/.bashrc`. `environment.d` was not needed.
+
+For the other shells:
+- **zsh:** a login shell reads `~/.zshenv`, which Devid already writes.
+- **fish:** SDDM's script sources `~/.profile`, then exports what `fish --login` sets, and Devid's `conf.d` file runs there.
+
+### Found on the way
+
+- **Firefox 160 made its profile in `~/.config/mozilla/firefox`** (the XDG layout), where Devid did not look. On Arch, Firefox trusted the CA anyway through p11-kit. Ubuntu's snap reads only its profile's database, so the same move there would break it.
+- **Konsole as a Flatpak** (`org.kde.konsole`) starts its shell in the home folder even with `--workdir`. Devid's "open a terminal" could not use it, and with no other terminal it failed with "No such file or directory".
+- **The TUI waited for the terminal to close,** since most Linux terminals run until their window does.
+- **Flatpak apps** (Dolphin here, or a Flatpak editor) run in a sandbox and never see programs outside it, Devid's `php` included. Native editors from pacman or the AUR do.
+
+### What changed (#139)
+
+- **bash:** the line goes to `~/.bash_profile` where it exists, else to `~/.profile`.
+- **Cleaning up:** `devid path off` and uninstall clean every startup file Devid may have written, for every shell.
+- **Firefox:** the CA also goes to profiles in the XDG folder, in the snap's XDG folder and in Flathub's Flatpak.
+- **The terminal:** with no terminal that opens in a folder, the TUI names one to install. It no longer waits for the terminal to close.
+- **`linux-e2e.sh`** checks that a non-interactive login shell puts `~/.devid/bin` first, on Ubuntu and on Arch.
 
 ## Where it is tested
 
