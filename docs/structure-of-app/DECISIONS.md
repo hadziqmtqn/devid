@@ -1054,7 +1054,7 @@ See ARCHITECTURE, "PHP runtime".
     - **PostgreSQL:** source only. postgresql.org has no macOS or generic Linux binaries.
 - **Decision:**
   - **Scope:** binaries only, in `devid-binaries`. Installing and running databases from Devid (daemon, CLI, TUI, app) is a later decision, so D-006 still stands for Devid itself.
-  - **Platforms:** macOS on Intel and Apple silicon, and Linux x86_64. The manifest uses Devid's arch keys (`x86_64`, `arm64`, `linux-x86_64`).
+  - **Platforms:** macOS on Intel and Apple silicon, and Linux x86_64: Ubuntu 22.04 and later, Debian 12 and later, and Arch (D-059). The manifest uses Devid's arch keys (`x86_64`, `arm64`, `linux-x86_64`).
   - **Versions:** every series upstream still supports, pinned in `db/versions.json`:
     - MySQL 8.4 LTS and 9.7 LTS (8.0 reached end of life in April 2026). The 26.x Innovation releases are left out: they have no Intel macOS build and are replaced every few months;
     - PostgreSQL 15 to 19 (14 ended on 2026-11-12);
@@ -1062,11 +1062,15 @@ See ARCHITECTURE, "PHP runtime".
   - **MySQL and MongoDB are mirrored, PostgreSQL is built:**
     - **MySQL:** the official build, checked against the SHA-256 pinned in its pull request, repackaged without the debug server, the MeCab dictionary, static libraries, headers and man pages (about 80 MB instead of 170 MB). The files kept are unmodified.
     - **MySQL per platform:** Oracle stopped building MySQL for Intel Macs after 8.4.11 and 9.7.4; 8.4.13 and 26.x have none. So MySQL is pinned per platform: Intel Macs stay on their last build (8.4.11), and the other platforms move on (8.4.13). Every arch entry in the manifest carries its own `version`.
-    - **MySQL on Linux:** `mysqld` needs `libaio.so.1` and `libnuma.so.1`. Ubuntu 24.04 ships libaio only as `libaio.so.1t64`, so both are built from source into `lib/private`, where the binaries' runpath looks first. They are built with static-php-cli's zig for glibc 2.17, since the runner's glibc would make them need symbols that Ubuntu 22.04 and Debian 12 lack.
-    - **MongoDB:** `mongod` only (no `mongos`), checked against `full.json`. Linux uses the Ubuntu 22.04 build, which also runs on 24.04 and Debian 12 and links the system's OpenSSL 3 and libcurl.
+    - **MySQL on Linux:** three libraries are built from source into `lib/private`, where the binaries' runpath looks first:
+      - `libaio.so.1` and `libnuma.so.1` for `mysqld`, since Ubuntu 24.04 ships libaio only as `libaio.so.1t64`;
+      - ncurses 6 (`libncurses.so.6`, `libtinfo.so.6`) for the `mysql` client, since Arch has only the wide-character `libncursesw`.
+      - They are built with static-php-cli's zig for glibc 2.17, since the runner's glibc would make them need symbols that Ubuntu 22.04 and Debian 12 lack.
+    - **MongoDB:** `mongod` only (no `mongos`), checked against `full.json`. Linux uses the Ubuntu 22.04 build, which links OpenSSL 3 and libcurl 4.
+    - **MongoDB on Linux:** Arch moved to OpenSSL 4 (`libssl.so.4`; OpenSSL 3 is the optional `openssl-3` package). So the archive carries OpenSSL 3.5's `libssl.so.3` and `libcrypto.so.3` in `lib/`, built with zig like MySQL's libraries. `mongod` has no runpath and stays unmodified, so it runs with `LD_LIBRARY_PATH=<archive>/lib`: Devid must set it when it runs `mongod` on Linux. libcurl comes from the system; Ubuntu, Debian and Arch all build it with the `CURL_OPENSSL_4` symbols `mongod` needs.
     - **mongosh:** the official build, checked against GitHub's digest.
     - **PostgreSQL:** built from source with OpenSSL 3.5 LTS linked statically (`no-atexit no-thread-pool no-quic`, since libpq refuses a library that can call `exit`), zlib, libedit and the contrib modules; no ICU, uuid-ossp or LLVM. It is relocatable: binaries find `share/` and `lib/` relative to themselves, and the links to libpq are rewritten to `@loader_path` (macOS) or `$ORIGIN` (Linux). macOS uses its own zlib and libedit and targets macOS 12. Linux builds with static-php-cli's zig toolchain for glibc 2.17, as PHP does, and must start on QEMU's Nehalem CPU.
-  - **Checks:** every archive is unpacked under a new path on its own platform's runner. A server is created there, started on 127.0.0.1 and a spare port, then queried with the bundled client and stopped (`scripts/db-smoke.sh`). MongoDB is queried through mongosh.
+  - **Checks:** every archive is unpacked under a new path on its own platform's runner. A server is created there, started on 127.0.0.1 and a spare port, then queried with the bundled client and stopped (`scripts/db-smoke.sh`). MongoDB is queried through mongosh. On Linux, `ldd` must show the bundled libraries loaded, and every Linux archive runs again in `archlinux` (without `openssl-3`), `debian:12` and `ubuntu:22.04` containers as an ordinary user.
   - **Releases:** a track of their own, `.github/workflows/db-release.yml`:
     - `db-YYYY.MM.DD-N` releases, and the rolling `db-latest` with the newest `manifest.json`;
     - the runtime releases, their manifest and `runtime-latest` do not change, so no Devid release reads the new builds;
@@ -1083,6 +1087,7 @@ See ARCHITECTURE, "PHP runtime".
 - **Owner's answers (2026-11-24):**
   - Binaries only; every supported series; official MySQL and MongoDB builds mirrored and PostgreSQL built from source; a separate release track.
   - MySQL on Intel Macs: a version per platform, not one version for all and not a source build. MySQL Innovation releases: not yet, LTS only.
+  - Arch support in the same pull request, with container smoke tests in CI ("Ya, kerjakan di #22").
 - **Status:** accepted on 2026-11-24. The scripts and workflow are on the `db-binaries` branch of `devid-binaries`.
   - The MD5 of every pinned MySQL archive matched Oracle's download pages on 2026-11-24.
   - Every macOS arm64 archive (MySQL 8.4.13 and 9.7.4, PostgreSQL 15 to 19, MongoDB 7.0 to 9.0, mongosh 2.14.3) was built and smoke-tested on the owner's M1.
