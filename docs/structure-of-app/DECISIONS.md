@@ -1128,6 +1128,7 @@ See ARCHITECTURE, "PHP runtime".
   - **fish:** `~/.config/fish/conf.d/devid.fish` on every OS. `DEVID_LOGIN_SHELL` overrides the login shell, for tests.
   - **0.19's dry-run bug** is fixed. Messages name pacman's packages on Arch, and opening a terminal finds konsole and GNOME's terminals.
   - **Fonts:** devid-binaries#23 lists both layouts in `type-linux.xml`.
+- **A3 (2026-11-24, #138):** `scripts/arch-vm.sh` boots Arch's cloud image under QEMU/KVM on a GitHub runner, set up like a desktop. `linux-e2e.sh` runs there in CI's `arch-e2e` job on every pull request. In `release.yml`, an `arch-e2e` job runs it on the Linux binary that ships, and `publish` waits for that job.
 
 ## D-060: after Phase 13, database integration comes before Node and Bun (accepted 2026-11-24)
 
