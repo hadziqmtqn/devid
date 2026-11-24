@@ -73,6 +73,8 @@ note "/etc/resolv.conf: $(grep -v '^#' /etc/resolv.conf | tr '\n' ' ')"
 note "libnssckbi.so is $(readlink -f /usr/lib/libnssckbi.so)"
 note "tools: $(for c in update-ca-certificates update-ca-trust trust nft certutil fish; do printf '%s=%s ' "$c" "$(command -v "$c" || echo missing)"; done)"
 note "the user's login shell: $(getent passwd "$USER" | cut -d: -f7)"
+note "tmpfiles.d on /etc/resolv.conf: $(grep -h 'resolv.conf' /usr/lib/tmpfiles.d/*.conf | tr '\n' ' ')"
+note "systemd-resolved is triggered by: $(systemctl show -p TriggeredBy --value systemd-resolved.service)"
 BEFORE="$(state)"
 # NetworkManager rewrites /etc/resolv.conf a moment after it restarts.
 unchanged() { [ "$(state)" = "$BEFORE" ]; }
@@ -125,6 +127,8 @@ note "queries outside .test that reached Devid: $(leaks option2 archlinux.org ex
 note "during: $(state)"
 
 section "The CA through p11-kit (A1.2), and the browsers (A1.3)"
+# Run 4's "rejects" passed with nothing serving; the site must answer first.
+check "the site answers on 443 by name (curl -k)" retry 10 serves -k "https://$HOST/"
 refuse "curl rejects the site before trust" serves "https://$HOST/"
 refuse "Chromium rejects it before trust" browser chromium
 refuse "Firefox rejects it before trust" browser firefox
@@ -143,7 +147,10 @@ refuse "Firefox rejects it again" browser firefox
 check "the system bundle is as before" test "$(sha256sum </etc/ssl/certs/ca-certificates.crt)" = "$BUNDLE"
 
 section "DNS option 2 undone"
-check "systemd-resolved disables and stops" sudo systemctl disable --now systemd-resolved.service
+# Run 4: `disable --now` on the service alone left its sockets listening, and the next lookup
+# through nss-resolve started it again. Its sockets go too.
+check "systemd-resolved and its sockets disable and stop" \
+  sudo systemctl disable --now systemd-resolved.service $(systemctl show -p TriggeredBy --value systemd-resolved.service)
 sudo rm -f /etc/systemd/resolved.conf.d/devid.conf
 sudo rmdir /etc/systemd/resolved.conf.d 2>/dev/null
 sudo mv -f /etc/resolv.conf.devid-backup /etc/resolv.conf
