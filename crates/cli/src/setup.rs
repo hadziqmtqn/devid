@@ -310,9 +310,8 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
     let ours = |name: &str| on_path(name).is_some_and(|p| Path::new(&p).starts_with(install::bin_dir(paths)));
     // The PATH line may already be in the startup files but not loaded by this (older) terminal.
     let rcs = install::rc_files();
-    let line = install::rc_line(paths);
     let missing: Vec<String> =
-        rcs.iter().filter(|rc| !install::rc_has_line(rc, &line)).map(|rc| rc.display().to_string()).collect();
+        rcs.iter().filter(|rc| !install::rc_has_line(paths, rc)).map(|rc| rc.display().to_string()).collect();
     let path_fix = if missing.is_empty() {
         "Devid's PATH line is in place; open a new terminal or run `exec $SHELL`".to_string()
     } else {

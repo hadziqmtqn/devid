@@ -681,8 +681,7 @@ fn shell_path(paths: &Paths, state: Option<&str>) -> Result<(), String> {
     let rcs = install::rc_files();
     match state {
         None => {
-            let line = install::rc_line(paths);
-            let on = rcs.iter().all(|rc| install::rc_has_line(rc, &line));
+            let on = rcs.iter().all(|rc| install::rc_has_line(paths, rc));
             println!(
                 "path:      {} ({})",
                 if on { "new terminals get Devid's commands" } else { "off; `devid path on` adds them" },
@@ -1467,10 +1466,12 @@ fn helper(action: HelperAction, paths: &Paths) -> Result<(), String> {
         HelperAction::Install { dry_run } | HelperAction::Uninstall { dry_run } => {
             let install = matches!(action, HelperAction::Install { .. });
             let plan = helper_plan(paths)?;
-            if install && !plan.ca_cert.is_file() {
-                return Err("no Devid CA yet; start the daemon once (`devid daemon run`) to create it".into());
-            }
+            // A dry run shows the plan before the daemon has made the CA; 0.19 refused it there
+            // (Phase 13 A1).
             if install && !dry_run {
+                if !plan.ca_cert.is_file() {
+                    return Err("no Devid CA yet; start the daemon once (`devid daemon run`) to create it".into());
+                }
                 devid_daemon::platform::prerequisites()?;
             }
             let actions = if install { h::install_actions(&plan) } else { h::uninstall_actions(&plan) };

@@ -1808,10 +1808,9 @@ fn mail_taken(config: &Config, sites: &[Site]) -> Vec<(u16, String)> {
 /// Whether Devid's commands are on PATH for new terminals (D-053): `on` when every startup file of
 /// the login shell has the PATH line; each file, and the commands in `~/.devid/bin`.
 fn terminal_status(paths: &Paths) -> Value {
-    let line = install::rc_line(paths);
     let files: Vec<Value> = install::rc_files()
         .iter()
-        .map(|rc| json!({"file": rc.display().to_string(), "has_line": install::rc_has_line(rc, &line)}))
+        .map(|rc| json!({"file": rc.display().to_string(), "has_line": install::rc_has_line(paths, rc)}))
         .collect();
     json!({
         "on": files.iter().all(|f| f["has_line"] == true),

@@ -33,6 +33,20 @@ fn dns_and_helper_without_root() {
     )
     .unwrap();
 
+    // Before the daemon ever ran there is no CA, and the dry runs still show their plans (0.19
+    // stopped with "no Devid CA yet", Phase 13 A1). A HOME of the test's own, though nothing is written.
+    let user = root.join("user");
+    fs::create_dir_all(&user).unwrap();
+    let fresh = |args: &[&str]| {
+        std::process::Command::new(BIN).args(args).env("DEVID_HOME", &home).env("HOME", &user).output().unwrap()
+    };
+    let out = fresh(&["helper", "install", "--dry-run"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("dry run: nothing changed"));
+    let out = fresh(&["setup", "--dry-run", "--no-php", "--no-server"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!home.join("ca/devid-ca.crt").exists() && fs::read_dir(&user).unwrap().next().is_none());
+
     let daemon = start_daemon(&home);
     let status = json(&home, &["status", "--json"]);
     assert_eq!(status["dns"], format!("listening on 127.0.0.1:{port}"));
