@@ -1,8 +1,8 @@
 # Phase 13 Plan: Arch-based Linux
 
 > Scope: Devid 0.19's Linux support (the daemon, the CLI and the TUI) extended from Ubuntu to Arch Linux and the distributions built on it
-> Verified against: 2026-11-24 (Devid 0.19.0; Phase 12 done, see `phase-12.md`; spike run 45311846301; A2's Arch run 45318939599)
-> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"), except question 6, which needs the Arch machine. **A2 done 2026-11-24** (see "A2 results"), except PATH in a desktop session, which waits for question 6.
+> Verified against: 2026-11-24 (Devid 0.19.0; Phase 12 done, see `phase-12.md`; spike run 45311846301; A2's Arch run 45318939599; A3's CI run 45351167579 and release dry run 45351179773)
+> Status: accepted 2026-11-24 (D-059, "Terima, mulai A1"), with the owner's answers in "Owner's answers". **A1 done 2026-11-24** (see "A1 results"), except question 6, which needs the Arch machine. **A2 done 2026-11-24** (see "A2 results"), except PATH in a desktop session, which waits for question 6. **A3 done 2026-11-24** (see "A3 results").
 
 On 2026-11-24, after 0.19.0 shipped Devid for Ubuntu, the owner named Arch-based distributions as a likely next target.
 
@@ -200,6 +200,38 @@ PR #137 (branch `arch-a2`) and hadziqmtqn/devid-binaries#23 (branch `arch-fonts`
 
 - PATH in a desktop session (A1.6, and `environment.d` if it is needed) waits for the KDE Plasma machine.
 - The `arch-e2e` job in CI is A3, built from `spike/arch/vm.sh`, `prepare.sh` and this e2e.
+
+## A3 results (2026-11-24)
+
+PR #138 (branch `arch-a3`).
+
+### What shipped
+
+- **`scripts/arch-vm.sh`** joins the spike's `vm.sh` with the parts of `prepare.sh` that `linux-e2e.sh` needs.
+  - **`boot`** opens KVM to the runner's user and installs QEMU (man-db's rebuild skipped). It downloads Arch's latest cloud image, checks it against its `.SHA256`, and boots it with cloud-init's user `arch`. Then, as root in the VM:
+    - pacman upgrades and installs `networkmanager nss nftables chromium ttf-liberation diffutils`, retrying a failed mirror twice;
+    - systemd-networkd and systemd-resolved and their sockets are disabled one at a time, and NetworkManager is enabled with an explicit connection for `eth0`;
+    - `/etc/resolv.conf` becomes the filesystem package's regular file;
+    - `systemd-time-wait-sync` is disabled, and journald forwards to the serial console.
+
+    After a reboot the script checks that names resolve.
+  - **`e2e <devid>`** copies that devid and `scripts/linux-e2e.sh` into the VM and runs the e2e there.
+  - **`ssh`** and **`copy`** are there for debugging.
+- **`ci.yml`:** the `arch-e2e` job builds the musl binary, boots the VM and runs the e2e on every pull request and push to main. Its apt step has a 10-minute timeout and the boot a 15-minute one, and a failed run uploads the VM's serial log.
+- **`release.yml`:** an `arch-e2e` job runs on the `devid-linux-x86_64` artifact that ships, after `build-linux`. `publish` now needs `build`, `build-linux` and `arch-e2e`.
+- **The spike's files** stay in `spike/arch/` as A1's record, and their README points to the script.
+
+### Verification
+
+| Run | Result |
+|---|---|
+| CI 45351167579 on #138 | `rust`, `gui`, `linux-e2e` and `arch-e2e` pass. In `arch-e2e`, Arch's image (kernel 7.3.4) came up with NetworkManager running and systemd-resolved off. The e2e then passed in full: setup, curl and headless Chromium got "e2e 8.5.13 Linux", doctor said "all good", and the snapshot matched after uninstall. Times: build 53 s, boot and setup 5 min 19 s, e2e 7 s |
+| Release dry run 45351179773 (`dry_run=true`, on `arch-a3`) | `build` (x86_64 and arm64), `build-linux` and `arch-e2e` pass; `publish` is skipped. `arch-e2e` ran the same e2e on the downloaded artifact: boot and setup about 3 min, e2e 10 s |
+
+### What this costs
+
+- **Every pull request** gets one more Linux job, which standard runners in a public repository run for free (D-043). At about 8 minutes, it is now the slowest job, so a pull request's checks take about 8 minutes instead of 2 (run 45351167579).
+- **A release:** `arch-e2e` takes about 3 minutes after `build-linux`. In the dry run it ended at 07:58, before the Intel macOS build, which ended at 08:01, so `publish` did not start any later.
 
 ## Where it is tested
 
