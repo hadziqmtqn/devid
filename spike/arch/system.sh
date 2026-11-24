@@ -63,7 +63,7 @@ leaks() {
   grep '? ' "$cap" | grep -vc '\.test\. ' || true
 }
 state() { echo "resolv.conf $(sha256sum </etc/resolv.conf | cut -c1-16) $(test -L /etc/resolv.conf && echo link || echo file); resolved $(systemctl is-enabled systemd-resolved 2>&1)/$(systemctl is-active systemd-resolved 2>&1); NetworkManager $(systemctl is-active NetworkManager)"; }
-browser() { timeout 90 python3 "$HERE/browser.py" "$1" "https://$HOST/" "$TEXT"; }
+browser() { timeout 90 /opt/selenium/bin/python "$HERE/browser.py" "$1" "https://$HOST/" "$TEXT"; }
 
 section "The VM"
 . /etc/os-release
@@ -79,7 +79,10 @@ unchanged() { [ "$(state)" = "$BEFORE" ]; }
 BUNDLE="$(sha256sum </etc/ssl/certs/ca-certificates.crt)"
 
 section "Devid 0.19.0 as released, on stock Arch"
-check "devid setup --dry-run lists its steps" "$DEVID" setup --dry-run
+# Run 1 found: on a machine that never ran Devid, the dry run stops at the system step with "no
+# Devid CA yet" (0.19 checks for the CA before it prints the plan). Recorded, not a check.
+"$DEVID" setup --dry-run >"$OUT/dry-run.txt" 2>&1
+note "devid setup --dry-run on a fresh machine: exit $?, ends with: $(tail -1 "$OUT/dry-run.txt")"
 "$DEVID" setup --no-php --no-server >"$OUT/setup.txt" 2>&1
 note "devid setup ends with: $(tail -2 "$OUT/setup.txt" | tr '\n' ' ')"
 check "the daemon runs as the systemd user unit" retry 20 systemctl --user is-active --quiet devid.service
@@ -110,7 +113,9 @@ section "DNS, option 2: turn systemd-resolved on (A1.1)"
 sudo cp -a /etc/resolv.conf /etc/resolv.conf.devid-backup
 sudo mkdir -p /etc/systemd/resolved.conf.d
 printf '[Resolve]\nDNS=127.0.0.1:53535\nDomains=~test\n' | sudo tee /etc/systemd/resolved.conf.d/devid.conf >/dev/null
-check "systemd-resolved enables and starts" sudo systemctl enable --now systemd-resolved.service
+sudo systemctl enable systemd-resolved.service
+# restart, not start: it reads the drop-in only when it starts.
+check "systemd-resolved enables and (re)starts" sudo systemctl restart systemd-resolved.service
 sudo ln -sfn ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 check "NetworkManager restarts" sudo systemctl restart NetworkManager.service
 check "$HOST resolves to 127.0.0.1" retry 30 resolves_local "$HOST"

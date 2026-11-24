@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    # -o pipefail: run 1's package step failed inside a pipe and the job went on.
+    shell: bash
+
 concurrency:
   group: spike-arch-${{ github.ref }}
   cancel-in-progress: true
@@ -29,7 +34,7 @@ jobs:
       - name: Packages, and NetworkManager with systemd-resolved off, as on a desktop
         run: |
           spike/arch/vm.sh copy spike/arch/prepare.sh prepare.sh
-          spike/arch/vm.sh ssh 'sudo bash prepare.sh' 2>&1 | grep -vE '^(\+ |::|  |\(|downloading|checking|loading|installing|upgrading|resolving|looking|Packages|Total|Net|warning: .* is up to date)' | tail -30
+          spike/arch/vm.sh ssh 'sudo bash prepare.sh' 2>&1 | sed -nE '/^(\+ |::|  |\(|.*downloading|checking|loading|installing|upgrading|resolving|looking|Packages|Total|Net)/!p' | tail -30
           spike/arch/vm.sh ssh 'sudo systemctl reboot' || true
           spike/arch/vm.sh wait
           spike/arch/vm.sh ssh 'systemctl is-active NetworkManager systemd-resolved; ls -l /etc/resolv.conf; cat /etc/resolv.conf'
