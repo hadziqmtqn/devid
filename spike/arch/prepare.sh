@@ -17,3 +17,16 @@ systemctl disable systemd-networkd.service systemd-networkd.socket systemd-netwo
   systemd-resolved.service || true
 systemctl enable NetworkManager.service
 rm -f /etc/resolv.conf
+# Run 2: after the reboot NetworkManager left eth0 down, so SSH never came back. cloud-init wrote
+# networkd's .network files on the first boot; they go, and eth0 gets an explicit connection.
+rm -f /etc/systemd/network/*.network
+mkdir -p /etc/NetworkManager/conf.d /etc/NetworkManager/system-connections
+printf '[device-spike-eth0]\nmatch-device=interface-name:eth0\nmanaged=1\n' >/etc/NetworkManager/conf.d/10-spike-eth0.conf
+printf '[connection]\nid=eth0\ntype=ethernet\ninterface-name=eth0\nautoconnect=true\n\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n' \
+  >/etc/NetworkManager/system-connections/eth0.nmconnection
+chmod 600 /etc/NetworkManager/system-connections/eth0.nmconnection
+# The network's state on the serial console after the reboot, for when SSH does not come back.
+printf '%s\n' '[Unit]' 'After=NetworkManager.service' '[Service]' 'Type=oneshot' \
+  "ExecStart=/bin/sh -c 'sleep 20; ip -br addr; nmcli -t device; journalctl -b -u NetworkManager --no-pager | tail -25'" \
+  'StandardOutput=tty' 'TTYPath=/dev/ttyS0' '[Install]' 'WantedBy=multi-user.target' >/etc/systemd/system/spike-netinfo.service
+systemctl enable spike-netinfo.service
