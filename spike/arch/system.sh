@@ -63,7 +63,7 @@ leaks() {
   grep '? ' "$cap" | grep -vc '\.test\. ' || true
 }
 state() { echo "resolv.conf $(sha256sum </etc/resolv.conf | cut -c1-16) $(test -L /etc/resolv.conf && echo link || echo file); resolved $(systemctl is-enabled systemd-resolved 2>&1)/$(systemctl is-active systemd-resolved 2>&1); NetworkManager $(systemctl is-active NetworkManager)"; }
-browser() { timeout 90 /opt/selenium/bin/python "$HERE/browser.py" "$1" "https://$HOST/" "$TEXT"; }
+browser() { timeout 90 /opt/selenium/bin/python "$HERE/browser.py" "$1" "https://$HOST/" "$TEXT" "${2:-}"; }
 
 section "The VM"
 . /etc/os-release
@@ -138,6 +138,13 @@ check "the system bundle holds it" grep -q "$(sed -n 2p "$CA")" /etc/ssl/certs/c
 check "curl trusts https://$HOST (80/443, systemd-resolved)" retry 10 serves "https://$HOST/"
 check "Chromium (fresh profile) trusts it from the system store" browser chromium
 check "Firefox (fresh profile) trusts it from the system store" browser firefox
+# Firefox may take p11-kit's roots for built-in ones, which can carry extra rules (Certificate
+# Transparency). 0.19's route, certutil into the profile, with the CA in both places:
+FFP="$OUT/firefox-profile"
+mkdir -p "$FFP"
+certutil -N -d "sql:$FFP" --empty-password
+certutil -A -d "sql:$FFP" -t "C,," -n "Devid Local CA" -i "$CA"
+check "Firefox with the CA in its profile as well (0.19's certutil)" browser firefox "$FFP"
 note "~/.pki/nssdb: $(test -e "$HOME/.pki/nssdb" && echo 'exists (Chromium made it)' || echo absent)"
 check "Devid's PHP reaches it (cacert.pem)" bash -c "'$HOME/.devid/bin/php' -r 'echo file_get_contents(\"https://$HOST/\");' | grep -qx '$TEXT'"
 check "trust anchor --remove takes it out" sudo trust anchor --remove "$CA"
@@ -185,7 +192,7 @@ sudo systemctl daemon-reload
 section "imagick's fonts (A1.5)"
 check "imagick installs from the catalog" "$D" php ext install 8.5 imagick
 ETC="$(dirname "$(find "$HOME/.devid" -name type.xml -path '*imagick*' | head -1)")"
-note "imagick's etc: $ETC; Arch's fonts: $(ls /usr/share/fonts/TTF | grep -E '^(DejaVuSans|LiberationSans-Regular)\.ttf$' | tr '\n' ' ')"
+note "imagick's etc: $ETC; Arch's fonts: $(ls /usr/share/fonts/TTF/DejaVuSans.ttf /usr/share/fonts/liberation/LiberationSans-Regular.ttf 2>&1 | tr '\n' ' ')"
 # PHP itself, with Devid's ini: the php8.5 shim sets MAGICK_CONFIGURE_PATH to imagick's own etc.
 PHP85="$OUT/php85"
 printf '#!/bin/bash\nPHPRC=%s PHP_INI_SCAN_DIR=%s/conf.d exec %s "$@"\n' \
