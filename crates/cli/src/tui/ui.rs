@@ -454,7 +454,10 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
         Mode::Menu { row, items, index } => {
             let name = match app.page {
                 Page::Server => app.servers.get(*row).map(|v| s(&v["server"]).to_string()).unwrap_or_default(),
-                Page::Php => format!("PHP {}", devid_daemon::php::SUPPORTED[(*row).min(2)]),
+                Page::Php => {
+                    let supported = devid_daemon::php::SUPPORTED;
+                    format!("PHP {}", supported[(*row).min(supported.len() - 1)])
+                }
                 _ => app.sites.get(*row).map(|s| s["name"].as_str().unwrap_or("?").to_string()).unwrap_or_default(),
             };
             // D-056: a Laravel site whose Vite stays on plain HTTP says what to fix, first, so a

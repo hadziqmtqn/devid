@@ -1,8 +1,9 @@
 #!/bin/bash
 # End-to-end check of a devid build with the real PHP and nginx from runtime-latest (D-044): a daemon
-# in a throwaway DEVID_HOME on spare ports installs them, serves a linked site, and stops. The
-# on-demand check also installs Caddy from the release and, on macOS, points Devid at the macOS
-# httpd (Linux has no Apache in Devid, D-057). It needs no sudo and leaves the system alone.
+# in a throwaway DEVID_HOME on spare ports installs them, serves a linked site (on PHP 8.5, then
+# pinned to 8.6 with Xdebug and pcov, D-062), and stops. The on-demand check also installs Caddy
+# from the release and, on macOS, points Devid at the macOS httpd (Linux has no Apache in Devid,
+# D-057). It needs no sudo and leaves the system alone.
 # release.yml runs it on each target before publishing: Intel and Apple silicon Macs, and Linux
 # x86_64; Apple silicon and Linux are tested on CI only.
 # Usage: scripts/smoke.sh <path to devid>
@@ -158,3 +159,22 @@ else
     *) echo "$out" >&2; exit 1 ;;
   esac
 fi
+
+# PHP 8.6 (D-062): installed next to the default 8.5, it serves a site pinned to it, with Xdebug and
+# pcov turned on through Devid (each restarts its php-fpm).
+"$DEVID" php install 8.6
+"$DEVID" isolate 8.6 --site shop > /dev/null
+"$DEVID" php ext 8.6 xdebug on > /dev/null
+"$DEVID" php ext 8.6 pcov on > /dev/null
+echo '<?php echo "smoke ", PHP_VERSION, " ", implode(",", array_filter(["xdebug", "pcov"], "extension_loaded"));' > "$T/shop/public/index.php"
+want="smoke 8.6."
+for _ in $(seq 50); do
+  got="$(curl -fsSk --resolve shop.test:28443:127.0.0.1 https://shop.test:28443/ 2> /dev/null || true)"
+  case "$got" in "$want"*" xdebug,pcov") break ;; esac
+  sleep 0.2
+done
+echo "got: $got"
+case "$got" in
+  "$want"*" xdebug,pcov") echo "PHP 8.6 smoke test passed on $(uname -m)" ;;
+  *) echo "FAIL: expected '$want<patch> xdebug,pcov' from shop.test pinned to 8.6" >&2; exit 1 ;;
+esac

@@ -1,7 +1,7 @@
 # Decisions
 
 > Scope: decisions that constrain Devid's design
-> Verified against: 2026-11-23
+> Verified against: 2026-11-25
 > Status: current
 
 Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx`.
@@ -16,7 +16,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-006 | 2026-11-01 | superseded by D-058 (the binaries) and D-061 (Devid runs them, Phase 14) | Databases are out of scope (DBngin is used) |
 | D-007 | 2026-11-01 | accepted (applies to the TUI page structure, D-012) | UI follows macOS System Settings, per the approved prototype |
 | D-008 | 2026-11-02 | accepted | How to ship static PHP binaries (details below) |
-| D-009 | 2026-11-02 | accepted | Supported PHP versions: 8.3, 8.4, 8.5; no 8.1 or 8.2 |
+| D-009 | 2026-11-02 | accepted (8.6 added by D-062) | Supported PHP versions: 8.3, 8.4, 8.5; no 8.1 or 8.2 |
 | D-010 | 2026-11-02 | accepted | Personal use first; a public release needs a prominent notice |
 | D-011 | 2026-11-02 | accepted | v1 scope: sites, PHP versions, HTTPS, parked folders |
 | D-012 | 2026-11-02 | accepted | v1 is CLI + TUI; GUI deferred; all logic in the daemon |
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-062 | 2026-11-25 | accepted 2026-11-25 (amends D-009) | PHP 8.6 joins 8.3, 8.4 and 8.5 in devid 0.20.1, built with static-php-cli 2.8.5 plus small fixes for 8.6 only, Xdebug 3.6.0alpha1, phpredis 6.4.0RC1 and pcov's fix commit; 8.3 stays until 2027-12-31; 8.5 stays the default until Xdebug 3.6.0 is stable and the catalog builds for 8.6, which has apcu, imagick, ldap and mongodb so far |
 | D-061 | 2026-11-25 | accepted 2026-11-25 (Phase 14; supersedes what D-006 left, builds on D-058 and D-060) | Devid runs D-058's MySQL, PostgreSQL and MongoDB: one server per engine under the daemon, on 127.0.0.1 at the usual port or the next free one, data in `~/.devid/data` that `uninstall --purge` keeps, accounts with generated passwords that one command creates or resets, the main MySQL and PostgreSQL account without a password, and `devid db` in the CLI, the TUI and the app |
 | D-060 | 2026-11-24 | accepted 2026-11-24 (an order; D-035 stands) | After Phase 13, the next phase wires D-058's databases into Devid; Node and Bun runtimes come later, in a phase of their own |
 | D-059 | 2026-11-24 | accepted 2026-11-24 (Phase 13; extends D-057); done in 0.20.0 2026-11-24 | Arch-based Linux: plain Arch first, then CachyOS and EndeavourOS; each part chosen by what the system has (p11-kit or Debian CA tools, systemd-resolved on or off), setup may turn systemd-resolved on and uninstall restores it, and fish gets a PATH file on every system; tested on GitHub's runners (Arch under QEMU/KVM) and a KDE Plasma VM on the old Mac |
@@ -121,6 +122,7 @@ See ARCHITECTURE, "PHP runtime".
 - **Context:** all of the owner's Laravel projects run on PHP 8.3 or newer. PHP 8.1 is EOL. PHP 8.2 receives security fixes only until the end of 2026. Each supported version costs about 20 minutes of CI per architecture on every release.
 - **Decision:** support PHP **8.3, 8.4 and 8.5**. Build and test the fully supported versions (8.5, then 8.4) first; 8.3 is security-only but still required. New sites default to the newest version. 8.1 and 8.2 are not supported.
 - **Going forward:** add a new PHP minor version once static-php-cli builds it. When a version reaches end of life, mark it EOL in the UI and stop building it. This replaces the "8.1 to latest" range in D-004.
+- **Amended by D-062 (2026-11-25):** PHP 8.6 joins before static-php-cli releases support for it, with small fixes for 8.6 only. New installs keep 8.5 as the default rather than the newest version until 8.6's Xdebug is stable and the catalog builds for it, and 8.3 stays until 2027-12-31.
 
 ## D-010: personal use first (accepted 2026-11-02)
 
@@ -1212,3 +1214,28 @@ See ARCHITECTURE, "PHP runtime".
   - **Socket paths:** MySQL refuses a socket path over 103 bytes, so Devid checks the length.
   - **Orphan check:** on Linux `comm` is only the program's name, so the orphan check reads `/proc/<pid>/exe`.
   - **Not tested yet:** minor updates, since `db-latest` has one build per series. They move to D2.
+
+## D-062: PHP 8.6 joins 8.3, 8.4 and 8.5 (accepted 2026-11-25, amends D-009)
+
+- **Context:**
+  - php.net released PHP 8.6.0 on 2026-11-19. Its active support runs to 2028-12-31 and its security support to 2030-12-31. PHP 8.3's security support ends on 2027-12-31, and 8.4's active support on 2026-12-31.
+  - D-009 adds a minor version "once static-php-cli builds it". static-php-cli 2.8.5 (2026-04-18), which builds every Devid PHP, predates 8.6. Its 8.6 support exists only in its unreleased v3 branch ([crazywhalecc/static-php-cli#1226](https://github.com/crazywhalecc/static-php-cli/pull/1226)).
+  - Upstream on 2026-11-25:
+    - **Xdebug:** 3.5 refuses 8.6. Only 3.6.0alpha1 supports it, a GitHub tag that is not on PECL.
+    - **pcov:** 1.0.12 (2024) uses macros 8.6 removed. The fix was merged on 2026-11-24 ([krakjoe/pcov#134](https://github.com/krakjoe/pcov/pull/134)) and is not released.
+    - **phpredis**, compiled into Devid's PHP: 6.3.0 predates 8.6's `zend_string` session save path; 6.4.0RC1 (2026-11-23) supports it.
+    - **The catalog:** the newest apcu and imagick still use aliases that 8.6 removed (`XtOffsetOf`, `zval_dtor`, `EMPTY_SWITCH_DEFAULT_CASE`). igbinary and msgpack predate 8.6's `zend_string` `unserialize_callback_func`, and memcached its `zend_string` session save path; their fixes are merged upstream, not released. No swoole release supports 8.6. mongodb's CI tests 8.6, and ldap comes from php-src.
+  - The owner asked: "php8.6 sudah rilis, perlu ditambahkan?"
+- **Decision:**
+  - **Versions:** Devid supports PHP 8.3, 8.4, 8.5 and 8.6 from devid 0.20.1. `php8.6` joins the terminal commands (D-053), and the TUI and the app list 8.6.
+  - **8.3 stays** until its security support ends on 2027-12-31. Then D-009's end-of-life rule applies.
+  - **The default stays 8.5** for new installs (`default_php`) until Xdebug 3.6.0 is stable and the catalog builds for 8.6. 8.6 then becomes the default in a release of its own.
+  - **The build:** static-php-cli 2.8.5 stays. For 8.6 only, `devid-binaries` adds the two fixes spc's v3 branch makes (`--enable-pic` instead of `--with-pic`, and `<locale>` before `php.h` in C++ sources) and builds Xdebug 3.6.0alpha1, phpredis 6.4.0RC1 and pcov from its fix commit. Each goes once its project releases 8.6 support. 8.3 to 8.5 build as before.
+  - **The catalog for 8.6:** official releases only. The aliases 8.6 removed come back at build time with their 8.5 definitions (`extensions/php-8.6-compat.h`, the list spc v3 restores), so apcu, imagick, ldap and mongodb build. igbinary, memcached, msgpack and swoole skip 8.6 (`SKIP` in their recipes) until a release of theirs supports it.
+  - **D-009's rule:** a new minor may ship before static-php-cli releases support for it, when the fixes are small, limited to that version and taken from spc's own work.
+- **Why:**
+  - 8.6 is supported until 2030, and projects that want it can use it now. Nothing changes for 8.3 to 8.5 or for anyone who does not install 8.6.
+  - The default stays on the version where Xdebug and the whole catalog work.
+- **Cost:** three more PHP jobs in each runtime release, about 20 minutes per architecture each (D-009). `devid-binaries`' Actions cache already held 10.7 GB in nine PHP caches, over GitHub's 10 GB, so with twelve some release jobs start from a cold cache: slower, still correct.
+- **Owner's answers (2026-11-25):** "Setuju" to the decision as proposed, "Tambal untuk 8.6" for the build, "Rilis + alias" for the catalog, and "Boleh" to the CLAUDE.md line.
+- **Status:** accepted on 2026-11-25. The builds: hadziqmtqn/devid-binaries#25. Devid 0.20.1 adds 8.6 to the daemon, the CLI, the TUI and the app, and devid-site's guide follows the release.

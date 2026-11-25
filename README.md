@@ -31,14 +31,14 @@ Homebrew moved Intel Macs to Tier 3: there are no more prebuilt packages, so Val
 ## What you get
 
 - **Sites:** park `~/Projects` or link one folder. Laravel, WordPress, Symfony, CodeIgniter, Vite, Next.js and other projects are detected per folder and served to match, over HTTPS from a local CA limited to `.test`.
-- **PHP:** 8.3, 8.4 and 8.5 side by side, with a version pinned per site. Xdebug and pcov are included, off by default.
+- **PHP:** 8.3, 8.4, 8.5 and 8.6 side by side, with a version pinned per site. Xdebug and pcov are included, off by default. 8.5 stays the default for new installs while 8.6's Xdebug is a preview.
 - **Node.js:** Vite, Next.js, Nuxt and Node servers are proxied to your dev server, hot reload included. Node is yours, for example from nvm.
 - **Dev servers:** save a command per site once, such as `npm run dev` or a queue worker, then start and stop it from Devid. On demand, a site's first visit starts its dev server, and Devid stops it once the site has been idle, so it uses memory only while you work on it (`devid cmd on-demand`). A Laravel site's Vite, started from Devid, serves HTTPS with the site's certificate, so Safari loads its scripts and CSS too.
-- **Extensions:** intl, gd, redis and PDO are built in. apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole come prebuilt from Devid's catalog, with nothing to compile.
+- **Extensions:** intl, gd, redis and PDO are built in. apcu, igbinary, imagick, ldap, memcached, mongodb, msgpack and swoole come prebuilt from Devid's catalog, with nothing to compile. For PHP 8.6 the catalog has apcu, imagick, ldap and mongodb so far; the others follow when their own releases support 8.6.
 - **Web server:** nginx by default, or Caddy, or Apache on macOS. One runs at a time; switch with `devid server use`.
 - **Share:** `devid share` gives a site a temporary public link through a Cloudflare quick tunnel (it uses your own `cloudflared`, from Homebrew or `~/.local/bin`). `devid app port` serves a site on a local port for a tunnel of your own.
 - **Mail:** `devid mail on` catches the mail your apps send, in an inbox on your computer that the desktop app shows. Laravel's SMTP mailer and PHP's `mail()` both work, and nothing reaches a real mailbox. Devid runs Mailpit for it.
-- **Terminal commands:** `php`, `composer`, `php8.3` to `php8.5`, `nginx -t`, `caddy` and `mailpit` run Devid's own copies from any terminal, editor or script. Add to PATH in the app's Settings (or `devid path on`) sets this up.
+- **Terminal commands:** `php`, `composer`, `php8.3` to `php8.6`, `nginx -t`, `caddy` and `mailpit` run Devid's own copies from any terminal, editor or script. Add to PATH in the app's Settings (or `devid path on`) sets this up.
 - **Interfaces:** the CLI, the TUI and, on macOS, the menu-bar app. Every action works the same in all three. `devid doctor` checks the whole setup and tells you how to fix what's wrong.
 
 ## Install
@@ -90,7 +90,7 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 **Shipped**
 
 - `*.test` sites: park, link, and a PHP version per site.
-- PHP 8.3 to 8.5, and the extension catalog.
+- PHP 8.3 to 8.6, and the extension catalog (D-009, D-062).
 - nginx, Caddy and Apache, with automatic HTTPS.
 - Node.js projects and dev servers.
 - Sharing a site through a Cloudflare tunnel.

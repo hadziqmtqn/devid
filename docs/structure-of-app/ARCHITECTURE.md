@@ -63,7 +63,7 @@ Implemented in M6:
 - **Signals.** The daemon blocks SIGTERM/SIGINT/SIGHUP before starting any thread. A `sigwait` thread turns them into the same clean stop as `devid daemon stop`. The supervisor clears the inherited mask in children (`pre_exec`), so nginx still gets SIGHUP for reloads.
 - **No inherited fds.** Services and site commands mark every fd above stderr close-on-exec (`supervisor::keep_no_fds`, 2026-11-16). On macOS, std marks a new pipe or socket close-on-exec only after creating it, so a child forked by another thread in between could keep another spawn's exec-status pipe open for its whole life, and that spawn would never return.
 - **`daemon::install`** (user level, no root):
-  - copies the binary to `~/.devid/bin/devid`, with the shims as hard links to it: `php`, `composer`, `php8.3`, `php8.4`, `php8.5`, `nginx`, `caddy`, `mailpit` (D-053);
+  - copies the binary to `~/.devid/bin/devid`, with the shims as hard links to it: `php`, `composer`, `php8.3`, `php8.4`, `php8.5`, `php8.6`, `nginx`, `caddy`, `mailpit` (D-053, D-062);
   - adds a marked PATH line to `~/.zshenv` and `~/.zshrc` (or `~/.bash_profile`) for the login shell read from the user database (D-053). `~/.zshenv` reaches every zsh, including those that editors and scripts start; the line in `~/.zshrc`, read after macOS's `path_helper`, keeps Devid's `php` ahead of Homebrew's. `devid path on|off`, the daemon's `shell_path` and Settings › Terminal in the app add or remove it; `status` reports it as `terminal`;
   - installs the LaunchAgent `dev.devid.daemon` (`RunAtLoad`, restart only on a crash, log in `~/.devid/log/daemon.log`) through `launchctl bootstrap gui/<uid>`;
   - downloads `composer.phar` with its published sha256.

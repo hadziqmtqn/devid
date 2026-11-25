@@ -1,7 +1,7 @@
 //! Shims: hard links to `devid` in `~/.devid/bin`, dispatched by the name they run under.
 //! - `php` and `composer`: the PHP version is the one of the site containing the current folder (if
 //!   isolated), otherwise the default.
-//! - `php8.3`, `php8.4`, `php8.5`: that version, wherever you are (D-053).
+//! - `php8.3`, `php8.4`, `php8.5`, `php8.6`: that version, wherever you are (D-053).
 //! - `nginx`, `caddy`, `mailpit`: Devid's own copies, set up to act on Devid's config (D-053).
 //!
 //! They work without the daemon, reading config.toml directly, so they stay fast and usable when the

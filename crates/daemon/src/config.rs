@@ -10,7 +10,7 @@ pub struct Config {
     pub tld: String,
     /// Active web server: nginx (default, D-015), caddy or apache.
     pub server: String,
-    /// PHP version for sites without their own (D-009: 8.3, 8.4, 8.5).
+    /// PHP version for sites without their own (D-009, D-062: 8.3 to 8.6).
     pub default_php: String,
     // shortcut: high port until the M5 helper redirects 80/443.
     /// Port the web server listens on (127.0.0.1 only).
@@ -122,6 +122,7 @@ impl Default for Config {
         Self {
             tld: "test".into(),
             server: "nginx".into(),
+            // D-062: 8.6 becomes the default once Xdebug 3.6.0 is stable and the catalog builds for it.
             default_php: "8.5".into(),
             http_port: 8088,
             https_port: 8443,

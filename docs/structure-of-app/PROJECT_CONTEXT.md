@@ -23,7 +23,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 ## Scope
 
 **In scope (planned):**
-- PHP 8.3, 8.4 and 8.5 (D-009), multiple versions side by side, with a per-site version.
+- PHP 8.3, 8.4, 8.5 and 8.6 (D-009, D-062), multiple versions side by side, with a per-site version.
 - `.test` DNS, a local CA and HTTPS.
 - One global web server: nginx (default, D-015), Caddy or Apache.
 - A CLI with a TUI mode, and `php`/`composer` shims. There is no GUI in v1 (D-012); the Tauri desktop app came in Phase 7 (D-023) and is opt-in (`devid setup --gui`).

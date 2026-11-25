@@ -7,8 +7,8 @@ use std::{
     process::Command,
 };
 
-/// D-009: the only versions Devid manages.
-pub const SUPPORTED: [&str; 3] = ["8.3", "8.4", "8.5"];
+/// D-009 and D-062: the only versions Devid manages.
+pub const SUPPORTED: [&str; 4] = ["8.3", "8.4", "8.5", "8.6"];
 
 fn err(msg: impl Into<String>) -> io::Error {
     io::Error::other(msg.into())

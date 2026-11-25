@@ -13,7 +13,7 @@ use std::{
 
 /// Names that run through `devid` itself (argv[0] dispatch in the CLI): the PHP of the current
 /// folder and composer, then (D-053) one PHP version each, and Devid's own nginx, Caddy and Mailpit.
-pub const SHIMS: [&str; 8] = ["php", "composer", "php8.3", "php8.4", "php8.5", "nginx", "caddy", "mailpit"];
+pub const SHIMS: [&str; 9] = ["php", "composer", "php8.3", "php8.4", "php8.5", "php8.6", "nginx", "caddy", "mailpit"];
 const RC_MARKER: &str = "# added by devid";
 const COMPOSER_URL: &str = "https://getcomposer.org/download/latest-stable/composer.phar";
 

@@ -84,7 +84,7 @@ enum Command {
         #[command(subcommand)]
         action: DaemonAction,
     },
-    /// Manage PHP versions (8.3, 8.4, 8.5)
+    /// Manage PHP versions (8.3, 8.4, 8.5, 8.6)
     Php {
         #[command(subcommand)]
         action: PhpAction,

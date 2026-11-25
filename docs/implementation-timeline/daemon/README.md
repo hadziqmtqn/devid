@@ -37,3 +37,4 @@
 | 2026-11-21 | [Dev servers on demand on Caddy and Apache (Phase 10 O4, D-054, v0.17.0)](2026-11-21-on-demand-caddy-apache.md) |
 | 2026-11-22 | [Fix: `devid … \| head -1` no longer panics on the broken pipe (v0.17.0)](2026-11-22-cli-broken-pipe.md) |
 | 2026-11-22 | [Vite over HTTPS for Laravel sites (Phase 11 V2, D-056, v0.18.0)](2026-11-22-vite-https.md) |
+| 2026-11-25 | [PHP 8.6 next to 8.3, 8.4 and 8.5 (D-062, v0.20.1)](2026-11-25-php-8.6.md) |
