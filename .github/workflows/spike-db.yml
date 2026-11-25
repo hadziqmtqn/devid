@@ -1,0 +1,84 @@
+name: Spike databases (Phase 14 D1)
+
+# Phase 14 D1 (docs/roadmap/phase-14.md, D-061): runs every database series from devid-binaries'
+# db-latest the way Devid would, on 127.0.0.1 and spare ports, and measures it: setup, readiness,
+# idle memory, stop, a restart after SIGKILL, accounts and password resets, Devid's PHP and a Laravel
+# migration. macOS (Apple silicon and Intel) and Ubuntu run it natively, Arch in its VM (A3's
+# scripts/arch-vm.sh). It runs only on spike/db-* branches and publishes nothing; the scripts are in
+# spike/db/.
+
+on:
+  push:
+    branches: ['spike/db-**']
+    paths-ignore: ['docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: spike-db-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch the builds (sha256-checked)
+        run: python3 spike/db/fetch.py "$RUNNER_TEMP/db"
+      - name: D1 checks
+        run: python3 spike/db/spike.py "$RUNNER_TEMP/db" --laravel | tee "$RUNNER_TEMP/db/summary.md"
+      - name: Results
+        if: always()
+        run: sed -n '/^| Server/,$p' "$RUNNER_TEMP/db/summary.md" >>"$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: d1-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/db/results.jsonl
+            ${{ runner.temp }}/db/summary.md
+            ${{ runner.temp }}/db/fetched.json
+          if-no-files-found: ignore
+
+  arch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Boot Arch, set up like a desktop
+        run: scripts/arch-vm.sh boot
+        timeout-minutes: 15
+      - name: Python in the VM, and the scripts
+        run: |
+          scripts/arch-vm.sh ssh 'for i in 1 2 3; do sudo pacman -Sy --noconfirm --needed python && break; sleep 10; done' | tail -3
+          tar -C spike/db -cf db.tar . && scripts/arch-vm.sh copy db.tar db.tar
+          scripts/arch-vm.sh ssh 'mkdir -p spike && tar -C spike -xf db.tar'
+      - name: Fetch the builds (sha256-checked)
+        run: scripts/arch-vm.sh ssh 'python3 spike/fetch.py db'
+      - name: D1 checks
+        run: scripts/arch-vm.sh ssh 'python3 spike/spike.py db --laravel' | tee summary.md
+      - name: Results
+        if: always()
+        run: |
+          sed -n '/^| Server/,$p' summary.md >>"$GITHUB_STEP_SUMMARY" || true
+          scripts/arch-vm.sh ssh 'cat db/results.jsonl' >results.jsonl || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: d1-arch
+          path: |
+            summary.md
+            results.jsonl
+            vm/serial.log
+          if-no-files-found: ignore
