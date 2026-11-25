@@ -2277,6 +2277,7 @@ fn db_status(state: &State, config: &Config) -> Value {
                 "state": status, "pid": pid, "error": error,
                 "socket": (d.port != 0 && db::socket_fits(&sock)).then(|| sock.display().to_string()),
                 "installed": db::installed_series(&state.paths, engine),
+                "data": series.as_ref().map(|s| db::data(&state.paths, engine, s).display().to_string()),
                 "download": download.as_ref().filter(|(e, _, _)| e == engine.name())
                     .map(|(_, path, size)| json!({"got": arrived(&Some((path.clone(), *size)), true), "size": size})),
             })

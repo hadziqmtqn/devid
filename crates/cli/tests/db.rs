@@ -238,6 +238,7 @@ fn databases_install_start_stop_and_come_back() {
         (Some("running"), Some("8.4"), Some(my as u64))
     );
     assert!(home.join("data/mysql-8.4/mysql").is_dir(), "set up by --initialize-insecure");
+    assert_eq!(d["data"], home.join("data/mysql-8.4").display().to_string(), "the app's Show in Finder");
     let log = calls(&home);
     assert!(log.contains("--initialize-insecure"), "{log}");
     for flag in ["--mysqlx=OFF", "--skip-log-bin", "--performance-schema=OFF", "--bind-address=127.0.0.1"] {

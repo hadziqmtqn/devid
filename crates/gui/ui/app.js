@@ -32,6 +32,7 @@ const ICONS = {
   php: '<svg viewBox="0 0 16 16"><path d="M5 4 1.5 8 5 12M11 4l3.5 4L11 12M9.3 2.8 6.7 13.2"/></svg>',
   server: '<svg viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="4.5" rx="1.3"/><rect x="2" y="9" width="12" height="4.5" rx="1.3"/><circle class="f" cx="4.8" cy="4.75" r=".9"/><circle class="f" cx="4.8" cy="11.25" r=".9"/></svg>',
   mail: '<svg viewBox="0 0 16 16"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.6"/><path d="m2.4 4.3 5.6 4.5 5.6-4.5"/></svg>',
+  databases: '<svg viewBox="0 0 16 16"><ellipse cx="8" cy="3.9" rx="5.2" ry="2"/><path d="M2.8 3.9v8.2c0 1.1 2.3 2 5.2 2s5.2-.9 5.2-2V3.9M2.8 8c0 1.1 2.3 2 5.2 2s5.2-.9 5.2-2"/></svg>',
   logs: '<svg viewBox="0 0 16 16"><rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"/></svg>',
   settings: '<svg viewBox="0 0 16 16"><path d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7"/><circle cx="11" cy="4.5" r="1.6"/><circle cx="5" cy="11.5" r="1.6"/></svg>',
   folder: '<svg viewBox="0 0 16 16"><path d="M1.8 4.2a1.2 1.2 0 0 1 1.2-1.2h3.3l1.5 1.5H13a1.2 1.2 0 0 1 1.2 1.2v6.6A1.2 1.2 0 0 1 13 13.5H3a1.2 1.2 0 0 1-1.2-1.2z"/></svg>',
@@ -76,6 +77,9 @@ const S = {
   // The inbox: the open message (`msg` once it arrived), its tab, and the search. `stay` keeps the
   // message opened in the Unread view listed after it is read; `extra` is the Headers or Raw tab.
   inbox: { cur: null, msg: null, tab: 'preview', q: '', filter: 'all', stay: null, extra: null },
+  // Databases (D-061): the engine on screen, its accounts (asked again only when its server changes
+  // or `stale`), a first start's download, the port being typed, and the series the release offers.
+  db: { eng: null, users: null, usersKey: '', usersErr: null, stale: false, dl: null, port: null, avail: null },
 };
 const $ = (id) => document.getElementById(id);
 
@@ -180,7 +184,7 @@ function menu(anchor, entries, list = false, side = null) {
       e.row ? h('div.dv-menu-row', { role: 'group', 'aria-label': e.label }, e.row.map((x) =>
         h('button.dv-btn' + (x.checked ? '.primary' : ''), { ...pick(x), role: 'menuitemradio', 'aria-checked': String(x.checked) }, x.label))) :
       h('button.dv-mi' + (e.danger ? '.danger' : ''), { ...pick(e), role: 'checked' in e ? 'menuitemradio' : 'menuitem',
-        'aria-checked': 'checked' in e ? String(e.checked) : null },
+        'aria-checked': 'checked' in e ? String(e.checked) : null, title: e.title || null },
       'checked' in e ? h('span.dv-mark', { 'aria-hidden': 'true' }, e.checked ? '✓' : '') : null,
       h('span.dv-ellipsis', {}, e.label), e.kbd ? h('span.dv-kbd', {}, e.kbd) : null)));
   document.body.append(m);
@@ -296,6 +300,7 @@ const PAGES = {
   server: { title: 'Web Server', sub: () => 'Status, engine choice and configuration.', load: () => daemon({ cmd: 'server_list' }), render: serverPage },
   mail: { title: 'Mail', heading: () => (S.mailSettings && S.status?.mail?.state === 'running' ? 'Mail settings' : 'Mail'), sub: mailSub,
     load: loadMail, render: mailRender, patch: mailPatch, tools: mailTools },
+  databases: { title: 'Databases', sub: () => 'MySQL, PostgreSQL and MongoDB, run by Devid on this Mac.', load: loadDatabases, render: dbRender },
   logs: { title: 'Logs', sub: () => 'Log files in ' + (S.status?.home || '~/.devid') + '/log.', load: loadLogs, render: logsPage },
   settings: { title: 'Settings', sub: () => 'Preferences for Devid on this Mac.', load: async () => ({}), render: settingsPage },
 };
@@ -489,6 +494,7 @@ async function quickMenu(anchor) {
     ...sites.map((s) => ({ label: siteHost(s), kbd: s.mode === 'php' ? 'PHP ' + s.php : s.mode === 'proxy' ? ':' + s.upstream : 'Static',
       run: () => openTarget({ what: 'site', name: s.name }) })),
     ...mailMenu(st.mail),
+    ...dbMenu(st.databases),
     '-',
     ...(running ? [{ label: 'Stop all', run: stopAll }, { label: 'Restart ' + st.server, run: () => restart(st.server) }] : [{ label: 'Start all', run: startAll }]),
     '-',
@@ -916,6 +922,364 @@ function mailOff(m) {
         h('div.dv-sub.ml-fine', {}, m.installed
           ? 'Mailpit ' + (m.version || '') + ' is installed. The mail it caught is still in ' + S.status.home + '/mail.'
           : 'Downloads Mailpit (about 11 MB, MIT license) from Devid\'s releases.')]);
+}
+
+// ---------- Databases (Phase 14, D-061): MySQL, PostgreSQL and MongoDB, with accounts ----------
+// As on the canvas page "Fase 14: databases": one tab per engine, its server, its accounts, the port
+// and the series, and where its data is. Explanations sit behind (i) (D-055).
+
+const DB_ENGINES = {
+  mysql: { label: 'MySQL', usual: 3306, main: 'root', clients: 'mysql · mysqldump', tile: '#2F7FB5' },
+  postgresql: { label: 'PostgreSQL', usual: 5432, main: 'postgres', clients: 'psql · pg_dump · pg_restore', tile: '#4A67B0' },
+  mongodb: { label: 'MongoDB', usual: 27017, main: 'root', clients: 'mongosh', tile: '#2F9E5B' },
+};
+const DB_STATES = { running: ['Running', 'ok'], starting: ['Starting', 'muted'], off: ['Off', 'muted'], paused: ['Stopped', 'warn'],
+  stopped: ['Stopped', 'warn'], failed: ['Failed', 'bad'], 'not installed': ['Not installed', 'bad'] };
+/** What the accounts' place says while the server does not run. */
+const DB_IDLE = { off: 'is off', paused: 'is stopped', stopped: 'is stopped', starting: 'is starting', failed: 'did not start',
+  'not installed': 'is not installed' };
+/** Account and database names Devid makes (db::check_name). */
+const DB_NAME = /^[a-z_][a-z0-9_]{0,31}$/;
+/** A password of the user's own (db::check_password). */
+const DB_PASSWORD = /^[A-Za-z0-9._~!@#%^*+=-]{8,64}$/;
+const dbLabel = (eng) => DB_ENGINES[eng]?.label || eng;
+const dbRunning = (st) => (st?.databases || []).filter((d) => d.state === 'running').length;
+const copyDb = (engine, name, password) => invoke('copy_db', { engine, name, password }).then((m) => toast(m), (e) => toast(String(e), true));
+const seriesOrder = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); return (x[0] - y[0]) || ((x[1] || 0) - (y[1] || 0)); };
+
+/** The engine on screen: the one picked, else the first that runs, else MySQL. */
+function dbEngine(list) {
+  if (S.db.eng && list.some((d) => d.engine === S.db.eng)) return S.db.eng;
+  return (list.find((d) => d.state === 'running') || list[0] || { engine: 'mysql' }).engine;
+}
+
+/** The state comes with `status`; the accounts only when the server on screen changed (each list runs its client). */
+async function loadDatabases() {
+  const list = S.status.databases || [];
+  const eng = dbEngine(list);
+  const d = list.find((x) => x.engine === eng);
+  if (!S.db.avail) loadDbAvailable();
+  const key = [eng, d?.series, d?.state, d?.port].join(':');
+  if (d?.state === 'running' && (S.db.usersKey !== key || S.db.stale)) {
+    S.db.stale = false;
+    try {
+      S.db.users = await daemon({ cmd: 'db_user_list', engine: eng });
+      S.db.usersErr = null;
+    } catch (e) {
+      S.db.users = null;
+      S.db.usersErr = String(e);
+    }
+    S.db.usersKey = key;
+  }
+  const own = S.db.usersKey === key;
+  return { list, eng, users: own ? S.db.users : null, usersErr: own ? S.db.usersErr : null, avail: S.db.avail };
+}
+
+/** The series Devid's database release offers here, asked once: it reads the release. Offline, the installed ones. */
+let dbAvailAsked = false;
+function loadDbAvailable() {
+  if (dbAvailAsked) return;
+  dbAvailAsked = true;
+  daemon({ cmd: 'db_list', available: true }).then((r) => { S.db.avail = r.available || {}; refresh(true); }, () => { S.db.avail = {}; });
+}
+
+function pickDb(eng) {
+  if (S.db.eng === eng) return Promise.resolve();
+  S.db.eng = eng;
+  S.db.port = null;
+  return refresh(true);
+}
+
+/** The tabs' arrow keys (the ARIA tabs pattern). */
+function dbTabKey(e) {
+  const order = (S.status?.databases || []).map((x) => x.engine);
+  const i = order.indexOf(dbEngine(S.status?.databases || []));
+  const next = e.key === 'ArrowRight' ? order[(i + 1) % order.length] : e.key === 'ArrowLeft' ? order[(i - 1 + order.length) % order.length]
+    : e.key === 'Home' ? order[0] : e.key === 'End' ? order[order.length - 1] : null;
+  if (!next) return;
+  e.preventDefault();
+  pickDb(next).then(() => $('db-tab-' + next)?.focus());
+}
+
+function dbRender(data) {
+  if (!S.status.databases) return h('div.dv-empty.dv-sub', {}, 'This daemon has no databases yet; update Devid.');
+  const { list, eng } = data;
+  const d = list.find((x) => x.engine === eng) || { engine: eng, installed: [], state: 'off', enabled: false };
+  const tabs = h('div.db-tabs', { role: 'tablist', 'aria-label': 'Database' }, list.map((x) =>
+    h('button', { type: 'button', role: 'tab', id: 'db-tab-' + x.engine, 'aria-selected': String(x.engine === eng), 'aria-controls': 'db-panel',
+      tabindex: x.engine === eng ? '0' : '-1', onclick: () => pickDb(x.engine), onkeydown: dbTabKey },
+    h('span.db-dot' + (x.state === 'running' ? '.on' : ''), { 'aria-hidden': 'true' }), dbLabel(x.engine),
+    x.state === 'running' ? h('span.dv-sub.dv-mono', {}, ':' + x.port) : null)));
+  // The download's progress comes from startDb's own polling, so it is read here, not from the page's data.
+  const dl = S.db.dl?.engine === eng ? S.db.dl : null;
+  const first = !d.installed?.length && !d.enabled;
+  const body = first ? dbHero(d, dl) : dl ? dbDownloading(d, dl) : dbServer(d, data);
+  return [tabs, h('div', { id: 'db-panel', role: 'tabpanel', 'aria-labelledby': 'db-tab-' + eng }, body)];
+}
+
+/** Another series on its way: its download's progress in the server's card. */
+function dbDownloading(d, dl) {
+  const e = DB_ENGINES[d.engine];
+  const pct = dl.size ? Math.min(100, Math.round(100 * dl.got / dl.size)) : 0;
+  return h('div.dv-card.db-status', {}, row(h('span.db-tile', { style: 'background: ' + e.tile, 'aria-hidden': 'true' }, icon('databases')),
+    h('div.dv-grow', {}, h('div.dv-strong', {}, (dl.size && dl.got >= dl.size ? 'Setting up ' : 'Downloading ') + e.label + (dl.series ? ' ' + dl.series : '')),
+      h('progress.up-bar', { max: '100', value: pct, 'aria-label': 'Downloading ' + e.label }),
+      h('div.up-meta', {}, h('span', {}, dl.size ? humanSize(dl.got) + ' of ' + humanSize(dl.size) : 'Starting…'), h('span', {}, dl.size ? pct + '%' : '')))));
+}
+
+/** Not installed yet: what Devid does, and Start; meanwhile the download's progress. */
+function dbHero(d, dl) {
+  const e = DB_ENGINES[d.engine];
+  const pct = dl?.size ? Math.min(100, Math.round(100 * dl.got / dl.size)) : 0;
+  return h('div.ml-hero', {},
+    h('span.db-tile.lg', { style: 'background: ' + e.tile, 'aria-hidden': 'true' }, icon('databases')),
+    h('h2', {}, 'Run ' + e.label + ' on this Mac'),
+    h('p.dv-sub', {}, 'Devid sets it up once and runs it whenever Devid runs, on a port of its own.'),
+    h('ul.ml-points', {}, ['On 127.0.0.1, at port ' + e.usual + ' or the next free one', 'An account and its password for each app, in one click',
+      'Your data stays when you stop or uninstall Devid'].map((t) => h('li', {}, icon('check'), t))),
+    dl
+      ? h('div.ml-dl', {}, h('div.dv-strong', {}, dl.size && dl.got >= dl.size ? 'Setting up ' + e.label + '…' : 'Downloading ' + e.label),
+        h('progress.up-bar', { max: '100', value: pct, 'aria-label': 'Downloading ' + e.label }),
+        h('div.up-meta', {}, h('span', {}, dl.size ? humanSize(dl.got) + ' of ' + humanSize(dl.size) : 'Starting…'), h('span', {}, dl.size ? pct + '%' : '')))
+      : [h('div.ml-cta', {}, busyBtn('db-start', 'Start ' + e.label, () => startDb(d.engine), 'primary')),
+        h('div.dv-sub.ml-fine', {}, 'Downloads ' + e.label + (d.engine === 'mongodb' ? ' and mongosh' : '') + ' from Devid\'s releases, sha256-checked.')]);
+}
+
+/** A title with its explanation in a tooltip, over a second line. */
+const titledSub = (title, about, sub) => h('div.dv-grow', {}, h('div', {}, title, tip(about)), sub);
+
+function dbServer(d, data) {
+  const e = DB_ENGINES[d.engine];
+  const [label, tone] = DB_STATES[d.state] || [capital(d.state), 'muted'];
+  const where = d.state === 'running' ? '127.0.0.1:' + d.port : d.port ? 'port ' + d.port : '';
+  const stopped = d.state === 'paused' || d.state === 'stopped';
+  return [
+    h('div.dv-card.db-status', {},
+      row(h('span.db-tile', { style: 'background: ' + e.tile, 'aria-hidden': 'true' }, icon('databases')),
+        h('label.dv-grow', { for: 'sw-db' }, h('div.ml-title', {}, h('span.dv-strong', {}, e.label + ' ' + (d.series || '')), h('span.dv-chip.' + tone, {}, label)),
+          h('div.dv-sub.dv-mono', {}, [d.version, where].filter(Boolean).join(' · '))),
+        stopped ? busyBtn('db-svc', 'Start', () => act('Starting ' + e.label + '…', () => daemon({ cmd: 'service_start', service: d.engine }), 'Started ' + e.label, 'db-svc')) : null,
+        h('input.dv-switch', { type: 'checkbox', role: 'switch', id: 'sw-db', checked: !!d.enabled, disabled: !!S.busy, 'aria-label': e.label + ' on',
+          onchange: (ev) => (ev.target.checked ? startDb(d.engine, d.series) : stopDb(d.engine)) }),
+        moreBtn(e.label + ' actions', () => [
+          { label: 'Restart ' + e.label, disabled: d.state !== 'running',
+            run: () => act('Restarting ' + e.label + '…', () => daemon({ cmd: 'restart', service: d.engine }), 'Restarted ' + e.label) },
+          { label: 'Copy .env for ' + e.main, disabled: !d.enabled, run: () => copyDb(d.engine, null, false) },
+          '-',
+          { label: 'Show log', run: () => { pickLog(d.engine + '.log'); go('logs'); } },
+        ])),
+      d.error ? row(h('div.dv-grow.dv-error', { role: 'alert' }, d.error)) : null),
+    d.state === 'running' ? dbAccounts(d, data)
+      : h('div.db-off.dv-sub', {}, e.label + ' ' + (DB_IDLE[d.state] || 'is off') + '. Its data and accounts stay in ',
+        h('span.dv-mono', {}, d.data || S.status.home + '/data'), '.'),
+    h('h2.dv-h2', {}, 'Settings'),
+    card(dbPortRow(d), dbSeriesRow(d, data.avail)),
+    h('h2.dv-h2', {}, 'Storage'),
+    card(
+      d.data ? row(titledSub('Data', 'Stopping, updating or uninstalling Devid keeps it. Only devid db remove --delete-data, or devid uninstall --purge --delete-databases, deletes it.',
+        h('div.dv-sub.dv-mono.dv-ellipsis', {}, d.data)), btn('Show in Finder', () => openTarget({ what: 'finder', path: d.data }))) : null,
+      row(titledSub('Terminal', 'These commands come first on PATH and reach this server as ' + e.main + ', unless you name another host or port.',
+        h('div.dv-sub.dv-mono', {}, e.clients)))),
+  ];
+}
+
+function dbAccounts(d, data) {
+  const e = DB_ENGINES[d.engine];
+  const head = h('div.db-h2row', {},
+    h('h2.dv-h2', {}, 'Accounts', tip(d.engine === 'mongodb'
+      ? 'Each account lives in a database of its own and reads and writes it. Devid makes the password and keeps it, so Copy .env works any time.'
+      : 'Each account gets a database named after it, with every right on it, and a password Devid makes. Devid keeps the passwords, so Copy .env works any time.')),
+    btn([icon('plus'), 'Add account'], () => addDbAccount(d.engine)));
+  if (data.usersErr) return [head, card(row(h('div.dv-grow.dv-error', { role: 'alert' }, data.usersErr)))];
+  if (!data.users) return [head, card(row(h('div.dv-grow.dv-sub', {}, 'Asking ' + e.label + '…')))];
+  const users = data.users.users.slice().sort((a, b) => (a.main ? -1 : b.main ? 1 : a.name.localeCompare(b.name)));
+  return [head, card(...users.map((u) => dbAccountRow(d, u)))];
+}
+
+function dbAccountRow(d, u) {
+  const unknown = u.password === 'unknown';
+  const pgMain = u.main && d.engine === 'postgresql';
+  const sub = u.main
+    ? (u.password === 'none' ? 'Main account · no password from this Mac' : 'Main account' + (u.database ? ' · in ' + u.database : ''))
+    : (u.database ? 'Database ' + u.database : 'No database of its own') + (unknown ? ' · password not known to Devid' : '');
+  return h('div.dv-row', {},
+    h('div.dv-grow', {}, h('div.db-name.dv-mono', {}, u.name), h('div.dv-sub', {}, sub)),
+    btn('Copy .env', () => copyDb(d.engine, u.name, false), '', { disabled: !!S.busy || unknown, 'aria-label': 'Copy .env for ' + u.name,
+      title: unknown ? 'Devid doesn\'t know this password; New password… sets one' : null }),
+    moreBtn(u.name + ' actions', () => [
+      { label: 'Copy password', disabled: u.password !== 'kept', title: u.password === 'none' ? 'No password from this Mac' : null,
+        run: () => copyDb(d.engine, u.name, true) },
+      { label: 'New password…', disabled: pgMain, title: pgMain ? 'postgres is trusted from this Mac, so a password would never be checked' : null,
+        run: () => newDbPassword(d.engine, u.name) },
+      '-',
+      { label: 'Remove…', danger: true, disabled: !!u.main, title: u.main ? 'The main account stays' : null, run: () => removeDbAccount(d.engine, u) },
+    ]));
+}
+
+function dbPortRow(d) {
+  const e = DB_ENGINES[d.engine];
+  const about = !d.port ? 'Picked at the first start: ' + e.usual + ', or the next free port. It stays the same, so .env files keep working.'
+    : d.port !== e.usual ? 'The usual port ' + e.usual + ' was taken, so Devid took the next free one. It stays the same, so .env files keep working.'
+    : 'The usual port for ' + e.label + '. It stays the same, so .env files keep working.';
+  return row(titled('Port', about, 'db-port'),
+    h('input.dv-input.port.dv-mono', { id: 'db-port', type: 'text', inputmode: 'numeric', maxlength: '5', spellcheck: 'false', placeholder: String(e.usual),
+      value: S.db.port ?? (d.port ? String(d.port) : ''), disabled: !!S.busy || !d.port,
+      oninput: (ev) => { S.db.port = ev.target.value; }, onchange: (ev) => applyDbPort(d, ev.target.value.trim()) }));
+}
+
+function applyDbPort(d, value) {
+  const e = DB_ENGINES[d.engine];
+  const port = Number(value);
+  S.db.port = null;
+  if (port === d.port) return;
+  if (!/^\d{1,5}$/.test(value) || port < 1024 || port > 65535) {
+    toast('Use a port from 1024 to 65535', true);
+    renderPage();
+    return;
+  }
+  act('Moving ' + e.label + '…', () => daemon({ cmd: 'db_port', engine: d.engine, port }),
+    (r) => (r.enabled ? e.label + ' runs on 127.0.0.1:' + port + ' now' : e.label + ' will use port ' + port) + '; update DB_PORT in your apps\' .env');
+}
+
+function dbSeriesRow(d, avail) {
+  const e = DB_ENGINES[d.engine];
+  const all = [...new Set([...(avail?.[d.engine] || []), ...(d.installed || []), d.series].filter(Boolean))].sort(seriesOrder);
+  return row(titled('Series', 'Each series keeps its own data and accounts. Moving data to another series is a dump and restore.'),
+    h('div.dv-seg', { role: 'group', 'aria-label': e.label + ' series' }, all.map((x) =>
+      h('button', { type: 'button', 'aria-pressed': String(x === d.series), disabled: !!S.busy,
+        onclick: () => { if (x !== d.series) switchDbSeries(d, x); } }, x))));
+}
+
+async function switchDbSeries(d, to) {
+  const e = DB_ENGINES[d.engine];
+  const fetch = (d.installed || []).includes(to) ? '' : ', downloaded first';
+  const old = d.series ? ' ' + d.series + '\'s data stays in ' + (d.data || S.status.home + '/data') + '.' : '';
+  if (await ask('Run ' + e.label + ' ' + to + ' instead?', e.label + ' ' + to + ' starts with data of its own' + fetch + '.' + old, 'Use ' + to))
+    startDb(d.engine, to);
+}
+
+/** Starts a database (`db start`); a first start downloads it, and `status` says how far meanwhile. */
+async function startDb(engine, series) {
+  if (S.busy) return;
+  const d = (S.status?.databases || []).find((x) => x.engine === engine);
+  const e = DB_ENGINES[engine];
+  const want = series || d?.series;
+  const downloads = !want || !(d?.installed || []).includes(want);
+  if (downloads) S.db.dl = { engine, series: series || null, got: 0, size: 0 };
+  const timer = downloads && setInterval(async () => {
+    try {
+      const x = (await daemon({ cmd: 'status' })).databases?.find((y) => y.engine === engine);
+      if (x?.download) { S.db.dl = { engine, series: series || null, ...x.download }; renderPage(); }
+    } catch { /* the next tick asks again */ }
+  }, 500);
+  try {
+    await act((downloads ? 'Downloading ' : 'Starting ') + e.label + '…', () => daemon({ cmd: 'db_start', engine, series: series || null }),
+      (r) => e.label + ' ' + (r.version || '') + ' runs on 127.0.0.1:' + r.port, 'db-start');
+  } finally {
+    clearInterval(timer);
+    S.db.dl = null;
+    S.db.stale = true;
+    renderPage();
+  }
+}
+
+const stopDb = (engine) => act('Stopping ' + dbLabel(engine) + '…', () => daemon({ cmd: 'db_stop', engine }),
+  dbLabel(engine) + ' is off; its data and accounts stay');
+
+/** New account: a name, a database of its own by default, and a generated password (or one typed). */
+function addDbAccount(engine) {
+  const e = DB_ENGINES[engine];
+  const mongo = engine === 'mongodb';
+  const f = { name: '', db: '', dbAuto: true, own: true, pwMode: 'gen', pw: '', error: '' };
+  const issue = () => {
+    if (!DB_NAME.test(f.name)) return f.name ? 'Name: lowercase letters, digits and _, starting with a letter or _.' : 'Type a name.';
+    if ((mongo || f.own) && !DB_NAME.test(f.db)) return 'Database: lowercase letters, digits and _, starting with a letter or _.';
+    if (f.pwMode === 'own' && !DB_PASSWORD.test(f.pw)) return 'Password: 8 to 64 letters, digits and - _ . ~ ! @ # % ^ * + =';
+    return '';
+  };
+  const save = async () => {
+    f.error = issue();
+    if (f.error) { draw(); return; }
+    try {
+      const own = mongo || f.own;
+      const r = await daemon({ cmd: 'db_user_add', engine, name: f.name, database: own ? f.db : null,
+        password: f.pwMode === 'own' ? f.pw : null, no_database: !own });
+      S.db.stale = true;
+      showDbSecret(r, true);
+      refresh(true);
+    } catch (err) { f.error = String(err); draw(); }
+  };
+  const draw = () => showDialog(h('div.dv-dialog', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dba-t' },
+    h('h2', { id: 'dba-t' }, 'New ' + e.label + ' account'),
+    h('div.dv-form', {},
+      h('label.dv-field', {}, 'Name', h('input.dv-input.dv-mono', { value: f.name, placeholder: 'shop', 'aria-label': 'Name', 'data-focus': true,
+        spellcheck: 'false', autocomplete: 'off', oninput: (ev) => {
+          f.name = ev.target.value.trim();
+          if (f.dbAuto) { f.db = f.name; const x = $('dba-db'); if (x) x.value = f.db; }
+        }, onkeydown: (ev) => { if (ev.key === 'Enter') save(); } })),
+      mongo || f.own ? h('label.dv-field', {}, 'Database', h('input.dv-input.dv-mono', { id: 'dba-db', value: f.db, placeholder: 'shop', 'aria-label': 'Database',
+        spellcheck: 'false', autocomplete: 'off', oninput: (ev) => { f.db = ev.target.value.trim(); f.dbAuto = false; },
+        onkeydown: (ev) => { if (ev.key === 'Enter') save(); } })) : h('div')),
+    mongo ? h('p.dv-sub', {}, 'The account lives in this database and reads and writes it.')
+      : h('label.db-checkrow', {}, h('input.dv-check', { type: 'checkbox', checked: f.own, 'aria-label': 'A database of its own',
+        onchange: (ev) => { f.own = ev.target.checked; draw(); } }), 'A database of its own, with every right on it'),
+    h('div.db-pwrow', {}, h('span.dv-sub', { id: 'dba-pw-l' }, 'Password'),
+      h('div.dv-seg', { role: 'group', 'aria-labelledby': 'dba-pw-l' }, [['gen', 'Generate'], ['own', 'Choose']].map(([k, label]) =>
+        h('button', { type: 'button', 'aria-pressed': String(f.pwMode === k), onclick: () => { f.pwMode = k; draw(); } }, label)))),
+    f.pwMode === 'own'
+      ? h('input.dv-input.dv-mono.db-pw', { value: f.pw, 'aria-label': 'Password', spellcheck: 'false', autocomplete: 'off', 'data-focus': true,
+        oninput: (ev) => { f.pw = ev.target.value; }, onkeydown: (ev) => { if (ev.key === 'Enter') save(); } })
+      : h('p.dv-sub', {}, '24 letters and digits. Devid keeps it, so Copy .env works any time.'),
+    f.error ? h('p.dv-error', { role: 'alert' }, f.error) : null,
+    h('div.dv-dialog-btns', {}, h('button.dv-btn', { type: 'button', onclick: closeDialog }, 'Cancel'),
+      h('button.dv-btn.primary', { type: 'button', onclick: save }, 'Add account'))), closeDialog);
+  draw();
+}
+
+/** The password Devid just set, with the account's .env lines (`db user add` or `db user password`). */
+function showDbSecret(r, added) {
+  const title = added ? 'Account ' + r.name + ' is ready' : 'New password for ' + r.name;
+  const sub = added
+    ? (r.database ? 'With the database ' + r.database + '. ' : 'Without a database of its own. ') + 'Devid keeps the password; Copy .env on the account gives it again.'
+    : 'Apps that use ' + r.name + ' need these lines in their .env.';
+  showDialog(h('div.dv-dialog', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dbs-t', 'aria-describedby': 'dbs-m' },
+    h('h2', { id: 'dbs-t' }, title),
+    h('p.dv-sub', { id: 'dbs-m' }, sub),
+    h('div.db-secret', {}, h('code', { 'aria-label': 'Password' }, r.password),
+      btn('Copy password', () => copyDb(r.engine, r.name, true))),
+    h('div.ml-env', {}, h('pre.dv-pre.ml-code', { 'aria-label': '.env lines for ' + r.name }, (r.env || []).join('\n')),
+      btn('Copy .env', () => copyDb(r.engine, r.name, false), 'ml-copy')),
+    h('div.dv-dialog-btns', {}, h('button.dv-btn.primary', { type: 'button', onclick: closeDialog, 'data-focus': true }, 'Done'))), closeDialog);
+}
+
+async function newDbPassword(engine, name) {
+  if (!await ask('Give ' + name + ' a new password?', 'Apps that use the old one can\'t connect until their .env has the new one.', 'New password')) return;
+  try {
+    const r = await daemon({ cmd: 'db_user_password', engine, name });
+    S.db.stale = true;
+    showDbSecret(r, false);
+    refresh(true);
+  } catch (e) { toast(String(e), true); }
+}
+
+async function removeDbAccount(engine, u) {
+  const stays = u.database ? 'Its database ' + u.database + ' and the data in it stay.' : 'Its data stays.';
+  if (!await ask('Remove the account ' + u.name + '?', stays, 'Remove', true)) return;
+  S.db.stale = true;
+  act('Removing ' + u.name + '…', () => daemon({ cmd: 'db_user_remove', engine, name: u.name }), 'Removed ' + u.name + '; ' + stays.charAt(0).toLowerCase() + stays.slice(1));
+}
+
+/** The window's quick menu: the databases that are on, as the menu-bar icon lists them. */
+function dbMenu(list) {
+  const on = (list || []).filter((d) => d.enabled);
+  if (!on.length) return [];
+  return ['-', { header: 'Databases' }, ...on.map((d) => ({ label: dbLabel(d.engine), kbd: d.state === 'running' ? ':' + d.port : 'Stopped',
+    run: () => {
+      if (S.page === 'databases') return pickDb(d.engine);
+      S.db.eng = d.engine;
+      S.db.port = null;
+      go('databases');
+    } }))];
 }
 
 // ---------- site detail (Phase 8 A5: app type D-035, local port D-037, commands D-036) ----------
@@ -1992,14 +2356,16 @@ function renderChrome() {
   const upd = [S.upd.dv, S.upd.rt].find((u) => u?.state === 'running');
   const pct = upd && (upd === S.upd.dv ? devidPercent(upd) : upd.percent || 0);
   const key = JSON.stringify([S.page, S.site, heading, PAGES[S.page].sub(), !!S.busy, cardBusy, autoUpdates(st)?.count, pct,
-    st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status), st.mail?.state, st.mail?.unread]]);
+    st && [st.sites, st.default_php, st.server, st.server_status, st.php.map((p) => p.status), st.mail?.state, st.mail?.unread,
+      st.databases?.map((d) => d.state)]]);
   if (key === chromeKey) return;
   chromeKey = key;
   $('nav').replaceChildren(...Object.entries(PAGES).map(([key, p]) =>
-    h('button.dv-nav' + (key === S.page ? '.is-active' : '') + (key === 'mail' ? '.is-mail' : ''), { type: 'button', 'aria-current': key === S.page ? 'page' : null,
+    h('button.dv-nav' + (key === S.page ? '.is-active' : '') + (key === 'mail' ? '.is-mail' : key === 'databases' ? '.is-db' : ''), { type: 'button', 'aria-current': key === S.page ? 'page' : null,
       onclick: () => go(key) }, icon(key), h('span.dv-grow', {}, p.title),
     key === 'sites' && st ? h('span.dv-chip', {}, String(st.sites)) : key === 'php' && st ? h('span.dv-chip', {}, st.default_php) :
       key === 'mail' && st?.mail?.unread ? h('span.dv-chip', { 'aria-label': plural(st.mail.unread, 'unread message') }, String(st.mail.unread)) :
+      key === 'databases' && dbRunning(st) ? h('span.dv-chip', { 'aria-label': plural(dbRunning(st), 'database') + ' running' }, String(dbRunning(st))) :
       key === 'settings' && upd ? h('span.dv-navpct', { 'aria-label': 'Updating, ' + pct + '%' }, pct + '%') :
       key === 'settings' && autoUpdates(st)?.count ? h('span.dv-navdot', { title: 'Updates available', 'aria-label': 'Updates available' }) : null)));
   $('title').textContent = heading;

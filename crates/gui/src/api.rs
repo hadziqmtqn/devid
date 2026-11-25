@@ -65,6 +65,9 @@ fn is_read(req: &Request) -> bool {
             | Request::MailList { .. }
             | Request::MailHeaders { .. }
             | Request::MailRaw { .. }
+            | Request::DbList { .. }
+            | Request::DbUserList { .. }
+            | Request::DbEnv { .. }
     )
 }
 
@@ -203,6 +206,21 @@ pub async fn copy_log_path(name: String) -> Result<String, String> {
         .find(|p| p.ends_with(&format!("/{name}")))
         .ok_or(format!("no log named {name}"))?;
     pbcopy(&path).map(|_| format!("Copied {path}"))
+}
+
+/// Copies an account's `.env` lines, or with `password` its password alone, as `devid db env`
+/// gives them (D-061): the main account's when `name` is None.
+#[tauri::command]
+pub async fn copy_db(engine: String, name: Option<String>, password: bool) -> Result<String, String> {
+    let v = request(&Paths::from_env(), &Request::DbEnv { engine, name })?;
+    let who = v["name"].as_str().unwrap_or("?").to_string();
+    if password {
+        let pw =
+            v["password"].as_str().filter(|p| !p.is_empty()).ok_or(format!("{who} has no password from this Mac"))?;
+        return pbcopy(pw).map(|_| format!("Copied {who}'s password"));
+    }
+    let lines: Vec<&str> = items(&v["env"]).filter_map(Value::as_str).collect();
+    pbcopy(&format!("{}\n", lines.join("\n"))).map(|_| format!("Copied {who}'s .env lines"))
 }
 
 fn pbcopy(text: &str) -> Result<(), String> {
@@ -393,7 +411,7 @@ fn log_paths(paths: &Paths) -> Result<Vec<String>, String> {
 }
 
 /// Only paths the daemon knows: sites, parked folders and removed sites' folders, plus (for Finder) the data folder, the
-/// server configs and the logs.
+/// server configs, the logs and the databases' data folders.
 fn known(paths: &Paths, path: &str, finder: bool) -> Result<(), String> {
     let sites = request(paths, &Request::Sites)?;
     let mut ok: Vec<&str> = items(&sites["sites"]).filter_map(|s| s["path"].as_str()).collect();
@@ -403,11 +421,13 @@ fn known(paths: &Paths, path: &str, finder: bool) -> Result<(), String> {
     let mail = format!("{home}/mail");
     let servers = if finder { request(paths, &Request::ServerList)? } else { Value::Null };
     let logs = if finder { log_paths(paths)? } else { Vec::new() };
+    let status = if finder { request(paths, &Request::Status)? } else { Value::Null };
     if finder {
         ok.push(&home);
         ok.push(&mail);
         ok.extend(items(&servers["servers"]).filter_map(|s| s["config"].as_str()));
         ok.extend(logs.iter().map(String::as_str));
+        ok.extend(items(&status["databases"]).filter_map(|d| d["data"].as_str()));
     }
     if ok.contains(&path) { Ok(()) } else { Err(format!("{path} is not a Devid site, folder or file")) }
 }

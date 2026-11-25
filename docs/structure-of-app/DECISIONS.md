@@ -1231,6 +1231,15 @@ See ARCHITECTURE, "PHP runtime".
     - MySQL 8.4 ran on 3307 and PostgreSQL 18 on 5433, next to DBngin's servers, which Devid never touched.
     - On each engine, the CLI and the TUI made two accounts each and gave one a new password.
     - A Laravel app migrated with each account.
+- **D4 (2026-11-25):** the app's Databases page, from the board the owner approved ("Setuju, lanjutkan D4"). The decision holds, with these details:
+  - **The page:**
+    - tabs per engine;
+    - the server's card with a switch;
+    - the accounts with Copy `.env` and ⋯;
+    - the port and the series in Settings, and the data folder in Storage;
+    - explanations behind (i) (D-055).
+  - **Secrets stay out of the page:** passwords and `.env` lines reach the clipboard through the app's `copy_db`, which asks the daemon. The page holds a password only while it shows a new one.
+  - **Accounts are listed when the server on screen changes or after an action,** not on every refresh, since each list runs the engine's client.
 
 ## D-062: PHP 8.6 joins 8.3, 8.4 and 8.5 (accepted 2026-11-25, amends D-009)
 
