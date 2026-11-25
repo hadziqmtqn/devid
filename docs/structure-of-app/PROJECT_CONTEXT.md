@@ -33,9 +33,11 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 - Phase 11 (accepted 2026-11-22, done in 0.18.0): Laravel + Vite over HTTPS, so a Laravel site's Vite dev server works in Safari too (D-056).
 - Phase 12 (accepted 2026-11-23, done in 0.19.0): Linux, Ubuntu 24.04 and 26.04 on x86_64, with the CLI and the TUI (D-057).
 - Phase 13 (accepted 2026-11-24, done in 0.20.0): Arch-based Linux, Arch Linux and the distributions built on it, such as CachyOS, on x86_64 (D-059).
+- Phase 14 (accepted 2026-11-25, done in 0.21.0): databases. Devid runs MySQL, PostgreSQL and MongoDB, with accounts and passwords in one step, in the CLI, the TUI and the app (D-061). D2 and D3 shipped in 0.20.1, off by default.
+- Phase 15 (accepted 2026-11-25, after Phase 14): `devid new` creates projects with each framework's own tool (D-063).
 
 **Non-goals:**
-- Running databases from Devid. The owner uses DBngin for PostgreSQL and MySQL. Since D-058, `devid-binaries` builds MySQL, PostgreSQL and MongoDB for every Devid platform, but no Devid release installs or runs them yet.
+- Databases beyond MySQL, PostgreSQL and MongoDB (Redis or Valkey, MariaDB, Elasticsearch), databases started on demand, and upgrades or imports across series other than dump and restore (D-061). The owner still uses DBngin, next to Devid's servers.
 - Per-site web server choice.
 - Arbitrary extra PHP extensions in v1 (see D-008).
 - In v1: mail catcher, dump viewer, log viewer, share/tunnel (deferred, D-011). Share/tunnel is scheduled for Phase 8 (D-037), the mail catcher for Phase 9 (D-049).
@@ -57,6 +59,8 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 | 11 | Laravel + Vite over HTTPS: a Laravel site's commands get the site's certificate for Vite when `APP_URL` names the site (D-056); plan in `docs/roadmap/phase-11.md` | done 2026-11-23: V2 in 0.18.0 (released 2026-11-22), the guide page `/docs/laravel-vite`, installed on the owner's M1 |
 | 12 | Linux: Ubuntu 24.04 and 26.04 on x86_64, the CLI and the TUI (D-057); plan in `docs/roadmap/phase-12.md` | done 2026-11-24: L1 to L4 on 2026-11-23, and 0.19.0 released on 2026-11-24 after rc.1 and rc.2 on the owner's Ubuntu 24.04 machine (install, browsers, reboot, uninstall, self-update) |
 | 13 | Arch-based Linux: Arch Linux and the distributions built on it, x86_64, the CLI and the TUI (D-059); plan in `docs/roadmap/phase-13.md` | done 2026-11-25: A1 to A3 on 2026-11-24, and 0.20.0 released on 2026-11-24 after rc.1 on the owner's Arch Linux, Ubuntu 24.04 and CachyOS machines (install, browsers, reboot, fish, self-update, uninstall) |
+| 14 | Databases: Devid runs MySQL, PostgreSQL and MongoDB, with accounts and passwords in one step (D-061); plan in `docs/roadmap/phase-14.md` | done 2026-11-25: D1 to D4 on 2026-11-25 (D2 and D3 shipped in 0.20.1, off by default), and 0.21.0 released after its rc on the owner's M1 and the Ubuntu, Arch and CachyOS VMs (D5) |
+| 15 | `devid new`: creating projects with each framework's own tool (D-063); plan in `docs/roadmap/phase-15.md` | accepted 2026-11-25; after Phase 14 |
 
 ## Open risks (Phase 1 must prove)
 

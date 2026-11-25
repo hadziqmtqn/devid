@@ -19,7 +19,7 @@ These limits are decisions (see [`docs/structure-of-app/DECISIONS.md`](docs/stru
 - **No Homebrew and no VM at runtime.** Devid downloads its own static builds.
 - **PHP 8.3, 8.4, 8.5 and 8.6**, each with php-fpm in `pm = ondemand`.
 - **One web server for every site:** nginx by default, Caddy or Apache instead.
-- **No databases.** Use DBngin, Docker or anything else next to Devid.
+- **Databases: MySQL, PostgreSQL and MongoDB,** from Devid's own builds (D-061). Each one is off until the user starts it, listens on 127.0.0.1 only, and leaves other servers alone, such as DBngin's or Homebrew's.
 - **Idle cost matters.** Devid is built on an Apple M1 with 8 GB of RAM, and it also runs on 2-core Intel Macs. Background work, polling and memory at idle need a reason.
 - **One platform at a time** (D-044): macOS on Intel and Apple silicon today, then Debian-based Linux, then Windows. Code for one operating system stays in as few places as possible (D-019), such as `crates/daemon/src/helper.rs` for the system setup.
 
