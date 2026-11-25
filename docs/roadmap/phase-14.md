@@ -87,14 +87,26 @@ Devid must never stop them, touch their data or take their ports, as it treats t
   - The port is chosen at the first start and saved in config.toml, so `.env` files keep working.
   - On the owner's M1 this gives MySQL 3307 and PostgreSQL 5433, next to DBngin.
   - The same checks as Mail's port apply (question 4).
-- **Users:** the same as DBngin, reachable only from this computer (question 5):
-  - MySQL: `root` without a password;
-  - PostgreSQL: `postgres`, with `trust` for local connections;
-  - MongoDB: no access control.
+- **Accounts and passwords** (the owner's wish, see "Owner's answers"): creating several accounts and resetting a password each take one step.
+  - `devid db user add mysql shop` creates the account `shop`. By default it also creates a database `shop`, gives the account every right on that database, and generates a password. `--database`, `--password` and `--no-database` change those defaults.
+  - `devid db user password mysql shop` resets the password, to a new generated one or to the one given. It works for every account, the main one included.
+  - `devid db user list` lists the accounts, and `devid db user remove` removes one.
+  - `devid db env mysql shop` prints the account's `.env` lines: `DB_CONNECTION`, `DB_HOST=127.0.0.1`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`.
+  - The TUI and the app's Databases page offer the same actions, with buttons to copy the password and the `.env` lines.
+  - **Generated passwords** are random, 24 letters and digits, with nothing that needs quoting in `.env`.
+  - **Where passwords are kept:** Devid keeps the passwords it set in `~/.devid/data/<engine>-<series>/accounts.toml`, a file only the user can read, so `devid db env` can show one again (question 10).
+  - **The passwords are enforced:**
+    - MySQL and PostgreSQL check them over TCP (PostgreSQL with `scram-sha-256`);
+    - MongoDB runs with access control on.
+  - **Devid's own way in:** Devid can always manage accounts and reset a lost password, the main account's included, without the user's password. On each engine:
+    - MySQL: an account of Devid's own, whose random password is in a file only the user can read, used over the Unix socket;
+    - PostgreSQL: the Unix socket in `~/.devid/run`, which only the user can open, with `trust`;
+    - MongoDB: an administrator account of Devid's own, kept the same way as MySQL's.
+- **The main account:** MySQL's `root` and PostgreSQL's `postgres` have no password from this computer, as in DBngin; the accounts the user adds have passwords (question 5).
+  - **MongoDB** cannot keep an account without a password once access control is on. Its main account `root` therefore gets a generated password too, which `devid db env mongodb` prints.
 - **Memory:** settings for a laptop, from D1's measurements, such as a capped WiredTiger cache for MongoDB.
 - **Apps:**
-  - `devid db env mysql` prints the `.env` lines: `DB_CONNECTION`, `DB_HOST=127.0.0.1`, `DB_PORT`, `DB_USERNAME` and an empty `DB_PASSWORD`.
-  - `devid db create <name>` creates a database.
+  - `devid db env mysql` prints the main account's `.env` lines. `devid db create <name>` creates a database without a new account.
   - Devid's PHP already has `pdo_mysql`, `mysqli`, `pdo_pgsql` and `pgsql` built in, and the `mongodb` extension in the catalog.
 - **Clients:** `mysql`, `mysqldump`, `psql`, `pg_dump`, `pg_restore` and `mongosh` become terminal commands (D-053).
   - Each defaults to Devid's server when no host or port is given.
@@ -109,7 +121,7 @@ Devid must never stop them, touch their data or take their ports, as it treats t
   - On Intel Macs: a note that MySQL gets no more fixes there.
   - On Linux, `mongod` gets `LD_LIBRARY_PATH` through `Spec.env`.
 - **Interfaces:**
-  - `devid db`: `list`, `install`, `start`, `stop`, `use`, `port`, `create`, `env` and `remove`;
+  - `devid db`: `list`, `install`, `start`, `stop`, `use`, `port`, `create`, `env`, `remove`, and `user` (`add`, `password`, `list`, `remove`);
   - a Databases page in the TUI;
   - checks in `devid doctor`;
   - on macOS, a Databases page in the app, built from a design board the owner approves first (D-026; question 7).
@@ -131,6 +143,12 @@ Devid must never stop them, touch their data or take their ports, as it treats t
    - the orphan check on Linux, by `/proc/<pid>/exe` instead of the process name.
 5. **Ports next to DBngin:** on the M1, Devid's servers take 3307 and 5433 while DBngin keeps 3306 and 5432, without anything of DBngin's being touched.
 6. **Minor updates:** a data folder made by one build of a series, opened by the next (MySQL 8.4.x, a PostgreSQL minor, a MongoDB patch).
+7. **Accounts:** for each engine:
+   - Create an account with a password, then reset it, both through Devid's own way in.
+   - The new password works, and the old one and a wrong one are refused.
+   - The main account still works without a password (MySQL, PostgreSQL), and `pg_hba.conf` lets only `postgres` in without one.
+   - A new account's first login from Devid's PHP over TCP works without TLS, which MySQL's `caching_sha2_password` needs RSA or a secure connection for.
+   - On MongoDB, Devid's administrator account is created before access control is turned on.
 
 **Where:** GitHub's macOS runners (Apple silicon and Intel), Ubuntu, and Arch in its VM; and the M1, on spare ports only.
 
@@ -140,8 +158,8 @@ Devid must never stop them, touch their data or take their ports, as it treats t
 |---|---|---|
 | D1 | **Spike** | the answers are in this doc, and D-061 is accepted or changed to match them |
 | D2 | **Daemon:** the second manifest, install and update, the supervisor's additions (stop timeout, readiness, log file, orphan check by path), config, ports, API | unit tests cover install, ports and the supervisor changes, and a CLI test starts and stops each engine from a local test release |
-| D3 | **CLI, TUI, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports, a Laravel site migrates against each, and uninstall keeps the data |
-| D4 | **The app's Databases page** (macOS) | the owner approves a design board, then uses the page on the M1 |
+| D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data |
+| D4 | **The app's Databases page** (macOS), accounts included | the owner approves a design board, then adds an account and resets a password from the page on the M1 |
 | D5 | **CI, docs and release** | a database check runs on every pull request on macOS, Ubuntu and Arch; the README, the guide's new `/docs/databases` page, PROJECT_CONTEXT and CLAUDE.md are updated; 0.21.0 ships after an rc on the M1 and the Linux VMs |
 
 ## Where it is tested
@@ -157,11 +175,17 @@ Devid must never stop them, touch their data or take their ports, as it treats t
 2. **Servers per engine:** one at a time (switch series with `devid db use`), or several series of the same engine at once, as DBngin allows? *Recommended: one per engine.*
 3. **Starting:** off until started by hand, then with the daemon? *Recommended: yes. On-demand start would need the daemon to relay TCP.*
 4. **Ports:** the usual port when free, else the next free one, saved? Or fixed ports of Devid's own? *Recommended: the usual port or the next free one, saved.*
-5. **Users:** no password and local only, as in DBngin? *Recommended: yes.*
+5. **The main account** (MySQL's `root`, PostgreSQL's `postgres`): no password from this computer, as in DBngin, while the accounts you add have passwords? Or a password for the main account too, which Devid generates and can reset? *Recommended: no password for the main account. MongoDB's main account gets a password either way.*
 6. **`uninstall --purge`:** keep the databases unless `--delete-databases` is given? *Recommended: keep them.*
 7. **The app:** a Databases page in this phase, after a design board? Or later? *Recommended: in this phase, as D4, after the CLI and the TUI.*
 8. **Terminal commands** (`mysql`, `psql`, `mongosh`…): added only for installed engines, ahead of DBngin's or Homebrew's on `PATH`? *Recommended: yes.*
 9. **Docs that say databases are out of scope:** CLAUDE.md, CONTRIBUTING, PROJECT_CONTEXT, the README and D-006. *Recommended: reword them in D5, once D-061 is accepted. CLAUDE.md only with your OK.*
+10. **The passwords Devid sets:** kept in a file only you can read, so `devid db env` can show one again, or shown once and reset when lost? *Recommended: kept. They are development passwords, which `.env` files hold in plain text anyway.*
+
+## Owner's answers (2026-11-25)
+
+- **Order:** databases before the Linux desktop app ("Database dulu"). Claude recommended it: databases add something Devid lacks on every platform, Linux has no DBngin, and the CLI and the TUI already do everything the app does. Since the app's pages are shared, a Databases page built now carries over to a Linux app later.
+- **Accounts:** "yang saya harapkan ada fitur mudah membuat beberapa akun database dan mudah reset password". Creating several accounts and resetting passwords are now part of the proposal, in "Accounts and passwords", with D1 item 7 and questions 5 and 10.
 
 ## Not in this phase
 
