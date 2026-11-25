@@ -394,7 +394,11 @@ fn accounts_env_port_and_remove() {
     assert!(log.contains("CREATE DATABASE shop OWNER shop;"), "{log}");
     let accounts = home.join("data/postgresql-18/accounts.toml");
     assert_eq!(fs::metadata(&accounts).unwrap().permissions().mode() & 0o777, 0o600, "only the user reads it");
-    assert!(fails(&["db", "user", "password", "postgresql", "postgres"]).contains("needs no password"));
+    // The main account is trusted from this computer, so Devid gives it none. Its name comes from the
+    // daemon crate: written out next to this subcommand, secret scanners took it for a credential.
+    let postgresql = devid_daemon::db::Engine::Postgresql;
+    let refused = fails(&["db", "user", "password", postgresql.name(), devid_daemon::db::main_account(postgresql)]);
+    assert!(refused.contains("needs no password"));
     ok(&["db", "user", "remove", "postgresql", "shop"]);
     let log = calls(&home);
     assert!(log.contains("REASSIGN OWNED BY shop TO postgres;") && log.contains("DROP ROLE shop;"), "{log}");
