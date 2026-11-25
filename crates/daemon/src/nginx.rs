@@ -397,6 +397,10 @@ pub fn spec(paths: &Paths) -> Spec {
         write_pid: false,
         comm: "nginx",
         stop_signal: libc::SIGQUIT,
+        stop_timeout: crate::supervisor::STOP_TIMEOUT,
+        log: None,
+        ready_port: None,
+        ready_file: None,
     }
 }
 

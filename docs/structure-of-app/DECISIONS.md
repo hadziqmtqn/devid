@@ -1212,3 +1212,8 @@ See ARCHITECTURE, "PHP runtime".
   - **Socket paths:** MySQL refuses a socket path over 103 bytes, so Devid checks the length.
   - **Orphan check:** on Linux `comm` is only the program's name, so the orphan check reads `/proc/<pid>/exe`.
   - **Not tested yet:** minor updates, since `db-latest` has one build per series. They move to D2.
+- **D2 (2026-11-25):** the daemon runs the databases. The decision holds, and D1's details are in the code:
+  - **The supervisor:** a stop timeout per service, readiness by the port and the server's own socket, stops outside the status lock, and an orphan check by executable path on Linux.
+  - **The database release:** a second manifest, `downloads/db-manifest.json`.
+  - **The daemon:** `devid db list|install|start|stop`, and `devid update` within a series.
+  - **Tests:** CLI tests with fake servers, and `scripts/db-e2e.sh` with the real builds in CI.

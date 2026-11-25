@@ -118,6 +118,10 @@ pub fn spec(paths: &Paths, mail: &Mail) -> Spec {
         // Only Devid's copy: the owner may run a Mailpit of their own on other ports (D-049).
         comm: "mailpit/bin/mailpit",
         stop_signal: libc::SIGTERM,
+        stop_timeout: crate::supervisor::STOP_TIMEOUT,
+        log: None,
+        ready_port: None,
+        ready_file: None,
     }
 }
 

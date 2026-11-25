@@ -272,6 +272,30 @@ pub enum Request {
         id: String,
         part: String,
     },
+    /// Databases (D-061): each engine's server and installed series. With `available`, also the
+    /// series the database release offers for this computer (it downloads the database manifest).
+    DbList {
+        #[serde(default)]
+        available: bool,
+    },
+    /// Download a series' newest build and put it in place, without starting it; MongoDB brings
+    /// mongosh along.
+    DbInstall {
+        engine: String,
+        #[serde(default)]
+        series: Option<String>,
+    },
+    /// Run an engine's server from now on, in `series` (default: the one in use, else the engine's
+    /// default): installs and sets it up first if needed, and picks its port at the first start.
+    DbStart {
+        engine: String,
+        #[serde(default)]
+        series: Option<String>,
+    },
+    /// Stop an engine's server and keep it off; its data stays.
+    DbStop {
+        engine: String,
+    },
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

@@ -322,6 +322,10 @@ pub fn spec(paths: &Paths) -> Spec {
         comm: "httpd",
         // SIGTERM stops Apache and its children; it does not handle SIGQUIT.
         stop_signal: libc::SIGTERM,
+        stop_timeout: crate::supervisor::STOP_TIMEOUT,
+        log: None,
+        ready_port: None,
+        ready_file: None,
     }
 }
 

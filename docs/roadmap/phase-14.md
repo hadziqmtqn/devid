@@ -2,7 +2,7 @@
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
 > Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 done 2026-11-25** (see "D1 results"); D2 (the daemon) is next.
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results); D3 (the CLI, the TUI and accounts) is next.
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -231,12 +231,61 @@ D-061 stands. D1 settles these details:
 - **Idle memory per engine:** MySQL about 175 to 225 MB, PostgreSQL 11 to 26 MB, MongoDB 15 to 35 MB on macOS (140 to 190 MB PSS on Linux). That is why each engine stays off until it is started.
 - **Minor updates** are tested in D2.
 
+## D2 results (2026-11-25)
+
+The record is `docs/implementation-timeline/databases/2026-11-25-d2-daemon.md`.
+
+### What shipped
+
+- **The supervisor,** for every service:
+  - **Stop timeout:** each service has its own (`Spec.stop_timeout`): 10 s as before, 60 s for a database.
+  - **Stopping:** services stop outside the lock `status` needs, and several at once on the daemon's exit, so a database's flush never holds up a request or php-fpm.
+  - **Log:** a log file per service (`Spec.log`).
+  - **Readiness:** `Spec.ready_port` and `Spec.ready_file`. A database counts as running only once its port answers and its own socket exists, so another program on the port never passes for it. The socket file is removed before each start, so one left by a crash does not count either.
+  - **The orphan check:**
+    - it reads only the pid file's first line, which suits PostgreSQL's `postmaster.pid`;
+    - on Linux it compares `/proc/<pid>/exe` with the program. That also fixes Mailpit's check there, which `comm` (only the name) never matched.
+    - An orphan that outlasts the stop timeout gets SIGKILL.
+- **The database release** (`releases.rs`):
+  - `fetch_db_manifest` reads `db-latest`, or `DEVID_DB_MANIFEST_URL` for tests, into `downloads/db-manifest.json`, beside the runtime's manifest;
+  - `db_artifact` takes each platform's own version;
+  - `db_series` sorts by number;
+  - `download_db` accepts only the release's own URLs.
+- **`db.rs`:**
+  - **Engines and folders:** binaries in `db/<engine>-<series>`, data in `data/<engine>-<series>`, logs in `log/<engine>.log`, sockets in `run/`.
+  - **Install:** a new build of a series replaces the binaries, never the data. MongoDB counts as installed only with mongosh.
+  - **Setup and settings:** D1's setup commands and server settings.
+  - **Ports and paths:** the port choice, and the socket length check.
+  - **Passwords:** `accounts.toml` (mode 0600), and generated passwords.
+  - **`bootstrap`:** Devid's own account on MySQL. On MongoDB, the administrator `devid` and the main account `root`, through the localhost exception.
+- **`config.toml`:** `[databases.<engine>]` holds `series`, `port` and `enabled`.
+- **The daemon:**
+  - **Requests:** `DbList`, `DbInstall`, `DbStart` and `DbStop`, and `status.databases`.
+  - **Services:** databases count as services, so `devid stop|start mysql` pause and resume them.
+  - **Ports:** Mail's port check knows the databases' ports.
+  - **Updates:** `devid update` moves each installed series, and mongosh, to the newest build in the database release, and restarts a running server on it. It reads that release only once a database is installed.
+- **The CLI:** `devid db` with `list [--available]`, `install`, `start` and `stop`.
+- **Tests:**
+  - unit tests for the supervisor, `db.rs`, the database manifest and the config;
+  - `crates/cli/tests/db.rs`, with fake servers (shell and perl, listening and making their sockets as the real ones do) from a local test release. It covers install, setup, a start with D1's flags, Devid's own accounts, a pause and resume, a stop, an update within a series, and a daemon restart;
+  - `scripts/db-e2e.sh`, in CI's new `db-e2e` job (Ubuntu and macOS), with the real builds:
+    - each engine starts;
+    - the main accounts and Devid's own account log in, and another account is refused without its password;
+    - the servers come back with the daemon;
+    - `devid db stop` stops them, and the data stays.
+
+### Not yet: D3
+
+- **Accounts:** `devid db user`, with `env`, `use`, `port`, `create` and `remove`.
+- **The rest of D3:** the TUI page, the terminal commands, and doctor.
+- **Uninstall:** today `devid uninstall --purge` would still delete `~/.devid/data`. D3 changes that before any release.
+
 ## Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
 | D1 | **Spike** | the answers are in this doc, and D-061 is accepted or changed to match them (done 2026-11-25, see "D1 results") |
-| D2 | **Daemon:** the second manifest, install and update, the supervisor's additions (stop timeout, readiness, log file, orphan check by path), config, ports, API | unit tests cover install, ports and the supervisor changes, and a CLI test starts and stops each engine from a local test release |
+| D2 | **Daemon:** the second manifest, install and update, the supervisor's additions (stop timeout, readiness, log file, orphan check by path), config, ports, API | unit tests cover install, ports and the supervisor changes, and a CLI test starts and stops each engine from a local test release (done 2026-11-25, see "D2 results") |
 | D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data |
 | D4 | **The app's Databases page** (macOS), accounts included | the owner approves a design board, then adds an account and resets a password from the page on the M1 |
 | D5 | **CI, docs and release** | a database check runs on every pull request on macOS, Ubuntu and Arch; the README, the guide's new `/docs/databases` page, PROJECT_CONTEXT and CLAUDE.md are updated; 0.21.0 ships after an rc on the M1 and the Linux VMs |
