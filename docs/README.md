@@ -25,7 +25,7 @@ Devid is a native local PHP development app for macOS and Linux (Herd-like, no H
 - [Phase 11 plan](roadmap/phase-11.md): Laravel + Vite over HTTPS, so a Laravel site's Vite dev server works in Safari too (D-056, accepted 2026-11-22; done in 0.18.0, released 2026-11-22).
 - [Phase 12 plan](roadmap/phase-12.md): Linux, starting with Ubuntu 24.04 and 26.04 LTS on x86_64 with the CLI and the TUI (D-057, accepted 2026-11-23; done in 0.19.0, released 2026-11-24).
 - [Phase 13 plan](roadmap/phase-13.md): Arch-based Linux, extending 0.19's Linux support from Ubuntu to Arch and its derivatives (D-059, accepted 2026-11-24; done in 0.20.0, released 2026-11-24).
-- [Phase 14 plan](roadmap/phase-14.md): databases, with Devid running D-058's MySQL, PostgreSQL and MongoDB builds (D-060, D-061; accepted 2026-11-25; D1, the spike, next).
+- [Phase 14 plan](roadmap/phase-14.md): databases, with Devid running D-058's MySQL, PostgreSQL and MongoDB builds (D-060, D-061; accepted 2026-11-25; D1, the spike, done the same day; D2 next).
 - [Implementation timeline](implementation-timeline/README.md): one record per merged milestone.
 
 ## Research
