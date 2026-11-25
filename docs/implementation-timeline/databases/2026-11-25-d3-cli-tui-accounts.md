@@ -55,6 +55,9 @@
 - **The help popup:** the TUI's help must fit in 20 rows (a test draws it at 100×20). The Databases line replaced the blank line under the global keys.
 - **Page numbers:** the Databases page took number 5, so Logs and Settings moved to 6 and 7.
 - **The main account's `.env`:** an empty `DB_DATABASE=` would mean no database in Laravel, so the line is left out rather than empty.
-- **GitGuardian** flagged password-like literals in the first push's tests, such as `"pw123"` and `PASSWORD '{pg_pw}'`. Tests now generate such values, or check the SQL in two parts.
-  - Its pull request check scans every commit of a PR, and the flagged commit stayed in #148's history. The same changes therefore came back as one commit on `db-d3-v2`, with none of those values in its history.
+- **GitGuardian** reads password-like literals in tests as hardcoded passwords:
+  - `"pw123"` in the TUI tests, now a generated value;
+  - the arguments `"password", "postgresql", "postgres"` in the CLI test, now taken from the daemon crate.
+
+  Its pull request check scans every commit of a PR, so a flagged commit keeps it red until the incident is marked in GitGuardian. The changes came back as one commit on `db-d3-v2` (#150) after #148; the CLI test's arguments were found only then.
 - **`db-e2e`:** D2's PostgreSQL check made a role `shop` by hand, which made D3's `devid db user add postgresql shop` refuse it, as it should. That role is now `probe`, with a random password.
