@@ -156,7 +156,7 @@ fn replaced(running: Option<(u64, u64)>, now: Option<(u64, u64)>) -> bool {
 
 /// One of the window's pages, by name.
 pub fn start_page(name: &str) -> Option<&'static str> {
-    ["sites", "php", "server", "mail", "logs", "settings"].into_iter().find(|p| *p == name)
+    ["sites", "php", "server", "mail", "databases", "logs", "settings"].into_iter().find(|p| *p == name)
 }
 
 /// Starts a fresh copy of the app with `args` (`--background` for the menu-bar icon only, `--page
@@ -194,6 +194,14 @@ mod tests {
         assert!(!replaced(Some((1, 10)), Some((1, 10))), "same binary");
         assert!(!replaced(Some((1, 10)), None), "mid-swap: no file at the path yet");
         assert!(!replaced(None, Some((1, 11))), "unknown at start");
+    }
+
+    #[test]
+    fn every_page_can_be_a_start_page() {
+        for page in ["sites", "php", "server", "mail", "databases", "logs", "settings"] {
+            assert_eq!(super::start_page(page), Some(page));
+        }
+        assert_eq!(super::start_page("inbox"), None);
     }
 
     use super::*;
