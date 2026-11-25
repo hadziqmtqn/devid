@@ -201,6 +201,10 @@ pub fn spec(paths: &Paths, version: &str) -> Spec {
         write_pid: false,
         comm: "php-fpm",
         stop_signal: libc::SIGQUIT,
+        stop_timeout: crate::supervisor::STOP_TIMEOUT,
+        log: None,
+        ready_port: None,
+        ready_file: None,
     }
 }
 

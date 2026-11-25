@@ -272,6 +272,82 @@ pub enum Request {
         id: String,
         part: String,
     },
+    /// Databases (D-061): each engine's server and installed series. With `available`, also the
+    /// series the database release offers for this computer (it downloads the database manifest).
+    DbList {
+        #[serde(default)]
+        available: bool,
+    },
+    /// Download a series' newest build and put it in place, without starting it; MongoDB brings
+    /// mongosh along.
+    DbInstall {
+        engine: String,
+        #[serde(default)]
+        series: Option<String>,
+    },
+    /// Run an engine's server from now on, in `series` (default: the one in use, else the engine's
+    /// default): installs and sets it up first if needed, and picks its port at the first start.
+    DbStart {
+        engine: String,
+        #[serde(default)]
+        series: Option<String>,
+    },
+    /// Stop an engine's server and keep it off; its data stays.
+    DbStop {
+        engine: String,
+    },
+    /// Make an account with a generated password (or `password`), and by default a database of its
+    /// own named after it (`database`, or none with `no_database`; MongoDB always has one). The
+    /// reply has the password and the `.env` lines.
+    DbUserAdd {
+        engine: String,
+        name: String,
+        #[serde(default)]
+        database: Option<String>,
+        #[serde(default)]
+        password: Option<String>,
+        #[serde(default)]
+        no_database: bool,
+    },
+    /// Give an account a new password: a generated one, or `password`.
+    DbUserPassword {
+        engine: String,
+        name: String,
+        #[serde(default)]
+        password: Option<String>,
+    },
+    /// The accounts people sign in with, and whether Devid knows each one's password.
+    DbUserList {
+        engine: String,
+    },
+    /// Remove an account; its databases stay.
+    DbUserRemove {
+        engine: String,
+        name: String,
+    },
+    /// The `.env` lines for an account (default: the main one).
+    DbEnv {
+        engine: String,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// A database without an account of its own.
+    DbCreate {
+        engine: String,
+        database: String,
+    },
+    /// Move a server to another port; it restarts there.
+    DbPort {
+        engine: String,
+        port: u16,
+    },
+    /// Remove an installed series that is not in use; its data stays unless `delete_data`.
+    DbRemove {
+        engine: String,
+        series: String,
+        #[serde(default)]
+        delete_data: bool,
+    },
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

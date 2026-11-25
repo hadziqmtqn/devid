@@ -10,3 +10,4 @@
 | [extensions](extensions/README.md) | the PHP extension catalog (Phase 6) |
 | [gui](gui/README.md) | the desktop app (Phase 7) |
 | [linux](linux/README.md) | Devid on Linux: Ubuntu (Phase 12) and Arch (Phase 13) |
+| [databases](databases/README.md) | MySQL, PostgreSQL and MongoDB run by Devid (Phase 14) |

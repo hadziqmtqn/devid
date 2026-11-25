@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-063 | 2026-11-25 | accepted 2026-11-25 (Phase 15; builds on D-035, D-036, D-054 and D-061) | `devid new` creates projects with each framework's official tool: blank PHP, Laravel and its starter kits, WordPress (WP-CLI, a Devid MySQL account), Symfony, CodeIgniter 4, static, and Node.js (Vite's React, Vue, Svelte and vanilla, Next.js, Nuxt, SvelteKit, Astro, an Express API) on the user's own Node; the daemon runs the job, and the project is served at `https://<name>.test` with its database, Mail and dev-server commands set up |
 | D-062 | 2026-11-25 | accepted 2026-11-25 (amends D-009) | PHP 8.6 joins 8.3, 8.4 and 8.5 in devid 0.20.1, built with static-php-cli 2.8.5 plus small fixes for 8.6 only, Xdebug 3.6.0alpha1, phpredis 6.4.0RC1 and pcov's fix commit; 8.3 stays until 2027-12-31; 8.5 stays the default until Xdebug 3.6.0 is stable and the catalog builds for 8.6, which has imagick, ldap and mongodb so far |
 | D-061 | 2026-11-25 | accepted 2026-11-25 (Phase 14; supersedes what D-006 left, builds on D-058 and D-060) | Devid runs D-058's MySQL, PostgreSQL and MongoDB: one server per engine under the daemon, on 127.0.0.1 at the usual port or the next free one, data in `~/.devid/data` that `uninstall --purge` keeps, accounts with generated passwords that one command creates or resets, the main MySQL and PostgreSQL account without a password, and `devid db` in the CLI, the TUI and the app |
 | D-060 | 2026-11-24 | accepted 2026-11-24 (an order; D-035 stands) | After Phase 13, the next phase wires D-058's databases into Devid; Node and Bun runtimes come later, in a phase of their own |
@@ -1214,6 +1215,22 @@ See ARCHITECTURE, "PHP runtime".
   - **Socket paths:** MySQL refuses a socket path over 103 bytes, so Devid checks the length.
   - **Orphan check:** on Linux `comm` is only the program's name, so the orphan check reads `/proc/<pid>/exe`.
   - **Not tested yet:** minor updates, since `db-latest` has one build per series. They move to D2.
+- **D2 (2026-11-25):** the daemon runs the databases. The decision holds, and D1's details are in the code:
+  - **The supervisor:** a stop timeout per service, readiness by the port and the server's own socket, stops outside the status lock, and an orphan check by executable path on Linux.
+  - **The database release:** a second manifest, `downloads/db-manifest.json`.
+  - **The daemon:** `devid db list|install|start|stop`, and `devid update` within a series.
+  - **Tests:** CLI tests with fake servers, and `scripts/db-e2e.sh` with the real builds in CI.
+- **D3 (2026-11-25):** the CLI, the TUI and accounts. The decision holds, with these details:
+  - **Commands:** `devid db user add|password|list|remove`, `devid db env|use|port|create|remove`, and a Databases page in the TUI with an Accounts view.
+  - **PostgreSQL's `postgres`** keeps no password. `devid db user password` refuses it, since `postgres` is trusted from this computer and a password would never be checked. Every other account can get a new one, MySQL's `root` and MongoDB's `root` included.
+  - **`.env` lines** of the main account leave `DB_DATABASE` out, so Laravel's default stays.
+  - **The clients** reach Devid's server unless told where to go. `mongosh` gets no password on its command line, which `ps` would show.
+  - **`uninstall --purge`** keeps `~/.devid/data` unless `--delete-databases`.
+  - **Stop time:** the login service now gives the daemon 75 s to stop (launchd's `ExitTimeOut`, systemd's `TimeoutStopSec`), so a database's clean stop is never cut short.
+  - **The M1 check:**
+    - MySQL 8.4 ran on 3307 and PostgreSQL 18 on 5433, next to DBngin's servers, which Devid never touched.
+    - On each engine, the CLI and the TUI made two accounts each and gave one a new password.
+    - A Laravel app migrated with each account.
 
 ## D-062: PHP 8.6 joins 8.3, 8.4 and 8.5 (accepted 2026-11-25, amends D-009)
 
@@ -1239,3 +1256,44 @@ See ARCHITECTURE, "PHP runtime".
 - **Cost:** three more PHP jobs in each runtime release, about 20 minutes per architecture each (D-009). `devid-binaries`' Actions cache already held 10.7 GB in nine PHP caches, over GitHub's 10 GB, so with twelve some release jobs start from a cold cache: slower, still correct.
 - **Owner's answers (2026-11-25):** "Setuju" to the decision as proposed, "Tambal untuk 8.6" for the build, "Rilis + alias" for the catalog, and "Boleh" to the CLAUDE.md line.
 - **Status:** accepted on 2026-11-25. The builds: hadziqmtqn/devid-binaries#25. Devid 0.20.1 adds 8.6 to the daemon, the CLI, the TUI and the app, and devid-site's guide follows the release.
+
+## D-063: `devid new` creates projects with the frameworks' own tools (accepted 2026-11-25, Phase 15)
+
+- **Context:**
+  - The owner asked for a feature that creates projects: "buatkan fitur baru untuk create project PHP, Laravel, Wordpress, NodeJs, dll", with suggestions before any documentation.
+  - Devid serves folders (D-011), detects their app type (D-035), runs their dev servers on demand (D-036, D-054) and, from Phase 14, runs databases with accounts (D-061). Making the project itself is still done by hand.
+  - Herd's wizard creates Laravel apps only; its WordPress guide is manual. Local covers WordPress only.
+  - React retired Create React App on 2025-02-14. The frameworks keep their own create tools current with each release.
+- **Decision:**
+  - **Interfaces:**
+    - `devid new <template> <name>` in the CLI;
+    - a wizard in the TUI (`n` on the Sites page);
+    - later, a page in the app, built from a design board the owner approves (D-026).
+  - **Templates in this phase:**
+    - blank PHP, Laravel (plain, and the React, Vue, Svelte and Livewire starter kits), WordPress, Symfony, CodeIgniter 4 and static;
+    - Node.js: React, Vue, Svelte and vanilla through Vite, Next.js, Nuxt, SvelteKit, Astro, and an Express API.
+  - **Official tools:**
+    - Devid runs each framework's own create tool: Composer's `create-project`, WP-CLI, `npm create` or `npx`.
+    - The tools run with fixed options, so nothing prompts, and only official packages run, by their exact names.
+    - Devid writes files of its own only where no tool exists: blank PHP, static, and the Express API.
+  - **The job:** the daemon runs it and reports its progress. The tools' output goes to `~/.devid/log/new-<name>.log`.
+  - **Where:** `--path`, else the first parked folder. With none, Devid offers to create and park `~/Sites`.
+  - **What Devid sets up:**
+    - the site and its preset, and `--php` through `devid isolate`;
+    - the database: SQLite for Laravel by default, MySQL or PostgreSQL through Devid's accounts (D-061); always a Devid MySQL account for WordPress;
+    - Mail's settings;
+    - the dev-server commands with on-demand start (D-054);
+    - Vite over HTTPS (D-056).
+  - **WP-CLI** joins Devid like `composer.phar`: downloaded from WP-CLI's GitHub release with its SHA-512, and the terminal command `wp` (D-053).
+  - **Node.js** stays the user's own (D-035, D-060), found through Devid's nvm lookup. npm is the default; pnpm, Yarn or Bun are used only if already installed.
+  - **A failure** keeps what was made, and Devid says what is there and how to remove it.
+- **Owner's answers (2026-11-25):**
+  - "saya ikut rekomendasi kamu", for the eight recommendations in `phase-15.md`.
+  - For Node.js, the official create tools rather than Devid's own templates: "Ya, tulis rencananya".
+- **Not in this decision:**
+  - templates from a Git repository;
+  - Devid's own Node and Bun (D-060);
+  - more frameworks;
+  - deploying.
+- **Plan:** `docs/roadmap/phase-15.md`, milestones N1 to N5, towards 0.22.0, after Phase 14.
+- **Status:** accepted on 2026-11-25. N1, the spike, starts after Phase 14.

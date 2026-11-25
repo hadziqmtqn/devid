@@ -37,6 +37,23 @@ pub struct Config {
     pub apps: BTreeMap<String, App>,
     /// Mail (D-049): Mailpit catches the mail apps send.
     pub mail: Mail,
+    /// Databases (D-061): one server per engine ("mysql", "postgresql", "mongodb"), off until
+    /// `devid db start` starts it.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub databases: BTreeMap<String, Database>,
+}
+
+/// `[databases.<engine>]`: which series Devid runs, on which port, and whether it runs (D-061).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Database {
+    /// The series in use ("8.4", "18", "8.0").
+    pub series: String,
+    /// On 127.0.0.1: the engine's usual port, or the next free one, chosen at the first start so
+    /// `.env` files keep working; 0 until then.
+    pub port: u16,
+    /// Starts with the daemon; `devid db stop` turns it off.
+    pub enabled: bool,
 }
 
 /// `[mail]`: whether Devid runs Mailpit (D-049) and how.
@@ -135,6 +152,7 @@ impl Default for Config {
             update_check_minutes: 20,
             apps: BTreeMap::new(),
             mail: Mail::default(),
+            databases: BTreeMap::new(),
         }
     }
 }
@@ -206,6 +224,12 @@ mod tests {
         fs::write(&path, "[mail]\nenabled = true\n").unwrap();
         let mail = Config::load_or_create(&path).unwrap().mail;
         assert!(mail.enabled && mail.port == 2525 && mail.keep == 500 && mail.php_mail, "{mail:?}");
+
+        fs::write(&path, "[databases.mysql]\nseries = \"8.4\"\nport = 3307\nenabled = true\n").unwrap();
+        let dbs = Config::load_or_create(&path).unwrap().databases;
+        assert_eq!(dbs["mysql"], Database { series: "8.4".into(), port: 3307, enabled: true });
+        Config::default().save(&path).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("databases"), "no empty [databases] table");
 
         fs::write(&path, "server = [").unwrap();
         assert!(Config::load_or_create(&path).is_err(), "invalid TOML is an error, not silently replaced");

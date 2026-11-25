@@ -201,6 +201,10 @@ pub fn agent_plist(paths: &Paths) -> String {
     </dict>
     <!-- No ProcessType: "Background" ran nginx and php-fpm at the lowest CPU priority, so pages
          took seconds whenever the Mac was busy. -->
+    <!-- A database may take up to a minute to stop cleanly (D-061); launchd's default 20 s would
+         kill it halfway. -->
+    <key>ExitTimeOut</key>
+    <integer>{exit_timeout}</integer>
     <key>StandardErrorPath</key>
     <string>{log}</string>
     <key>StandardOutPath</key>
@@ -211,6 +215,7 @@ pub fn agent_plist(paths: &Paths) -> String {
         bin = install::installed_bin(paths).display(),
         home = paths.home.display(),
         log = log.display(),
+        exit_timeout = super::EXIT_TIMEOUT,
     )
 }
 
@@ -249,7 +254,7 @@ pub fn load_service(paths: &Paths) -> io::Result<()> {
 /// right after it fails (this took the owner's sites down during the first upgrade).
 pub fn stop_service() {
     let _ = Command::new("/bin/launchctl").arg("bootout").arg(format!("{}/{AGENT_LABEL}", gui_domain())).output();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(super::EXIT_TIMEOUT + 5);
     while service_loaded() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }

@@ -1,7 +1,7 @@
 //! Rendering. D-017: the terminal's 16 colors, used only for meaning; every state also has a
 //! symbol and text; NO_COLOR drops colors entirely (selection still shows through REVERSED).
 
-use super::app::{App, ExtView, Focus, InputFor, Mode, Page, PickFor, human_size};
+use super::app::{AccountsView, App, ExtView, Focus, InputFor, Mode, Page, PickFor, Secret, human_size};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -137,6 +137,7 @@ fn draw_page(frame: &mut Frame, app: &App, area: Rect) {
         Page::Php => draw_php(frame, app, status, inner),
         Page::Server => draw_server(frame, app, status, inner),
         Page::Mail => draw_mail(frame, app, inner),
+        Page::Databases => draw_databases(frame, app, status, inner),
         Page::Logs => draw_logs(frame, app, inner),
         Page::Settings => draw_settings(frame, app, status, inner),
     }
@@ -354,6 +355,69 @@ fn draw_mail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
+/// Databases (D-061): each engine's server, then the selected one's address, main account and data.
+fn draw_databases(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
+    let list = app.databases();
+    let dim = Style::default().add_modifier(Modifier::DIM);
+    if list.is_empty() {
+        frame.render_widget(Paragraph::new(Line::styled("This daemon has no databases yet; update Devid.", dim)), area);
+        return;
+    }
+    let [table, info] = Layout::vertical([Constraint::Length(list.len() as u16 + 2), Constraint::Min(2)]).areas(area);
+    let rows = list.iter().enumerate().map(|(i, d)| {
+        let on = d["enabled"] == true;
+        let series = match (d["series"].as_str(), d["version"].as_str()) {
+            (Some(series), Some(version)) if on => format!("{series} ({version})"),
+            (Some(series), None) if on => series.to_string(),
+            _ => "-".to_string(),
+        };
+        let port = d["port"].as_u64().filter(|_| on).map(|p| format!("127.0.0.1:{p}")).unwrap_or_default();
+        Row::new(vec![
+            Cell::from(s(&d["label"]).to_string()),
+            Cell::from(series),
+            Cell::from(state(app, s(&d["state"]))),
+            Cell::from(port),
+        ])
+        .style(row_style(app, i))
+    });
+    frame.render_widget(
+        Table::new(rows, [Constraint::Length(12), Constraint::Length(16), Constraint::Length(17), Constraint::Min(10)])
+            .header(
+                Row::new(["Database", "Series", "Status", "Address"])
+                    .style(Style::default().add_modifier(Modifier::BOLD)),
+            ),
+        table,
+    );
+    let d = &list[app.row.min(list.len() - 1)];
+    let (engine, label) = (s(&d["engine"]), s(&d["label"]));
+    let mut lines = Vec::new();
+    if d["enabled"] != true {
+        lines.push(Line::raw(format!("{label} is off. Enter starts it; the first time, Devid downloads it.")));
+    } else {
+        let main = devid_daemon::db::Engine::parse(engine).map_or("root", devid_daemon::db::main_account);
+        let password = match engine {
+            "mongodb" => "its password is kept by Devid (Accounts… copies it)",
+            _ => "no password from this computer",
+        };
+        lines.push(Line::raw(format!("Main account: {main}, {password}")));
+        if let Some(sock) = d["socket"].as_str() {
+            lines.push(Line::raw(format!("Socket:       {}", tilde(sock))));
+        }
+        let data = format!("{}/data/{engine}-{}", s(&status["home"]), s(&d["series"]));
+        lines.push(Line::raw(format!("Data:         {} (kept when you stop or uninstall)", tilde(&data))));
+        let installed: Vec<&str> = d["installed"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).collect();
+        if installed.len() > 1 {
+            lines.push(Line::raw(format!("Installed:    {}", installed.join(", "))));
+        }
+        if let Some(e) = d["error"].as_str() {
+            lines.push(Line::styled(format!("Problem:      {e}"), bad(app)));
+        }
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::styled("Another series: `devid db use <engine> <series>` (each has its own data).", dim));
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), info);
+}
+
 fn draw_settings(frame: &mut Frame, app: &App, status: &Value, area: Rect) {
     let mut lines = vec![
         Line::raw(format!("Domain:    *.{}", s(&status["tld"]))),
@@ -421,6 +485,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 (Page::Mail, _) => {
                     " m on/off · t test email · o open inbox · c copy .env · p PHP mail() · X delete all · ? help · q quit"
                 }
+                (Page::Databases, _) => {
+                    " enter actions (start/stop, accounts, copy .env, new database, port) · ? help · q quit"
+                }
                 (Page::Php, _) => {
                     " enter actions (extensions, default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
                 }
@@ -458,6 +525,7 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
                     let supported = devid_daemon::php::SUPPORTED;
                     format!("PHP {}", supported[(*row).min(supported.len() - 1)])
                 }
+                Page::Databases => app.databases().get(*row).map(|d| s(&d["label"]).to_string()).unwrap_or_default(),
                 _ => app.sites.get(*row).map(|s| s["name"].as_str().unwrap_or("?").to_string()).unwrap_or_default(),
             };
             // D-056: a Laravel site whose Vite stays on plain HTTP says what to fix, first, so a
@@ -498,6 +566,19 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
                     "name command",
                     " e.g. dev npm run dev · enter save · esc cancel",
                 ),
+                InputFor::Account(engine) => (
+                    format!("New {} account", label_of(engine)),
+                    "name [database]",
+                    " the database defaults to the name; Devid makes the password · enter · esc",
+                ),
+                InputFor::Database(engine) => (
+                    format!("New {} database", label_of(engine)),
+                    "name",
+                    " lowercase letters, digits and _ · enter · esc",
+                ),
+                InputFor::DbPort(engine) => {
+                    (format!("{} port", label_of(engine)), "port", " from 1024; it restarts there · enter · esc")
+                }
             };
             popup(frame, 70, 5, &title, vec![Line::raw(format!(" {label}: {text}█")), hint(help)]);
         }
@@ -535,6 +616,17 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
             );
         }
         Mode::Extensions(v) => draw_extensions(frame, app, v),
+        Mode::Accounts(v) => draw_accounts(frame, v),
+        Mode::ConfirmAccount { question, .. } => {
+            popup(
+                frame,
+                64,
+                7,
+                "Confirm",
+                vec![Line::styled(format!(" {question}"), warn(app)), Line::raw(""), hint(" y yes · n back")],
+            );
+        }
+        Mode::Secret(secret) => draw_secret(frame, secret),
         Mode::ConfirmExt { question, .. } => {
             popup(
                 frame,
@@ -592,6 +684,54 @@ fn draw_extensions(frame: &mut Frame, app: &App, v: &ExtView) {
     popup(frame, 72, height, &format!("PHP {} · Extensions", v.version), lines);
 }
 
+/// "MySQL" for "mysql".
+fn label_of(engine: &str) -> String {
+    devid_daemon::db::Engine::parse(engine).map_or_else(|| engine.to_string(), |e| e.label().to_string())
+}
+
+/// An engine's accounts (D-061), and the keys that act on them.
+fn draw_accounts(frame: &mut Frame, v: &AccountsView) {
+    let hint = |t: &str| Line::styled(t.to_string(), Style::default().add_modifier(Modifier::DIM));
+    let mut lines = vec![Line::styled(
+        format!("   {:<18} {:<18} Password", "Account", "Database"),
+        Style::default().add_modifier(Modifier::BOLD),
+    )];
+    if v.rows.is_empty() {
+        lines.push(Line::raw("   no accounts yet; a adds one"));
+    }
+    for (i, r) in v.rows.iter().enumerate() {
+        let password = match r.password.as_str() {
+            "kept" => "kept by Devid",
+            "none" => "none from this computer",
+            _ => "not known to Devid (p sets one)",
+        };
+        let text = format!(
+            " {} {:<18} {:<18} {password}",
+            if i == v.index { "›" } else { " " },
+            r.name,
+            r.database.as_deref().unwrap_or("-")
+        );
+        lines.push(if i == v.index { Line::styled(text, selected()) } else { Line::raw(text) });
+    }
+    lines.push(Line::raw(""));
+    lines.push(hint(" a add · p new password · c copy .env · y copy password · d remove · esc close"));
+    popup(frame, 80, lines.len() as u16 + 2, &format!("{} {} · Accounts", v.label, v.series), lines);
+}
+
+/// A password Devid just set, shown with the account's `.env` lines.
+fn draw_secret(frame: &mut Frame, secret: &Secret) {
+    let hint = |t: String| Line::styled(t, Style::default().add_modifier(Modifier::DIM));
+    let mut lines = vec![
+        Line::styled(format!(" Password: {}", secret.password), Style::default().add_modifier(Modifier::BOLD)),
+        Line::raw(""),
+    ];
+    lines.extend(secret.env.iter().map(|l| Line::raw(format!(" {l}"))));
+    lines.push(Line::raw(""));
+    lines.push(hint(" c copy .env · y copy password · esc close".into()));
+    lines.push(hint(format!(" Devid keeps it: `devid db env {} {}` shows it again", secret.engine, secret.name)));
+    popup(frame, 80, lines.len() as u16 + 2, &secret.title, lines);
+}
+
 fn draw_help(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let w = area.width.min(58);
@@ -601,16 +741,16 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("↑ ↓  or  j k     move"),
         Line::raw("tab              switch sidebar / page"),
         Line::raw("enter → l        open the page   ← h  back"),
-        Line::raw("1 – 6            jump to Sites, PHP, Server, Mail, Logs, Settings"),
+        Line::raw("1 – 7            jump to a page (its number in the sidebar)"),
         Line::raw("r                refresh now (also every 2 s)"),
         Line::raw("q  esc  ctrl-c   quit"),
-        Line::raw(""),
         Line::raw("Sites: enter = actions (open, Terminal, copy, PHP, remove, unlink)"),
         Line::raw("       a link · p park · U unpark · I unignore"),
         Line::raw("PHP:   enter = actions · u check updates · U update"),
         Line::raw("       Extensions…: space tick · enter install · r remove"),
         Line::raw("Server: enter = actions · S stop all · A start all"),
         Line::raw("Mail:  m on/off · t test · o inbox · c copy .env · p mail() · X delete"),
+        Line::raw("Databases: enter = actions · Accounts…: a add · p new password"),
         Line::raw("Logs:  f follow · c clear"),
         Line::raw("Settings: d doctor · u/U updates · D devid · s setup · X uninstall"),
         Line::raw("Every action is also a command: `devid --help`."),
