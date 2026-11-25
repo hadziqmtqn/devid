@@ -1204,3 +1204,11 @@ See ARCHITECTURE, "PHP runtime".
   - "Ikuti rekomendasi" for all ten questions in `phase-14.md`.
 - **Plan:** `docs/roadmap/phase-14.md`, milestones D1 to D5, towards 0.21.0.
 - **Status:** accepted on 2026-11-25. D1, the spike, comes next.
+- **D1 (2026-11-25, spike run 45522275157 and the owner's M1):** the decision holds, with these details:
+  - **Accounts:** every account and password check passed on macOS (Apple silicon and Intel), Ubuntu and Arch, for every series, and Devid's PHP and a Laravel migration connected with a Devid account.
+  - **MySQL:** runs with `--mysqlx=OFF`, since DBngin's `mysqld` holds 33060 on every interface. It also runs with `--skip-log-bin` and `--performance-schema=OFF`, which halves its idle memory to about 175–225 MB.
+  - **PostgreSQL:** `initdb` refuses a password method without a superuser password, so Devid runs `initdb -A trust` and writes `pg_hba.conf` itself. It runs with 32 MB `shared_buffers` and 50 connections, at 11–26 MB idle.
+  - **MongoDB:** access control is on from the first start, and the localhost exception creates Devid's administrator. It runs with a 0.25 GB cache and diagnostic data collection off, at 15–35 MB idle on macOS (140–190 MB of PSS on Linux, mostly its program's clean pages).
+  - **Socket paths:** MySQL refuses a socket path over 103 bytes, so Devid checks the length.
+  - **Orphan check:** on Linux `comm` is only the program's name, so the orphan check reads `/proc/<pid>/exe`.
+  - **Not tested yet:** minor updates, since `db-latest` has one build per series. They move to D2.

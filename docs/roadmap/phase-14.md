@@ -1,8 +1,8 @@
 # Phase 14 Plan: Databases
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
-> Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". D1 (the spike) is next.
+> Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 done 2026-11-25** (see "D1 results"); D2 (the daemon) is next.
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -152,11 +152,90 @@ Devid must never stop them, touch their data or take their ports, as it treats t
 
 **Where:** GitHub's macOS runners (Apple silicon and Intel), Ubuntu, and Arch in its VM; and the M1, on spare ports only.
 
+## D1 results (2026-11-25)
+
+**Where it ran:**
+- Spike run 45522275157 on GitHub's runners: macOS 15 on Apple silicon and on Intel, Ubuntu 24.04, and Arch in its VM.
+  - Every series in `db-2026.11.24-8`, with Devid's PHP 8.5.13 from `runtime-latest`.
+  - Each server ran on 127.0.0.1, with the soft open-files limit Devid's daemon passes on: 256 under launchd, 1024 under systemd.
+- The owner's M1: MySQL 8.4 and PostgreSQL 18, next to DBngin's servers.
+- The scripts are in `spike/db/`.
+
+### Answers
+
+1. **Setup and connections:** every series set up, started and stopped on every platform.
+   - **Setup times:** MySQL's `--initialize-insecure` took 1.3 to 5.3 s, `initdb` 0.3 to 2.1 s, and MongoDB needs no setup.
+   - **MySQL's `root@localhost`** accepts TCP from 127.0.0.1 without a password, so `DB_HOST=127.0.0.1` works.
+   - **Devid's PHP** connected with `pdo_mysql`, `pdo_pgsql` and the `mongodb` extension. For MySQL that included a new account's first `caching_sha2_password` login over TCP without TLS.
+   - **Laravel:** `php artisan migrate` on a new Laravel app passed with a Devid account, on MySQL 8.4 and on PostgreSQL 18, on all four platforms.
+   - **`initdb` refuses a password method for TCP** unless the superuser has a password. So Devid runs `initdb -A trust` and writes `pg_hba.conf` itself:
+     - the socket and `postgres` from 127.0.0.1 need no password;
+     - every other account needs one (`scram-sha-256`).
+2. **Memory at idle.** Linux figures are PSS. macOS figures are the footprint from the second run (45523404458), which also counts what the memory compressor holds:
+
+   | Engine | Its defaults | Devid's settings | Devid's settings are |
+   |---|---|---|---|
+   | MySQL 8.4 and 9.7 | 449 MB (Linux), 410–468 MB (macOS) | 210–225 MB (Linux), 175–228 MB (macOS) | `--performance-schema=OFF`, `--skip-log-bin` |
+   | PostgreSQL 15 to 19 | 25 MB (18, Linux), 26–36 MB (macOS) | 14–20 MB (Linux), 11–26 MB (macOS) | `shared_buffers` 32 MB and 50 connections, which saved 8 to 12 MB |
+   | MongoDB 7.0 to 9.0 | 181–207 MB (8.0, Linux), 26–35 MB (macOS) | 140–190 MB (Linux), 15–31 MB (macOS) | `--wiredTigerCacheSizeGB 0.25`, diagnostic data collection off |
+
+   - **RSS counts more than a server needs.** MongoDB's RSS on macOS was 70 to 113 MB against a 15 to 35 MB footprint: most of it is the clean pages of its 100 MB program, which macOS can drop at any time. Linux's PSS counts those pages too, which is why MongoDB looks larger there.
+
+   - **MySQL's performance schema** is the big cost. Turning it off halves idle memory. A 64 MB buffer pool and 50 connections saved only 1 to 13 MB more, so Devid keeps MySQL's 128 MB pool.
+   - **PostgreSQL's settings** matter little at idle. With PostgreSQL's own defaults, `shared_buffers` (128 MB) would fill only as a database is used.
+   - **MongoDB's cache cap** barely changes idle memory. It keeps the cache from growing towards half of the computer's memory, which is MongoDB's own default.
+   - **On the M1**, under memory pressure, `ps` showed far less (MySQL 27 to 75 MB), because macOS compresses idle pages. That is why the second run added the footprint.
+3. **Start and stop:**
+   - **Ready:** MySQL in 0.3 to 1.8 s, PostgreSQL 0.1 to 0.3 s, MongoDB 0.1 to 2.4 s.
+   - **Clean stop when idle:**
+     - MySQL 0.2 to 1.5 s, on SIGTERM;
+     - PostgreSQL under 0.05 s, on SIGINT (its fast shutdown);
+     - MongoDB 0.3 s at most, on SIGTERM.
+
+     All of these are well inside the supervisor's 10 s. D2 still gives databases a longer timeout, for a server with writes in flight.
+   - **After SIGKILL:** every server started again with its data. MySQL took 0.6 to 3.4 s, PostgreSQL 0.1 to 1.9 s, and MongoDB 0.3 to 2.1 s.
+4. **Limits:**
+   - **Open files:** with a soft limit of 256 or 1024, MySQL raised its own limit to 8161, which the hard limit allows. PostgreSQL adapts. MongoDB logs a "soft rlimits" warning but runs.
+   - **Socket paths:** MySQL refuses to start when its socket path is longer than 103 bytes (`[MY-010267] The socket file path is too long`, then "Aborting").
+     - `~/.devid/run/mysql.sock` fits any ordinary home folder.
+     - On the M1 the spike's long work folder hit the limit. Devid must check the length and say so.
+   - **Orphan check:** on Linux, `ps -o comm=` shows only `mysqld`, `postgres` or `mongod`, which would match DBngin's or the system's server as well. `/proc/<pid>/exe` gives the full path. On macOS, `comm` is the full path already.
+5. **Next to DBngin on the M1:**
+   - With the usual port taken, MySQL took 3307 and PostgreSQL 5433. They ran every check and stopped.
+   - DBngin's servers kept 3306 and 5432 throughout, with the same process IDs before and after.
+   - **DBngin's `mysqld` also listens on 33060 (MySQL's X Protocol) on every interface,** so Devid's MySQL must run with `--mysqlx=OFF`. Otherwise it cannot start next to DBngin.
+6. **Minor updates:** not tested yet, since `db-latest` holds one build per series. D2 tests an update once the next build appears.
+7. **Accounts:** every check passed on every platform and series.
+   - **MySQL:**
+     - `root` over TCP and over the socket without a password, and Devid's own account;
+     - an account with its database, and PHP's first and second login;
+     - a wrong password, and the old one after a reset, refused;
+     - the main account given a password, then without one again.
+   - **PostgreSQL:**
+     - `postgres` over TCP and over the socket without a password;
+     - other accounts refused without a password;
+     - a reset, and PHP's login.
+   - **MongoDB:**
+     - with access control on from the first start, the localhost exception let Devid create its administrator;
+     - reads without credentials refused;
+     - `root`, and an account with `readWrite` on its database;
+     - PHP's login, and a reset.
+
+### What this changes in the plan
+
+D-061 stands. D1 settles these details:
+- **MySQL** runs with `--mysqlx=OFF`, `--skip-log-bin` and `--performance-schema=OFF`.
+- **PostgreSQL** gets `initdb -A trust` and Devid's own `pg_hba.conf`, with `shared_buffers` at 32 MB and 50 connections.
+- **MongoDB** runs with access control, a 0.25 GB cache, and diagnostic data collection off.
+- **Devid checks socket path lengths,** and its orphan check reads `/proc/<pid>/exe` on Linux.
+- **Idle memory per engine:** MySQL about 175 to 225 MB, PostgreSQL 11 to 26 MB, MongoDB 15 to 35 MB on macOS (140 to 190 MB PSS on Linux). That is why each engine stays off until it is started.
+- **Minor updates** are tested in D2.
+
 ## Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
-| D1 | **Spike** | the answers are in this doc, and D-061 is accepted or changed to match them |
+| D1 | **Spike** | the answers are in this doc, and D-061 is accepted or changed to match them (done 2026-11-25, see "D1 results") |
 | D2 | **Daemon:** the second manifest, install and update, the supervisor's additions (stop timeout, readiness, log file, orphan check by path), config, ports, API | unit tests cover install, ports and the supervisor changes, and a CLI test starts and stops each engine from a local test release |
 | D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data |
 | D4 | **The app's Databases page** (macOS), accounts included | the owner approves a design board, then adds an account and resets a password from the page on the M1 |
