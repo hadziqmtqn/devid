@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-063 | 2026-11-25 | accepted 2026-11-25 (Phase 15; builds on D-035, D-036, D-054 and D-061) | `devid new` creates projects with each framework's official tool: blank PHP, Laravel and its starter kits, WordPress (WP-CLI, a Devid MySQL account), Symfony, CodeIgniter 4, static, and Node.js (Vite's React, Vue, Svelte and vanilla, Next.js, Nuxt, SvelteKit, Astro, an Express API) on the user's own Node; the daemon runs the job, and the project is served at `https://<name>.test` with its database, Mail and dev-server commands set up |
 | D-061 | 2026-11-25 | accepted 2026-11-25 (Phase 14; supersedes what D-006 left, builds on D-058 and D-060) | Devid runs D-058's MySQL, PostgreSQL and MongoDB: one server per engine under the daemon, on 127.0.0.1 at the usual port or the next free one, data in `~/.devid/data` that `uninstall --purge` keeps, accounts with generated passwords that one command creates or resets, the main MySQL and PostgreSQL account without a password, and `devid db` in the CLI, the TUI and the app |
 | D-060 | 2026-11-24 | accepted 2026-11-24 (an order; D-035 stands) | After Phase 13, the next phase wires D-058's databases into Devid; Node and Bun runtimes come later, in a phase of their own |
 | D-059 | 2026-11-24 | accepted 2026-11-24 (Phase 13; extends D-057); done in 0.20.0 2026-11-24 | Arch-based Linux: plain Arch first, then CachyOS and EndeavourOS; each part chosen by what the system has (p11-kit or Debian CA tools, systemd-resolved on or off), setup may turn systemd-resolved on and uninstall restores it, and fish gets a PATH file on every system; tested on GitHub's runners (Arch under QEMU/KVM) and a KDE Plasma VM on the old Mac |
@@ -1228,3 +1229,44 @@ See ARCHITECTURE, "PHP runtime".
     - MySQL 8.4 ran on 3307 and PostgreSQL 18 on 5433, next to DBngin's servers, which Devid never touched.
     - On each engine, the CLI and the TUI made two accounts each and gave one a new password.
     - A Laravel app migrated with each account.
+
+## D-063: `devid new` creates projects with the frameworks' own tools (accepted 2026-11-25, Phase 15)
+
+- **Context:**
+  - The owner asked for a feature that creates projects: "buatkan fitur baru untuk create project PHP, Laravel, Wordpress, NodeJs, dll", with suggestions before any documentation.
+  - Devid serves folders (D-011), detects their app type (D-035), runs their dev servers on demand (D-036, D-054) and, from Phase 14, runs databases with accounts (D-061). Making the project itself is still done by hand.
+  - Herd's wizard creates Laravel apps only; its WordPress guide is manual. Local covers WordPress only.
+  - React retired Create React App on 2025-02-14. The frameworks keep their own create tools current with each release.
+- **Decision:**
+  - **Interfaces:**
+    - `devid new <template> <name>` in the CLI;
+    - a wizard in the TUI (`n` on the Sites page);
+    - later, a page in the app, built from a design board the owner approves (D-026).
+  - **Templates in this phase:**
+    - blank PHP, Laravel (plain, and the React, Vue, Svelte and Livewire starter kits), WordPress, Symfony, CodeIgniter 4 and static;
+    - Node.js: React, Vue, Svelte and vanilla through Vite, Next.js, Nuxt, SvelteKit, Astro, and an Express API.
+  - **Official tools:**
+    - Devid runs each framework's own create tool: Composer's `create-project`, WP-CLI, `npm create` or `npx`.
+    - The tools run with fixed options, so nothing prompts, and only official packages run, by their exact names.
+    - Devid writes files of its own only where no tool exists: blank PHP, static, and the Express API.
+  - **The job:** the daemon runs it and reports its progress. The tools' output goes to `~/.devid/log/new-<name>.log`.
+  - **Where:** `--path`, else the first parked folder. With none, Devid offers to create and park `~/Sites`.
+  - **What Devid sets up:**
+    - the site and its preset, and `--php` through `devid isolate`;
+    - the database: SQLite for Laravel by default, MySQL or PostgreSQL through Devid's accounts (D-061); always a Devid MySQL account for WordPress;
+    - Mail's settings;
+    - the dev-server commands with on-demand start (D-054);
+    - Vite over HTTPS (D-056).
+  - **WP-CLI** joins Devid like `composer.phar`: downloaded from WP-CLI's GitHub release with its SHA-512, and the terminal command `wp` (D-053).
+  - **Node.js** stays the user's own (D-035, D-060), found through Devid's nvm lookup. npm is the default; pnpm, Yarn or Bun are used only if already installed.
+  - **A failure** keeps what was made, and Devid says what is there and how to remove it.
+- **Owner's answers (2026-11-25):**
+  - "saya ikut rekomendasi kamu", for the eight recommendations in `phase-15.md`.
+  - For Node.js, the official create tools rather than Devid's own templates: "Ya, tulis rencananya".
+- **Not in this decision:**
+  - templates from a Git repository;
+  - Devid's own Node and Bun (D-060);
+  - more frameworks;
+  - deploying.
+- **Plan:** `docs/roadmap/phase-15.md`, milestones N1 to N5, towards 0.22.0, after Phase 14.
+- **Status:** accepted on 2026-11-25. N1, the spike, starts after Phase 14.
