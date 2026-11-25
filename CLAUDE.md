@@ -18,7 +18,7 @@ Phase 1 (spike) is done. Phase 2 (daemon + CLI) is in progress; the milestones a
 - No Homebrew and no VM dependency at runtime.
 - PHP 8.3, 8.4, 8.5 and 8.6 (see D-009 and D-062), static builds, php-fpm with `pm = ondemand`.
 - One global web server: nginx by default, Caddy or Apache as alternatives (D-015).
-- Databases are out of scope (the owner uses DBngin).
+- Databases: Devid runs its own MySQL, PostgreSQL and MongoDB (D-061) next to DBngin's, which the owner still uses; never start, stop or touch DBngin's servers.
 
 ## Working rules
 
