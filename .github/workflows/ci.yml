@@ -49,7 +49,8 @@ jobs:
 
   db-e2e:
     # Phase 14 (D-061): the daemon installs MySQL, PostgreSQL and MongoDB from devid-binaries'
-    # db-latest, runs them and gives Devid its own way in, with the real builds; no sudo.
+    # db-latest, runs them and gives Devid its own way in, with the real builds; no sudo. Arch runs
+    # the same script in its VM, in arch-e2e (D5).
     strategy:
       fail-fast: false
       matrix:
@@ -89,7 +90,8 @@ jobs:
     # The same end to end on Arch (Phase 13 A3, D-059), in a VM on the runner: Arch's cloud image
     # under QEMU/KVM, set up like a desktop install (NetworkManager, systemd-resolved off). There
     # setup turns systemd-resolved on and trusts the CA through p11-kit, and uninstall must put
-    # /etc/resolv.conf and systemd-resolved back as they were. About five minutes.
+    # /etc/resolv.conf and systemd-resolved back as they were. Then db-e2e.sh runs the databases with
+    # the musl build (Phase 14 D5), so every pull request checks them on macOS, Ubuntu and Arch.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -108,6 +110,8 @@ jobs:
         timeout-minutes: 15
       - name: Setup, a site over HTTPS, and uninstall on Arch
         run: scripts/arch-vm.sh e2e target/x86_64-unknown-linux-musl/release/devid
+      - name: MySQL, PostgreSQL and MongoDB on Arch
+        run: scripts/arch-vm.sh db-e2e target/x86_64-unknown-linux-musl/release/devid
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
