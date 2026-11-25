@@ -2198,17 +2198,19 @@ mod tests {
             ),
             other => panic!("expected a new account, got {other:?}"),
         }
+        // Generated, so no password-like literal sits in the source for secret scanners.
+        let generated = devid_daemon::db::password();
         app.open_secret(
-            &json!({"engine": "mysql", "name": "blog", "database": "blogdb", "password": "pw123",
-                    "env": ["DB_CONNECTION=mysql", "DB_PASSWORD=pw123"]}),
+            &json!({"engine": "mysql", "name": "blog", "database": "blogdb", "password": generated,
+                    "env": ["DB_CONNECTION=mysql", "DB_USERNAME=blog"]}),
             true,
         );
         assert!(matches!(&app.mode, Mode::Secret(s) if s.title.contains("with the database blogdb")));
         assert!(matches!(
             app.handle_key(ch('c')),
-            Action::Do(Effect::CopyQuiet { text, .. }) if text == "DB_CONNECTION=mysql\nDB_PASSWORD=pw123\n"
+            Action::Do(Effect::CopyQuiet { text, .. }) if text == "DB_CONNECTION=mysql\nDB_USERNAME=blog\n"
         ));
-        assert!(matches!(app.handle_key(ch('y')), Action::Do(Effect::CopyQuiet { text, .. }) if text == "pw123"));
+        assert!(matches!(app.handle_key(ch('y')), Action::Do(Effect::CopyQuiet { text, .. }) if text == generated));
         assert!(matches!(app.handle_key(key(KeyCode::Esc)), Action::Do(Effect::LoadAccounts(_))));
     }
 

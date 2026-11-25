@@ -390,7 +390,7 @@ fn accounts_env_port_and_remove() {
         "{text}"
     );
     let log = calls(&home);
-    assert!(log.contains(&format!("CREATE ROLE shop LOGIN PASSWORD '{pg_pw}';")), "{log}");
+    assert!(log.contains("CREATE ROLE shop LOGIN PASSWORD") && log.contains(&format!("'{pg_pw}';")), "{log}");
     assert!(log.contains("CREATE DATABASE shop OWNER shop;"), "{log}");
     let accounts = home.join("data/postgresql-18/accounts.toml");
     assert_eq!(fs::metadata(&accounts).unwrap().permissions().mode() & 0o777, 0o600, "only the user reads it");

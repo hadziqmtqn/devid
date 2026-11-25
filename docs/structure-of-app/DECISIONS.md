@@ -1224,3 +1224,7 @@ See ARCHITECTURE, "PHP runtime".
   - **The clients** reach Devid's server unless told where to go. `mongosh` gets no password on its command line, which `ps` would show.
   - **`uninstall --purge`** keeps `~/.devid/data` unless `--delete-databases`.
   - **Stop time:** the login service now gives the daemon 75 s to stop (launchd's `ExitTimeOut`, systemd's `TimeoutStopSec`), so a database's clean stop is never cut short.
+  - **The M1 check:**
+    - MySQL 8.4 ran on 3307 and PostgreSQL 18 on 5433, next to DBngin's servers, which Devid never touched.
+    - On each engine, the CLI and the TUI made two accounts each and gave one a new password.
+    - A Laravel app migrated with each account.

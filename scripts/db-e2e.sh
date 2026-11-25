@@ -159,10 +159,12 @@ for engine in mysql postgresql mongodb; do
       [ "$(psql -h 127.0.0.1 -p "$port" -U postgres -c 'SELECT current_user')" = postgres ] ||
         fail "postgres over TCP without a password"
       [ "$(psql -h "$DEVID_HOME/run" -p "$port" -U postgres -c 'SELECT 1')" = 1 ] || fail "the socket"
-      psql -h 127.0.0.1 -p "$port" -U postgres -c "CREATE ROLE shop LOGIN PASSWORD 'secret'" || fail "create a role"
-      ! psql -h 127.0.0.1 -p "$port" -U shop -d postgres -c 'SELECT 1' 2>/dev/null ||
+      # A role of the test's own (not `shop`, which the accounts below make through Devid).
+      probe="$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
+      psql -h 127.0.0.1 -p "$port" -U postgres -c "CREATE ROLE probe LOGIN PASSWORD '$probe'" || fail "create a role"
+      ! psql -h 127.0.0.1 -p "$port" -U probe -d postgres -c 'SELECT 1' 2>/dev/null ||
         fail "another account got in without a password"
-      [ "$(PGPASSWORD=secret psql -h 127.0.0.1 -p "$port" -U shop -d postgres -c 'SELECT 1')" = 1 ] ||
+      [ "$(PGPASSWORD="$probe" psql -h 127.0.0.1 -p "$port" -U probe -d postgres -c 'SELECT 1')" = 1 ] ||
         fail "another account with its password"
       ;;
     mongodb)

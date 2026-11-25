@@ -42,7 +42,12 @@
 
 - **Local:** on the M1, `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` passed. As always, `paths::tests::passwd_home_matches_home` fails under a fake HOME and passes with the real one. `~/.zshrc` and `~/.zshenv` were unchanged after the run.
 - **CI:** `db-e2e` runs the accounts on the real builds on Ubuntu and macOS.
-- **The M1 check:** next (see the plan's "D3 results").
+- **The M1 check** (details in the plan's "D3 results"):
+  - **Setup:** a test daemon with a home of its own and spare ports. The home was a short path under `/tmp`, linked to the scratch folder, because of the socket limits. Its http, https and DNS ports were 18088, 18443 and 15353.
+  - **Next to DBngin:** MySQL 8.4.13 ran on 3307 and PostgreSQL 18.7 on 5433, one at a time.
+  - **Accounts:** the CLI and the TUI each made two accounts on each engine and gave one a new password.
+  - **Laravel:** a new Laravel app on Devid's PHP 8.5 migrated with every account.
+  - **How the TUI was driven:** a small Python script ran the real TUI in a pseudo-terminal (`pty.fork`, 120×40). It sent the keys (`5`, Enter, Enter, `a`, `a`, the name, Enter, Esc, `j`, `p`, `y`), and read the screen with the escape codes stripped. After each step it checked the result with `devid db env` and `devid db user list`.
 
 ## Gotchas
 
@@ -50,3 +55,5 @@
 - **The help popup:** the TUI's help must fit in 20 rows (a test draws it at 100×20). The Databases line replaced the blank line under the global keys.
 - **Page numbers:** the Databases page took number 5, so Logs and Settings moved to 6 and 7.
 - **The main account's `.env`:** an empty `DB_DATABASE=` would mean no database in Laravel, so the line is left out rather than empty.
+- **GitGuardian** flagged password-like literals in the first push's tests, such as `"pw123"` and `PASSWORD '{pg_pw}'`. Tests now generate such values, or check the SQL in two parts.
+- **`db-e2e`:** D2's PostgreSQL check made a role `shop` by hand, which made D3's `devid db user add postgresql shop` refuse it, as it should. That role is now `probe`, with a random password.

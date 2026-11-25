@@ -2,7 +2,7 @@
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
 > Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 built 2026-11-25** (the CLI, the TUI and accounts; see "D3 results"); its check on the M1 is next, then D4 (the app's page).
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). D4, the app's page, is next.
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -350,10 +350,29 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d3-cli-tui-acco
 - **PostgreSQL's `postgres`** gets no password from `devid db user password`. The plan said every account, the main one included. But `postgres` is trusted from this computer, so a password would never be checked; Devid says so instead.
 - **`devid db create`** takes the engine first (`devid db create mysql blog`), like the other commands.
 
-### Not yet
+### The M1 check (2026-11-25)
 
-- **The M1 check:** MySQL and PostgreSQL next to DBngin, two accounts and a new password from the CLI and the TUI, and a Laravel migration with each account.
-- **A real uninstall that keeps the data:** on the Linux VMs with the rc (D5). On the M1 only the dry run, since a real uninstall would undo the owner's own setup.
+D3's build ran in a test daemon with a home of its own and spare ports, one engine at a time. The home's path was short enough for the sockets. Devid never touched DBngin, whose servers kept their pids throughout.
+
+- **Next to DBngin:**
+  - MySQL 8.4.13 ran on 3307, beside DBngin's MySQL 9.7.2 on 3306. Its first start, download included, took 11 s.
+  - PostgreSQL 18.7 ran on 5433, beside DBngin's PostgreSQL 18.4 on 5432.
+- **From the CLI,** on each engine:
+  - Devid made the accounts `shop` and `blog`, each with a database of its own, and gave `shop` a new password.
+  - `devid db user password postgresql postgres` was refused, as planned.
+- **From the TUI:**
+  - The real TUI ran in a pseudo-terminal, with the keys a user presses.
+  - On each engine it made `tuiapp` and `tuiblog` from the Accounts view, and gave `tuiapp` a new password.
+  - Each password the TUI showed matched the one in `accounts.toml`.
+- **Laravel:**
+  - A new Laravel app, on Devid's PHP 8.5, migrated with each of the eight accounts, into the account's own database.
+  - Each database got the 9 tables; on PostgreSQL the account owned them.
+  - Each new MySQL account's first login used `caching_sha2_password` over TCP without TLS.
+- **Terminal commands:** `mysql` reached `root@localhost` on 3307 through the socket, and `psql` reached `postgres` on 5433.
+- **`devid doctor`:** "PostgreSQL 18 running on 127.0.0.1:5433".
+- **Uninstall:**
+  - The dry run of `--purge` deleted all but `data/` and kept `mysql-8.4` and `postgresql-18`; with `--delete-databases` it deleted them too.
+  - A real uninstall would undo the owner's own setup, so it runs on the Linux VMs with the rc (D5).
 
 ## Milestones
 
@@ -361,7 +380,7 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d3-cli-tui-acco
 |---|---|---|
 | D1 | **Spike** | the answers are in this doc, and D-061 is accepted or changed to match them (done 2026-11-25, see "D1 results") |
 | D2 | **Daemon:** the second manifest, install and update, the supervisor's additions (stop timeout, readiness, log file, orphan check by path), config, ports, API | unit tests cover install, ports and the supervisor changes, and a CLI test starts and stops each engine from a local test release (done 2026-11-25, see "D2 results") |
-| D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data (built 2026-11-25, see "D3 results") |
+| D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data (done 2026-11-25, see "D3 results"; a real uninstall runs on the VMs in D5) |
 | D4 | **The app's Databases page** (macOS), accounts included | the owner approves a design board, then adds an account and resets a password from the page on the M1 |
 | D5 | **CI, docs and release** | a database check runs on every pull request on macOS, Ubuntu and Arch; the README, the guide's new `/docs/databases` page, PROJECT_CONTEXT and CLAUDE.md are updated; 0.21.0 ships after an rc on the M1 and the Linux VMs |
 
