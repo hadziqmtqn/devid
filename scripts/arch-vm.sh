@@ -8,6 +8,8 @@
 # It changes the runner (KVM's permissions, QEMU's packages), so it is for throwaway runners only.
 #   scripts/arch-vm.sh boot                 download, check and boot the image, set it up, reboot
 #   scripts/arch-vm.sh e2e <path to devid>  run scripts/linux-e2e.sh in the VM with that devid
+#   scripts/arch-vm.sh db-e2e <path to devid>
+#                                           run scripts/db-e2e.sh there (Phase 14 D5, D-061)
 #   scripts/arch-vm.sh ssh <command>        run a command in the VM as arch
 #   scripts/arch-vm.sh copy <local> <remote>
 set -euo pipefail
@@ -66,7 +68,7 @@ printf '[Journal]\nForwardToConsole=yes\n' >/etc/systemd/journald.conf.d/arch-vm
 EOF
 }
 
-case "${1:?usage: arch-vm.sh boot|e2e|ssh|copy}" in
+case "${1:?usage: arch-vm.sh boot|e2e|db-e2e|ssh|copy}" in
   boot)
     mkdir -p "$W"
     # The standard runners have /dev/kvm, but only root may use it until a udev rule opens it.
@@ -115,7 +117,15 @@ EOF
     scp -q -P "$PORT" "${SSH_OPTS[@]}" "$devid" "$HERE/linux-e2e.sh" arch@127.0.0.1:
     "${SSH[@]}" "chmod +x '$(basename "$devid")' && bash linux-e2e.sh './$(basename "$devid")'"
     ;;
+  db-e2e)
+    # No sudo and a throwaway DEVID_HOME under /tmp, so it does not matter what e2e left. Its
+    # checks read JSON and probe ports with python3, which cloud-init already pulls in.
+    devid="${2:?usage: arch-vm.sh db-e2e <path to devid>}"
+    scp -q -P "$PORT" "${SSH_OPTS[@]}" "$devid" "$HERE/db-e2e.sh" arch@127.0.0.1:
+    "${SSH[@]}" "command -v python3 >/dev/null || sudo pacman -S --noconfirm --needed python >/dev/null
+      chmod +x '$(basename "$devid")' && bash db-e2e.sh './$(basename "$devid")'"
+    ;;
   ssh) shift; "${SSH[@]}" "$@" ;;
   copy) scp -q -P "$PORT" "${SSH_OPTS[@]}" "$2" "arch@127.0.0.1:$3" ;;
-  *) echo "usage: arch-vm.sh boot|e2e|ssh|copy" >&2; exit 2 ;;
+  *) echo "usage: arch-vm.sh boot|e2e|db-e2e|ssh|copy" >&2; exit 2 ;;
 esac
