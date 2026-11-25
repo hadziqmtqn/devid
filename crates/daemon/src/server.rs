@@ -4,6 +4,7 @@ use crate::{
     ca,
     commands::{self, Commands},
     config::{App, AppCommand, Config},
+    db::{self, Engine},
     dns, helper, install, logs, mail, nginx,
     ondemand::{self, OnDemand},
     paths::Paths,
@@ -64,6 +65,8 @@ struct State {
     /// Mailpit's archive while the first `mail on` downloads it, and its size (D-049), for the
     /// app's progress bar.
     mail_download: Mutex<Option<(PathBuf, u64)>>,
+    /// D-061: the database archive being downloaded (engine, archive, size), for progress.
+    db_download: Mutex<Option<(String, PathBuf, u64)>>,
 }
 
 /// Progress of a `PhpExtInstall`. Downloads count for 0–90 % by bytes (the archive's size on disk
@@ -164,6 +167,11 @@ impl State {
         if config.mail.enabled && mail::installed(&self.paths) {
             out.insert(mail::SERVICE.into());
         }
+        for (engine, d) in databases(&config) {
+            if d.enabled && db::installed(&self.paths, engine, &d.series) {
+                out.insert(engine.service().into());
+            }
+        }
         out
     }
 
@@ -226,6 +234,16 @@ impl State {
         if mail_on {
             fs::create_dir_all(mail::data(&self.paths)).map_err(|e| e.to_string())?;
             wanted.insert(mail::SERVICE.into(), mail::spec(&self.paths, &config.mail));
+        }
+        // D-061: the databases that are on, installed, set up and given a port.
+        for (engine, d) in databases(config) {
+            if d.enabled
+                && d.port != 0
+                && db::installed(&self.paths, engine, &d.series)
+                && db::initialized(&self.paths, engine, &d.series)
+            {
+                wanted.insert(engine.service().into(), db::spec(&self.paths, engine, &d.series, d.port));
+            }
         }
         {
             let paused = self.paused.lock().unwrap();
@@ -495,6 +513,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         on_demand: OnDemand::default(),
         redirect_check: Mutex::new(None),
         mail_download: Mutex::new(None),
+        db_download: Mutex::new(None),
     });
     // D-036: commands a crashed daemon left running are stopped. Found before any request can
     // start a new one; stopped in the background, as that may take 10 s.
@@ -687,6 +706,7 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                     .map(|(site, _)| json!({"site": site, "url": share_state(state, &site)["url"]}))
                     .collect::<Vec<_>>(),
                 "mail": mail_status(state, &config),
+                "databases": db_status(state, &config),
             }))
         }
         Request::Stop => {
@@ -846,6 +866,37 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                 });
             }
             mail_request(req, &config.mail)
+        }
+        Request::DbList { available } => {
+            let config = state.config.lock().unwrap().clone();
+            let mut reply = json!({"ok": true, "databases": db_status(state, &config)});
+            if available {
+                let manifest = releases::fetch_db_manifest(&state.paths).map_err(|e| e.to_string())?;
+                reply["available"] = db::ENGINES
+                    .iter()
+                    .map(|e| (e.name().to_string(), json!(releases::db_series(&manifest, e.name()))))
+                    .collect::<serde_json::Map<_, _>>()
+                    .into();
+                reply["release"] = manifest["tag"].clone();
+            }
+            Ok(reply)
+        }
+        Request::DbInstall { engine, series } => {
+            let engine = parse_engine(&engine)?;
+            let series = series.unwrap_or_else(|| db_series_in_use(state, engine));
+            let version = install_db(state, engine, &series, None, &|| {})?;
+            Ok(json!({"ok": true, "engine": engine.name(), "series": series, "version": version}))
+        }
+        Request::DbStart { engine, series } => db_start(state, parse_engine(&engine)?, series),
+        Request::DbStop { engine } => {
+            let engine = parse_engine(&engine)?;
+            state.mutate(|c, _| match c.databases.get_mut(engine.name()) {
+                Some(d) if d.enabled => {
+                    d.enabled = false;
+                    Ok(json!({"ok": true, "engine": engine.name(), "series": d.series}))
+                }
+                _ => Err(format!("{} is not on; `devid db start {}` starts it", engine.label(), engine.name())),
+            })
         }
         Request::Logs => Ok(json!({"ok": true, "logs": logs::list(&state.paths)})),
         Request::LogRead { name, offset } => {
@@ -1802,7 +1853,207 @@ fn mail_taken(config: &Config, sites: &[Site]) -> Vec<(u16, String)> {
             taken.push((s.upstream, format!("the dev server port of {}.{}", s.name, config.tld)));
         }
     }
+    for (engine, d) in databases(config) {
+        if d.port != 0 {
+            taken.push((d.port, format!("the port of Devid's {}", engine.label())));
+        }
+    }
     taken
+}
+
+/// The databases in config.toml (D-061), by engine; names Devid does not know are skipped.
+fn databases(config: &Config) -> Vec<(Engine, crate::config::Database)> {
+    config.databases.iter().filter_map(|(name, d)| Some((Engine::parse(name)?, d.clone()))).collect()
+}
+
+fn parse_engine(name: &str) -> Result<Engine, String> {
+    Engine::parse(name).ok_or_else(|| format!("unknown database {name:?}; Devid runs mysql, postgresql and mongodb"))
+}
+
+/// The series Devid runs for `engine`, else the engine's default one.
+fn db_series_in_use(state: &State, engine: Engine) -> String {
+    let config = state.config.lock().unwrap();
+    config
+        .databases
+        .get(engine.name())
+        .map(|d| d.series.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| engine.default_series().to_string())
+}
+
+/// Download a series' newest build from the database release (sha256 checked) and put it in place
+/// (D-061); MongoDB brings mongosh along. The data stays, and a running server of that series
+/// restarts on the new build. Returns the version.
+fn install_db(
+    state: &State,
+    engine: Engine,
+    series: &str,
+    manifest: Option<&Value>,
+    on_downloaded: &dyn Fn(),
+) -> Result<String, String> {
+    let fetched;
+    let manifest = match manifest {
+        Some(m) => m,
+        None => {
+            fetched = releases::fetch_db_manifest(&state.paths).map_err(|e| e.to_string())?;
+            &fetched
+        }
+    };
+    let build =
+        releases::db_artifact(manifest, engine.name(), Some(series)).ok_or_else(|| {
+            match releases::db_series(manifest, engine.name()) {
+                offered if offered.is_empty() => {
+                    format!("Devid's database release has no {} for this computer", engine.label())
+                }
+                offered => {
+                    format!("{} {series} is not built for this computer; it has {}", engine.label(), offered.join(", "))
+                }
+            }
+        })?;
+    if engine == Engine::Mongodb && !db::mongosh(&state.paths).is_file() {
+        install_mongosh(state, manifest, &|| {})?;
+    }
+    fetch_db_build(state, engine.name(), &build, on_downloaded, |dir| {
+        db::install(&state.paths, engine, series, dir, &build.version)
+    })?;
+    let in_use = state.config.lock().unwrap().databases.get(engine.name()).is_some_and(|d| d.series == series);
+    if in_use && state.supervisor.state().contains_key(engine.service()) {
+        state.supervisor.restart(engine.service());
+    }
+    Ok(build.version)
+}
+
+/// mongosh from the database release, which MongoDB needs for Devid's own accounts (D-061).
+fn install_mongosh(state: &State, manifest: &Value, on_downloaded: &dyn Fn()) -> Result<(), String> {
+    let build = releases::db_artifact(manifest, "mongosh", None)
+        .ok_or("Devid's database release has no mongosh for this computer")?;
+    fetch_db_build(state, "mongodb", &build, on_downloaded, |dir| {
+        db::install_mongosh(&state.paths, dir, &build.version)
+    })
+}
+
+/// Download one build of the database release (its progress in `db_download`), then put it in
+/// place with `place`.
+fn fetch_db_build(
+    state: &State,
+    engine: &str,
+    build: &releases::Artifact,
+    on_downloaded: &dyn Fn(),
+    place: impl FnOnce(&Path) -> io::Result<()>,
+) -> Result<(), String> {
+    *state.db_download.lock().unwrap() = Some((engine.into(), releases::archive_path(&state.paths, build), build.size));
+    let downloaded = releases::download_db(&state.paths, build).map_err(|e| e.to_string());
+    *state.db_download.lock().unwrap() = None;
+    let dir = downloaded?;
+    on_downloaded();
+    let placed = place(&dir).map_err(|e| e.to_string());
+    let _ = fs::remove_dir_all(&dir);
+    placed
+}
+
+/// Ports a database may not take: Devid's own, Mail's, the sites' and the other databases'.
+fn db_taken(config: &Config, sites: &[Site]) -> Vec<u16> {
+    let mut taken: Vec<u16> = mail_taken(config, sites).into_iter().map(|(p, _)| p).collect();
+    if config.mail.enabled {
+        taken.extend([config.mail.port, mail::inbox_port(&config.mail)]);
+    }
+    taken
+}
+
+/// D-061: run `engine`'s server from now on. The series is installed and its data set up first
+/// if needed, outside the config lock (MySQL's setup takes seconds); the first start picks its
+/// port. Then it waits for the server to answer and gives Devid its own way in.
+fn db_start(state: &State, engine: Engine, series: Option<String>) -> Result<Value, String> {
+    let current = state.config.lock().unwrap().databases.get(engine.name()).cloned().unwrap_or_default();
+    let series = series
+        .or_else(|| Some(current.series.clone()).filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| engine.default_series().to_string());
+    if !db::installed(&state.paths, engine, &series) {
+        install_db(state, engine, &series, None, &|| {})?;
+    }
+    db::init(&state.paths, engine, &series).map_err(|e| format!("setting up {}'s data: {e}", engine.label()))?;
+    let running = matches!(state.supervisor.state().get(engine.service()), Some(ProcState::Running(_)));
+    state.paused.lock().unwrap().remove(engine.service());
+    let reply = state.mutate(|c, sites| {
+        let taken = db_taken(c, sites);
+        let d = c.databases.entry(engine.name().into()).or_default();
+        if d.port == 0 {
+            d.port = db::pick_port(engine, &taken, ports::in_use)
+                .ok_or_else(|| format!("no free port from {} on for {}", engine.usual_port(), engine.label()))?;
+        } else if !running && ports::in_use(d.port) {
+            let who = ports::holder(d.port).unwrap_or_else(|| "another program".into());
+            return Err(format!("{}'s port {} is in use by {who}", engine.label(), d.port));
+        }
+        db::check_socket(&state.paths, engine, d.port)?;
+        d.series = series.clone();
+        d.enabled = true;
+        Ok(json!({"ok": true, "engine": engine.name(), "series": d.series, "port": d.port}))
+    })?;
+    let port = reply["port"].as_u64().map_or(0, |p| p as u16);
+    if !settled_running(|| state.supervisor.state().get(engine.service()).cloned(), Duration::from_secs(120)) {
+        return Err(db_failure(state, engine));
+    }
+    db::bootstrap(&state.paths, engine, &series, port)
+        .map_err(|e| format!("{} runs, but Devid could not set up its own account: {e}", engine.label()))?;
+    let mut reply = reply;
+    reply["version"] = json!(db::version(&state.paths, engine, &series));
+    let sock = db::socket(&state.paths, engine, port);
+    reply["socket"] = json!(db::socket_fits(&sock).then(|| sock.display().to_string()));
+    Ok(reply)
+}
+
+/// Why a database did not start: the end of its log.
+fn db_failure(state: &State, engine: Engine) -> String {
+    let log = db::log(&state.paths, engine);
+    let text = fs::read_to_string(&log).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().rev().take(6).collect();
+    let tail: Vec<&str> = lines.into_iter().rev().collect();
+    format!("{} did not start; the end of {}:\n{}", engine.label(), log.display(), tail.join("\n"))
+}
+
+/// Each engine's server for `status` (D-061): the series in use, its port and state, and the
+/// installed series.
+fn db_status(state: &State, config: &Config) -> Value {
+    let procs = state.supervisor.state();
+    let paused = state.paused.lock().unwrap().clone();
+    let download = state.db_download.lock().unwrap().clone();
+    let list: Vec<Value> = db::ENGINES
+        .iter()
+        .map(|&engine| {
+            let d = config.databases.get(engine.name()).cloned().unwrap_or_default();
+            let series = (!d.series.is_empty()).then_some(d.series.clone());
+            let installed = series.as_ref().is_some_and(|s| db::installed(&state.paths, engine, s));
+            let (status, pid) = match procs.get(engine.service()) {
+                _ if !d.enabled => ("off", None),
+                _ if !installed => ("not installed", None),
+                Some(ProcState::Running(pid)) => ("running", Some(*pid)),
+                Some(ProcState::Starting) => ("starting", None),
+                Some(ProcState::Failed) => ("failed", None),
+                None if paused.contains(engine.service()) => ("paused", None),
+                None => ("stopped", None),
+            };
+            let error = (status == "failed").then(|| match ports::in_use(d.port) {
+                true => format!(
+                    "port {} is in use by {}",
+                    d.port,
+                    ports::holder(d.port).unwrap_or_else(|| "another program".into())
+                ),
+                false => format!("{} keeps stopping; see {}", engine.label(), db::log(&state.paths, engine).display()),
+            });
+            let sock = db::socket(&state.paths, engine, d.port);
+            json!({
+                "engine": engine.name(), "label": engine.label(), "series": series, "enabled": d.enabled,
+                "port": (d.port != 0).then_some(d.port),
+                "version": series.as_ref().and_then(|s| db::version(&state.paths, engine, s)),
+                "state": status, "pid": pid, "error": error,
+                "socket": (d.port != 0 && db::socket_fits(&sock)).then(|| sock.display().to_string()),
+                "installed": db::installed_series(&state.paths, engine),
+                "download": download.as_ref().filter(|(e, _, _)| e == engine.name())
+                    .map(|(_, path, size)| json!({"got": arrived(&Some((path.clone(), *size)), true), "size": size})),
+            })
+        })
+        .collect();
+    json!(list)
 }
 
 /// Whether Devid's commands are on PATH for new terminals (D-053): `on` when every startup file of
@@ -1862,12 +2113,28 @@ fn mail_status(state: &State, config: &Config) -> Value {
 /// `check`. The periodic check (D-028) runs it with `check` on.
 fn find_updates(state: &State, check: bool) -> Result<Value, String> {
     let manifest = releases::fetch_manifest(&state.paths).map_err(|e| e.to_string())?;
-    let (plan, unknown) = plan_updates(state, &manifest);
+    let (mut plan, mut unknown) = plan_updates(state, &manifest);
+    // D-061: the database release only once a database is installed.
+    let any_db = db::ENGINES.iter().any(|&e| !db::installed_series(&state.paths, e).is_empty());
+    let db_manifest = match any_db {
+        true => match releases::fetch_db_manifest(&state.paths) {
+            Ok(m) => {
+                plan_db_updates(state, &m, &mut plan, &mut unknown);
+                Some(m)
+            }
+            Err(e) => {
+                unknown.push(format!("databases (Devid's database release: {e})"));
+                None
+            }
+        },
+        false => None,
+    };
     let changes: Vec<Value> = plan.iter().map(|p| p.change.clone()).collect();
     if !check && !plan.is_empty() {
-        apply_updates(state, &manifest, plan)?;
+        apply_updates(state, &manifest, db_manifest.as_ref(), plan)?;
     }
-    Ok(json!({"ok": true, "changes": changes, "unknown": unknown, "applied": !check, "release": manifest["tag"]}))
+    Ok(json!({"ok": true, "changes": changes, "unknown": unknown, "applied": !check, "release": manifest["tag"],
+              "db_release": db_manifest.as_ref().map(|m| m["tag"].clone())}))
 }
 
 /// One change `update` makes: its line for the reply (with the download `size`), the archive it
@@ -1886,6 +2153,9 @@ enum Install {
     RemoveExt(String, String),
     Server(&'static str),
     Mail,
+    /// A database series' newer build (D-061); its data stays.
+    Db(Engine, String),
+    Mongosh,
 }
 
 /// What is newer in the release, in the order `update` installs it: each PHP version, then its
@@ -1966,9 +2236,48 @@ fn plan_updates(state: &State, manifest: &Value) -> (Vec<Planned>, Vec<String>) 
     (plan, unknown)
 }
 
+/// Newer builds of the installed database series and of mongosh, in the database release (D-061).
+/// A newer series (MySQL 9.7 after 8.4) is never offered: moving data across series is a dump and
+/// restore.
+fn plan_db_updates(state: &State, manifest: &Value, plan: &mut Vec<Planned>, unknown: &mut Vec<String>) {
+    for engine in db::ENGINES {
+        for series in db::installed_series(&state.paths, engine) {
+            let Some(a) = releases::db_artifact(manifest, engine.name(), Some(&series)) else { continue };
+            let what = format!("{} {series}", engine.name());
+            match db::version(&state.paths, engine, &series) {
+                None => unknown.push(what),
+                Some(current) if releases::newer(&a.version, &current) => plan.push(Planned {
+                    change: json!({"what": what, "from": current, "to": a.version, "size": a.size}),
+                    download: Some((releases::archive_path(&state.paths, &a), a.size)),
+                    install: Install::Db(engine, series),
+                }),
+                Some(_) => {}
+            }
+        }
+    }
+    if db::mongosh(&state.paths).is_file()
+        && let Some(a) = releases::db_artifact(manifest, "mongosh", None)
+    {
+        match db::mongosh_version(&state.paths) {
+            None => unknown.push("mongosh".into()),
+            Some(current) if releases::newer(&a.version, &current) => plan.push(Planned {
+                change: json!({"what": "mongosh", "from": current, "to": a.version, "size": a.size}),
+                download: Some((releases::archive_path(&state.paths, &a), a.size)),
+                install: Install::Mongosh,
+            }),
+            Some(_) => {}
+        }
+    }
+}
+
 /// Installs `plan` in order, one at a time, with its progress in `update_job`. php-fpm restarts
 /// after a version's extensions change. The first failure stops it; what was installed stays.
-fn apply_updates(state: &State, manifest: &Value, plan: Vec<Planned>) -> Result<(), String> {
+fn apply_updates(
+    state: &State,
+    manifest: &Value,
+    db_manifest: Option<&Value>,
+    plan: Vec<Planned>,
+) -> Result<(), String> {
     *state.update_job.lock().unwrap() = Some(UpdateJob {
         items: plan.iter().map(|p| p.change.clone()).collect(),
         index: 0,
@@ -2009,6 +2318,11 @@ fn apply_updates(state: &State, manifest: &Value, plan: Vec<Planned>) -> Result<
             Install::RemoveExt(version, name) => phpext::remove(&state.paths, version, name).map_err(|e| e.to_string()),
             Install::Server(server) => install_server(state, server, None, Some(manifest), &installing),
             Install::Mail => install_mail(state, Some(manifest), &installing),
+            Install::Db(engine, series) => install_db(state, *engine, series, db_manifest, &installing).map(|_| ()),
+            Install::Mongosh => match db_manifest {
+                Some(m) => install_mongosh(state, m, &installing),
+                None => Err("Devid's database release could not be read".into()),
+            },
         };
         if result.is_ok()
             && let Some(version) = ext_version(Some(p)).filter(|v| ext_version(plan.get(i + 1)).as_ref() != Some(v))

@@ -247,6 +247,28 @@ enum Command {
         #[command(subcommand)]
         action: Option<MailAction>,
     },
+    /// MySQL, PostgreSQL and MongoDB, run by Devid on this computer. With no action: their status
+    Db {
+        #[command(subcommand)]
+        action: Option<DbAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DbAction {
+    /// Each database's server; --available also lists the series Devid can install here
+    List {
+        #[arg(long)]
+        available: bool,
+    },
+    /// Download a database without starting it (default series: the one in use, else MySQL 8.4,
+    /// PostgreSQL 18, MongoDB 8.0)
+    Install { engine: String, series: Option<String> },
+    /// Run a database from now on, with Devid; the first time, Devid downloads it, sets it up and
+    /// picks its port (the usual one, or the next free one)
+    Start { engine: String, series: Option<String> },
+    /// Stop a database and keep it off; its data stays
+    Stop { engine: String },
 }
 
 #[derive(Subcommand)]
@@ -653,6 +675,7 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             }
         }),
         Command::Mail { action } => mail(action, paths),
+        Command::Db { action } => db(action, paths),
         Command::Share { site, stop: false } => {
             println!("starting a Cloudflare quick tunnel…");
             let v = send(Request::ShareStart { site, cwd: cwd()? })?;
@@ -772,6 +795,86 @@ fn mail(action: Option<MailAction>, paths: &Paths) -> Result<(), String> {
             .map(|v| println!("deleted {}", plural(v["deleted"].as_u64().unwrap_or(0), "message"))),
         Some(MailAction::Save { id, part }) => {
             send(Request::MailSave { id, part }).map(|v| println!("saved {}", v["path"].as_str().unwrap_or("?")))
+        }
+    }
+}
+
+/// `devid db` (D-061, Phase 14).
+fn db(action: Option<DbAction>, paths: &Paths) -> Result<(), String> {
+    let send = |req: Request| request(paths, &req);
+    let label = |engine: &str| {
+        devid_daemon::db::Engine::parse(engine).map_or_else(|| engine.to_string(), |e| e.label().to_string())
+    };
+    match action {
+        None => send(Request::DbList { available: false }).map(|v| print_databases(&v, false)),
+        Some(DbAction::List { available }) => {
+            send(Request::DbList { available }).map(|v| print_databases(&v, available))
+        }
+        Some(DbAction::Install { engine, series }) => {
+            println!("downloading {} (sha256-checked)…", label(&engine));
+            let v = send(Request::DbInstall { engine, series })?;
+            let engine = v["engine"].as_str().unwrap_or("?");
+            println!(
+                "installed {} {} ({}); `devid db start {engine}` runs it",
+                label(engine),
+                v["series"].as_str().unwrap_or("?"),
+                v["version"].as_str().unwrap_or("?")
+            );
+            Ok(())
+        }
+        Some(DbAction::Start { engine, series }) => {
+            println!(
+                "starting {} (the first time, Devid downloads it, sha256-checked, and sets it up)…",
+                label(&engine)
+            );
+            let v = send(Request::DbStart { engine, series })?;
+            let engine = v["engine"].as_str().unwrap_or("?");
+            println!(
+                "{} {} runs on 127.0.0.1:{}{}",
+                label(engine),
+                v["version"].as_str().unwrap_or("?"),
+                v["port"],
+                v["socket"].as_str().map(|s| format!(" (socket {s})")).unwrap_or_default()
+            );
+            Ok(())
+        }
+        Some(DbAction::Stop { engine }) => send(Request::DbStop { engine }).map(|v| {
+            let engine = v["engine"].as_str().unwrap_or("?");
+            println!("{} is off; its data stays in ~/.devid/data", label(engine))
+        }),
+    }
+}
+
+fn print_databases(v: &serde_json::Value, available: bool) {
+    for d in v["databases"].as_array().into_iter().flatten() {
+        let name = d["label"].as_str().unwrap_or("?");
+        let engine = d["engine"].as_str().unwrap_or("?");
+        let state = d["state"].as_str().unwrap_or("?");
+        let what = match (d["series"].as_str(), d["version"].as_str()) {
+            (Some(s), Some(v)) => format!("{s} ({v})"),
+            (Some(s), None) => s.to_string(),
+            _ => "-".to_string(),
+        };
+        let wher = match (state, d["port"].as_u64()) {
+            ("off", _) => format!("`devid db start {engine}` starts it"),
+            (_, Some(port)) => format!("127.0.0.1:{port}"),
+            _ => String::new(),
+        };
+        println!("{name:<11} {what:<16} {state:<13} {wher}");
+        if let Some(problem) = d["error"].as_str() {
+            println!("            problem: {problem}");
+        }
+        let installed: Vec<&str> = d["installed"].as_array().into_iter().flatten().filter_map(|s| s.as_str()).collect();
+        if installed.len() > 1 {
+            println!("            installed: {}", installed.join(", "));
+        }
+    }
+    if available {
+        println!("\nin Devid's database release ({}):", v["release"].as_str().unwrap_or("?"));
+        for (engine, series) in v["available"].as_object().into_iter().flatten() {
+            let list: Vec<&str> = series.as_array().into_iter().flatten().filter_map(|s| s.as_str()).collect();
+            let shown = if list.is_empty() { "none for this computer".to_string() } else { list.join(", ") };
+            println!("  {engine:<11} {shown}");
         }
     }
 }

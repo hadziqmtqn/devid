@@ -47,6 +47,24 @@ jobs:
       - run: cargo clippy -p devid-gui --all-targets -- -D warnings
       - run: cargo test -p devid-gui
 
+  db-e2e:
+    # Phase 14 (D-061): the daemon installs MySQL, PostgreSQL and MongoDB from devid-binaries'
+    # db-latest, runs them and gives Devid its own way in, with the real builds; no sudo.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: db-e2e
+      - run: cargo build --bin devid
+      - run: scripts/db-e2e.sh target/debug/devid
+
   linux-e2e:
     # Devid on Linux end to end (Phase 12 L3, D-057): the static musl build runs `devid setup` with
     # its real root step (the runner allows sudo), serves a site over HTTPS to curl and headless

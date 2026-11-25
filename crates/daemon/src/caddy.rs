@@ -251,6 +251,10 @@ pub fn spec(paths: &Paths) -> Spec {
         write_pid: false,
         comm: "caddy",
         stop_signal: libc::SIGTERM,
+        stop_timeout: crate::supervisor::STOP_TIMEOUT,
+        log: None,
+        ready_port: None,
+        ready_file: None,
     }
 }
 
