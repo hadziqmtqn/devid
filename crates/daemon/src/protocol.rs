@@ -296,6 +296,58 @@ pub enum Request {
     DbStop {
         engine: String,
     },
+    /// Make an account with a generated password (or `password`), and by default a database of its
+    /// own named after it (`database`, or none with `no_database`; MongoDB always has one). The
+    /// reply has the password and the `.env` lines.
+    DbUserAdd {
+        engine: String,
+        name: String,
+        #[serde(default)]
+        database: Option<String>,
+        #[serde(default)]
+        password: Option<String>,
+        #[serde(default)]
+        no_database: bool,
+    },
+    /// Give an account a new password: a generated one, or `password`.
+    DbUserPassword {
+        engine: String,
+        name: String,
+        #[serde(default)]
+        password: Option<String>,
+    },
+    /// The accounts people sign in with, and whether Devid knows each one's password.
+    DbUserList {
+        engine: String,
+    },
+    /// Remove an account; its databases stay.
+    DbUserRemove {
+        engine: String,
+        name: String,
+    },
+    /// The `.env` lines for an account (default: the main one).
+    DbEnv {
+        engine: String,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// A database without an account of its own.
+    DbCreate {
+        engine: String,
+        database: String,
+    },
+    /// Move a server to another port; it restarts there.
+    DbPort {
+        engine: String,
+        port: u16,
+    },
+    /// Remove an installed series that is not in use; its data stays unless `delete_data`.
+    DbRemove {
+        engine: String,
+        series: String,
+        #[serde(default)]
+        delete_data: bool,
+    },
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

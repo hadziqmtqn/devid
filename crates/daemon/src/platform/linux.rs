@@ -356,6 +356,7 @@ fn unit_quote(s: &str) -> String {
 pub fn service_unit(paths: &Paths) -> String {
     let bin = install::installed_bin(paths).display().to_string();
     let log = paths.log_dir().join("daemon.log").display().to_string().replace('%', "%%");
+    let timeout = super::EXIT_TIMEOUT;
     format!(
         "[Unit]\n\
          Description=Devid daemon (local sites, PHP and the web server)\n\
@@ -368,6 +369,8 @@ pub fn service_unit(paths: &Paths) -> String {
          # Only the daemon gets SIGTERM; it stops PHP, the web server and dev servers itself, as under\n\
          # launchd. Whatever is left after it exits is killed.\n\
          KillMode=mixed\n\
+         # A database may take up to a minute to stop cleanly (D-061).\n\
+         TimeoutStopSec={timeout}\n\
          StandardOutput=append:{log}\n\
          StandardError=append:{log}\n\
          \n\
