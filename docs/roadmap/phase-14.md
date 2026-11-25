@@ -2,7 +2,7 @@
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
 > Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1)
-> Status: proposed 2026-11-25. Waits for the owner's answers (see "Questions for the owner"). D-061 is written once they are in.
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". D1 (the spike) is next.
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -186,6 +186,17 @@ Devid must never stop them, touch their data or take their ports, as it treats t
 
 - **Order:** databases before the Linux desktop app ("Database dulu"). Claude recommended it: databases add something Devid lacks on every platform, Linux has no DBngin, and the CLI and the TUI already do everything the app does. Since the app's pages are shared, a Databases page built now carries over to a Linux app later.
 - **Accounts:** "yang saya harapkan ada fitur mudah membuat beberapa akun database dan mudah reset password". Creating several accounts and resetting passwords are now part of the proposal, in "Accounts and passwords", with D1 item 7 and questions 5 and 10.
+- **Questions 1 to 10:** "Ikuti rekomendasi". Every recommendation stands:
+  - all three engines;
+  - one server per engine;
+  - off until started by hand, then with the daemon;
+  - the usual port or the next free one, saved;
+  - the main MySQL and PostgreSQL account without a password, MongoDB's with one;
+  - `--purge` keeps the databases;
+  - the app's page in D4;
+  - terminal commands only for installed engines;
+  - the out-of-scope docs reworded in D5;
+  - the passwords Devid sets kept in a file only the user can read.
 
 ## Not in this phase
 

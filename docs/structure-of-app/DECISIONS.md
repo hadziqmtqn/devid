@@ -13,7 +13,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-003 | 2026-11-01 | superseded by D-012 | GUI: Tauri v2 + React + Tailwind + shadcn/ui, menu bar first |
 | D-004 | 2026-11-01 | accepted (version range superseded by D-009) | PHP 8.1 to latest from static-php-cli builds, php-fpm with `pm = ondemand` |
 | D-005 | 2026-11-01 | accepted (default changed to nginx by D-015; all three implemented in M7) | One global web server: Caddy (default), nginx, Apache |
-| D-006 | 2026-11-01 | superseded in part by D-058 (binaries are built; Devid does not run databases yet) | Databases are out of scope (DBngin is used) |
+| D-006 | 2026-11-01 | superseded by D-058 (the binaries) and D-061 (Devid runs them, Phase 14) | Databases are out of scope (DBngin is used) |
 | D-007 | 2026-11-01 | accepted (applies to the TUI page structure, D-012) | UI follows macOS System Settings, per the approved prototype |
 | D-008 | 2026-11-02 | accepted | How to ship static PHP binaries (details below) |
 | D-009 | 2026-11-02 | accepted | Supported PHP versions: 8.3, 8.4, 8.5; no 8.1 or 8.2 |
@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-061 | 2026-11-25 | accepted 2026-11-25 (Phase 14; supersedes what D-006 left, builds on D-058 and D-060) | Devid runs D-058's MySQL, PostgreSQL and MongoDB: one server per engine under the daemon, on 127.0.0.1 at the usual port or the next free one, data in `~/.devid/data` that `uninstall --purge` keeps, accounts with generated passwords that one command creates or resets, the main MySQL and PostgreSQL account without a password, and `devid db` in the CLI, the TUI and the app |
 | D-060 | 2026-11-24 | accepted 2026-11-24 (an order; D-035 stands) | After Phase 13, the next phase wires D-058's databases into Devid; Node and Bun runtimes come later, in a phase of their own |
 | D-059 | 2026-11-24 | accepted 2026-11-24 (Phase 13; extends D-057); done in 0.20.0 2026-11-24 | Arch-based Linux: plain Arch first, then CachyOS and EndeavourOS; each part chosen by what the system has (p11-kit or Debian CA tools, systemd-resolved on or off), setup may turn systemd-resolved on and uninstall restores it, and fish gets a PATH file on every system; tested on GitHub's runners (Arch under QEMU/KVM) and a KDE Plasma VM on the old Mac |
 | D-058 | 2026-11-24 | accepted 2026-11-24 (supersedes D-006 in part) | Database binaries for every Devid platform: official MySQL and MongoDB builds mirrored, PostgreSQL built from source, in a release track of their own; Devid does not run them yet |
@@ -1166,3 +1167,40 @@ See ARCHITECTURE, "PHP runtime".
   - **Cost:** no idle RAM, only disk (about 40 to 70 MB per version), so it fits D-052 whenever it comes.
 - **Owner's answer (2026-11-24):** "Integrasi database dulu".
 - **Status:** accepted on 2026-11-24. No plan yet: the database phase gets its roadmap file when Phase 13 closes.
+
+## D-061: Devid runs MySQL, PostgreSQL and MongoDB, with accounts (accepted 2026-11-25, Phase 14)
+
+- **Context:**
+  - D-058 built the databases for every Devid platform, published in devid-binaries' `db-latest`. D-060 made running them the phase after Arch.
+  - macOS users have DBngin; Linux users have nothing comparable. On the owner's M1, DBngin runs PostgreSQL 18 on 5432 and MySQL 9.7 on 3306.
+  - The owner asked for easy creation of several accounts and easy password resets: "yang saya harapkan ada fitur mudah membuat beberapa akun database dan mudah reset password".
+- **Decision:**
+  - **Engines:** MySQL, PostgreSQL and MongoDB from `db-latest`. Devid reads it as a second manifest (`downloads/db-manifest.json`), using each platform entry's own `version`.
+  - **One server per engine,** in the series the user picks. Switching series keeps the old data folder.
+  - **Folders:**
+    - binaries in `~/.devid/db/<engine>-<series>/`;
+    - data in `~/.devid/data/<engine>-<series>/`;
+    - sockets in `~/.devid/run/`;
+    - logs in `~/.devid/log/<engine>.log`.
+  - **The supervisor gains** a stop timeout per service, stops that do not hold the lock `status` needs, a log file per service, a readiness check, and an orphan check by executable path.
+  - **Starting:** off until started by hand (`devid db start`), then with the daemon. No on-demand start, which would need a TCP relay.
+  - **Ports:** 127.0.0.1 only, on the usual port, else the next free one, chosen at the first start and saved. On the owner's M1 that gives 3307 and 5433 next to DBngin.
+  - **Accounts:**
+    - `devid db user add|password|list|remove`, with generated passwords and `devid db env <engine> <account>` for the `.env` lines;
+    - the same actions in the TUI and the app;
+    - passwords enforced on every engine;
+    - Devid's own way into each server, so any password can be reset, the main account's included;
+    - the passwords Devid sets kept in `accounts.toml`, readable only by the user;
+    - MySQL's `root` and PostgreSQL's `postgres` without a password from this computer, and MongoDB's `root` with a generated one.
+  - **Clients** (`mysql`, `mysqldump`, `psql`, `pg_dump`, `pg_restore`, `mongosh`) as terminal commands (D-053), linked only for installed engines.
+  - **Updates** within a series through `devid update`. A new series is a dump and restore.
+  - **Uninstall:** `uninstall --purge` keeps `~/.devid/data` unless `--delete-databases` is given.
+  - **Limits shown:** macOS 14 for MySQL and for MongoDB 8.0 and 9.0, AVX for MongoDB, no more MySQL fixes on Intel Macs, no Linux arm64, and `LD_LIBRARY_PATH` for `mongod` on Linux.
+  - **Interfaces:** `devid db`, a TUI page, `devid doctor`, and an app page built from a design board the owner approves.
+  - **DBngin and Homebrew:** Devid never starts, stops or reads their servers or data. It only avoids their ports.
+- **Owner's answers (2026-11-25):**
+  - "Database dulu": databases before the Linux desktop app.
+  - The accounts wish, quoted under Context.
+  - "Ikuti rekomendasi" for all ten questions in `phase-14.md`.
+- **Plan:** `docs/roadmap/phase-14.md`, milestones D1 to D5, towards 0.21.0.
+- **Status:** accepted on 2026-11-25. D1, the spike, comes next.
