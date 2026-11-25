@@ -1230,9 +1230,9 @@ See ARCHITECTURE, "PHP runtime".
   - **Versions:** Devid supports PHP 8.3, 8.4, 8.5 and 8.6 from devid 0.20.1. `php8.6` joins the terminal commands (D-053), and the TUI and the app list 8.6.
   - **8.3 stays** until its security support ends on 2027-12-31. Then D-009's end-of-life rule applies.
   - **The default stays 8.5** for new installs (`default_php`) until Xdebug 3.6.0 is stable and the catalog builds for 8.6. 8.6 then becomes the default in a release of its own.
-  - **The build:** static-php-cli 2.8.5 stays. For 8.6 only, `devid-binaries` adds the two fixes spc's v3 branch makes (`--enable-pic` instead of `--with-pic`, and `<locale>` before `php.h` in C++ sources) and builds Xdebug 3.6.0alpha1, phpredis 6.4.0RC1 and pcov from its fix commit. Each goes once its project releases 8.6 support. 8.3 to 8.5 build as before.
+  - **The build:** static-php-cli 2.8.5 stays. For 8.6 only, `devid-binaries` adds the two fixes spc's v3 branch makes (`--enable-pic` instead of `--with-pic`, and `<locale>` before `php.h` in C++ sources) and builds Xdebug 3.6.0alpha1, phpredis 6.4.0RC1 and pcov from its fix commit. CI turned up two more fixes, also for 8.6 only: phpmicro's patches named exactly, since spc's list of versions ends at 8.5, and on Linux autoconf answers that keep `epoll_pwait2` (glibc 2.35) out of a build for glibc 2.17. Each goes once its project releases 8.6 support. 8.3 to 8.5 build as before.
   - **The catalog for 8.6:** official releases only. The aliases 8.6 removed come back at build time with their 8.5 definitions (`extensions/php-8.6-compat.h`, the list spc v3 restores), so imagick, ldap and mongodb build. apcu, igbinary, memcached, msgpack and swoole skip 8.6 (`SKIP` in their recipes) until a release of theirs supports it.
-  - **D-009's rule:** a new minor may ship before static-php-cli releases support for it, when the fixes are small, limited to that version and taken from spc's own work.
+  - **D-009's rule:** a new minor may ship before static-php-cli releases support for it, when the fixes are small and limited to that version.
 - **Why:**
   - 8.6 is supported until 2030, and projects that want it can use it now. Nothing changes for 8.3 to 8.5 or for anyone who does not install 8.6.
   - The default stays on the version where Xdebug and the whole catalog work.
