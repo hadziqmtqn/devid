@@ -119,9 +119,12 @@ enum Command {
     Uninstall {
         #[arg(long)]
         dry_run: bool,
-        /// Also delete ~/.devid (PHP, config, CA, certificates)
+        /// Also delete ~/.devid (PHP, config, CA, certificates); the databases in ~/.devid/data stay
         #[arg(long)]
         purge: bool,
+        /// With --purge: delete the databases in ~/.devid/data too, for good
+        #[arg(long, requires = "purge")]
+        delete_databases: bool,
     },
     /// One-time system setup that needs your password (.test DNS, ports 80/443, CA trust)
     Helper {
@@ -269,6 +272,56 @@ enum DbAction {
     Start { engine: String, series: Option<String> },
     /// Stop a database and keep it off; its data stays
     Stop { engine: String },
+    /// Run another series of a database instead (each series has its own data and accounts)
+    Use { engine: String, series: String },
+    /// Move a database to another port; it restarts there
+    Port { engine: String, port: u16 },
+    /// Make a database without an account of its own
+    Create { engine: String, database: String },
+    /// Print an account's .env lines (default: the main account), e.g. `devid db env mysql shop >> .env`
+    Env { engine: String, name: Option<String> },
+    /// Remove an installed series that is not in use; its data stays unless --delete-data
+    Remove {
+        engine: String,
+        series: String,
+        /// Also delete the series' data in ~/.devid/data, for good
+        #[arg(long)]
+        delete_data: bool,
+    },
+    /// Accounts: add, password, list, remove
+    User {
+        #[command(subcommand)]
+        action: DbUserAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum DbUserAction {
+    /// Make an account with a generated password and a database of its own, named after it
+    Add {
+        engine: String,
+        name: String,
+        /// The account's database (default: its name); made if missing
+        #[arg(long)]
+        database: Option<String>,
+        /// The password (default: a generated one)
+        #[arg(long)]
+        password: Option<String>,
+        /// No database of its own (MySQL and PostgreSQL)
+        #[arg(long, conflicts_with = "database")]
+        no_database: bool,
+    },
+    /// Give an account a new password: a generated one, or --password
+    Password {
+        engine: String,
+        name: String,
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// The accounts, and which passwords Devid keeps
+    List { engine: String },
+    /// Remove an account; its databases and their data stay
+    Remove { engine: String, name: String },
 }
 
 #[derive(Subcommand)]
@@ -624,7 +677,9 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             None => Ok(()),
         },
         Command::SelfUpdate { check, no_sudo } => setup::self_update(paths, check, no_sudo),
-        Command::Uninstall { dry_run, purge } => setup::uninstall(paths, dry_run, purge),
+        Command::Uninstall { dry_run, purge, delete_databases } => {
+            setup::uninstall(paths, dry_run, purge, delete_databases)
+        }
         Command::Sites { json } => send(Request::Sites).map(|v| {
             print_sites(&v["sites"], json);
             let ignored: Vec<&str> =
@@ -842,6 +897,123 @@ fn db(action: Option<DbAction>, paths: &Paths) -> Result<(), String> {
             let engine = v["engine"].as_str().unwrap_or("?");
             println!("{} is off; its data stays in ~/.devid/data", label(engine))
         }),
+        Some(DbAction::Use { engine, series }) => {
+            println!("starting {} {series} (Devid downloads it first if needed, sha256-checked)…", label(&engine));
+            let v = send(Request::DbStart { engine, series: Some(series) })?;
+            let engine = v["engine"].as_str().unwrap_or("?");
+            println!("{} {} runs on 127.0.0.1:{}", label(engine), v["version"].as_str().unwrap_or("?"), v["port"]);
+            println!("each series has its own data and accounts; the others' stay in ~/.devid/data");
+            Ok(())
+        }
+        Some(DbAction::Port { engine, port }) => {
+            let v = send(Request::DbPort { engine, port })?;
+            let engine = v["engine"].as_str().unwrap_or("?");
+            match (v["changed"] == true, v["enabled"] == true) {
+                (false, _) => println!("{} is on port {port} already", label(engine)),
+                (true, true) => println!("{} runs on 127.0.0.1:{port} now; update DB_PORT in your apps", label(engine)),
+                (true, false) => println!("{} will run on port {port}; update DB_PORT in your apps", label(engine)),
+            }
+            Ok(())
+        }
+        Some(DbAction::Create { engine, database }) => {
+            let v = send(Request::DbCreate { engine, database })?;
+            let engine = v["engine"].as_str().unwrap_or("?");
+            let database = v["database"].as_str().unwrap_or("?");
+            if engine == "mongodb" {
+                println!("MongoDB makes the database {database} when an app first writes to it");
+            } else {
+                println!("made the {} database {database}", label(engine));
+            }
+            println!("`devid db user add {engine} <name> --database {database}` gives an account every right on it");
+            Ok(())
+        }
+        Some(DbAction::Env { engine, name }) => {
+            let v = send(Request::DbEnv { engine, name })?;
+            print_lines(&v["env"]);
+            if !v["env"].to_string().contains("DB_DATABASE") {
+                eprintln!("(DB_DATABASE stays as your app has it; Laravel's `migrate` offers to create a missing one)");
+            }
+            Ok(())
+        }
+        Some(DbAction::Remove { engine, series, delete_data }) => {
+            let v = send(Request::DbRemove { engine, series, delete_data })?;
+            let engine = v["engine"].as_str().unwrap_or("?");
+            let series = v["series"].as_str().unwrap_or("?");
+            let data = v["data"].as_str().unwrap_or("?");
+            match v["data_kept"] == true {
+                true => println!("removed {} {series}; its data stays in {data}", label(engine)),
+                false => println!("removed {} {series} and its data", label(engine)),
+            }
+            Ok(())
+        }
+        Some(DbAction::User { action }) => db_user(action, paths),
+    }
+}
+
+/// `devid db user`: accounts with passwords Devid generates and keeps (D-061).
+fn db_user(action: DbUserAction, paths: &Paths) -> Result<(), String> {
+    let send = |req: Request| request(paths, &req);
+    let label = |engine: &serde_json::Value| {
+        engine
+            .as_str()
+            .and_then(devid_daemon::db::Engine::parse)
+            .map_or_else(|| "?".to_string(), |e| e.label().to_string())
+    };
+    match action {
+        DbUserAction::Add { engine, name, database, password, no_database } => {
+            let v = send(Request::DbUserAdd { engine, name, database, password, no_database })?;
+            let with = v["database"].as_str().map(|d| format!(", with the database {d}")).unwrap_or_default();
+            println!("made the {} account {}{with}", label(&v["engine"]), v["name"].as_str().unwrap_or("?"));
+            print_account(&v);
+            Ok(())
+        }
+        DbUserAction::Password { engine, name, password } => {
+            let v = send(Request::DbUserPassword { engine, name, password })?;
+            println!("new password for the {} account {}", label(&v["engine"]), v["name"].as_str().unwrap_or("?"));
+            print_account(&v);
+            Ok(())
+        }
+        DbUserAction::List { engine } => {
+            let v = send(Request::DbUserList { engine })?;
+            let engine = v["engine"].as_str().unwrap_or("?");
+            println!("{} {} on 127.0.0.1:{}", label(&v["engine"]), v["series"].as_str().unwrap_or("?"), v["port"]);
+            println!("{:<20} {:<20} PASSWORD", "ACCOUNT", "DATABASE");
+            for u in v["users"].as_array().into_iter().flatten() {
+                let name = u["name"].as_str().unwrap_or("?");
+                let password = match u["password"].as_str() {
+                    Some("kept") => format!("kept by Devid: `devid db env {engine} {name}`"),
+                    Some("none") => "none from this computer".to_string(),
+                    _ => format!("not known to Devid: `devid db user password {engine} {name}` sets one"),
+                };
+                println!("{name:<20} {:<20} {password}", u["database"].as_str().unwrap_or("-"));
+            }
+            Ok(())
+        }
+        DbUserAction::Remove { engine, name } => send(Request::DbUserRemove { engine, name }).map(|v| {
+            println!(
+                "removed the {} account {}; its databases stay",
+                label(&v["engine"]),
+                v["name"].as_str().unwrap_or("?")
+            )
+        }),
+    }
+}
+
+/// A new password and the account's `.env` lines.
+fn print_account(v: &serde_json::Value) {
+    println!("password: {}", v["password"].as_str().unwrap_or("?"));
+    println!("\n.env:");
+    print_lines(&v["env"]);
+    let engine = v["engine"].as_str().unwrap_or("?");
+    println!(
+        "\nDevid keeps the password; `devid db env {engine} {}` shows these lines again",
+        v["name"].as_str().unwrap_or("?")
+    );
+}
+
+fn print_lines(lines: &serde_json::Value) {
+    for line in lines.as_array().into_iter().flatten().filter_map(|l| l.as_str()) {
+        println!("{line}");
     }
 }
 

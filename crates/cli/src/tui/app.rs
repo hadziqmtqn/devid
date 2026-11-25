@@ -11,12 +11,14 @@ pub enum Page {
     Php,
     Server,
     Mail,
+    Databases,
     Logs,
     Settings,
 }
 
 impl Page {
-    pub const ALL: [Page; 6] = [Page::Sites, Page::Php, Page::Server, Page::Mail, Page::Logs, Page::Settings];
+    pub const ALL: [Page; 7] =
+        [Page::Sites, Page::Php, Page::Server, Page::Mail, Page::Databases, Page::Logs, Page::Settings];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -24,6 +26,7 @@ impl Page {
             Page::Php => "PHP",
             Page::Server => "Server",
             Page::Mail => "Mail",
+            Page::Databases => "Databases",
             Page::Logs => "Logs",
             Page::Settings => "Settings",
         }
@@ -71,6 +74,53 @@ pub enum Effect {
     },
     /// Share a site through a Cloudflare quick tunnel and show its link (D-037).
     Share(String),
+    /// Load an engine's accounts (D-061), then show the Accounts view.
+    LoadAccounts(String),
+    /// Make an account (`DbUserAdd`) or give one a new password (`DbUserPassword`), then show the
+    /// password and the account's `.env` lines.
+    DbAccount(Request),
+    /// Copy an account's `.env` lines, or its password, as `db_env` gives them (default: the main
+    /// account).
+    DbCopy {
+        engine: String,
+        name: Option<String>,
+        password: bool,
+    },
+    /// Copy text that is on the screen already; the message names `what` rather than the text.
+    CopyQuiet {
+        text: String,
+        what: String,
+    },
+}
+
+/// One account in the Accounts view (D-061).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountRow {
+    pub name: String,
+    pub database: Option<String>,
+    /// "kept" (Devid set it), "none" (the main account, trusted from this computer), "unknown".
+    pub password: String,
+    pub main: bool,
+}
+
+/// One engine's accounts: add one, give one a new password, copy its `.env` lines, remove it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountsView {
+    pub engine: String,
+    pub label: String,
+    pub series: String,
+    pub rows: Vec<AccountRow>,
+    pub index: usize,
+}
+
+/// A password Devid just set, with the account's `.env` lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Secret {
+    pub engine: String,
+    pub title: String,
+    pub name: String,
+    pub password: String,
+    pub env: Vec<String>,
 }
 
 /// One catalog extension in the Extensions view.
@@ -133,6 +183,12 @@ pub enum InputFor {
     Port(String),
     /// A new command for a site (D-036): its name, a space, then the shell line.
     Command(String),
+    /// A new account on this engine (D-061): its name, and optionally a space and its database.
+    Account(String),
+    /// A new database on this engine.
+    Database(String),
+    /// This engine's port.
+    DbPort(String),
 }
 
 /// What a pick list is for.
@@ -218,6 +274,16 @@ pub enum Mode {
         args: Vec<String>,
     },
     Extensions(ExtView),
+    Accounts(AccountsView),
+    /// A new password or a removal from the Accounts view waiting for y/n; no goes back to the view.
+    ConfirmAccount {
+        question: String,
+        request: Box<Request>,
+        done: String,
+        back: Box<AccountsView>,
+    },
+    /// A password Devid just set; closing goes back to the Accounts view.
+    Secret(Secret),
     /// An install or remove from the Extensions view waiting for y/n; no goes back to the view.
     ConfirmExt {
         question: String,
@@ -254,6 +320,8 @@ pub struct App {
     pub checks: Vec<(bool, String, String)>,
     /// After this action, load the Extensions view of this PHP version again.
     pub reopen: Option<String>,
+    /// After this action, load this engine's Accounts view again.
+    pub reopen_accounts: Option<String>,
 }
 
 /// `AppSet` changing only the preset or the mode of `site`.
@@ -321,7 +389,43 @@ impl App {
             follow: false,
             checks: Vec::new(),
             reopen: None,
+            reopen_accounts: None,
         }
+    }
+
+    /// Show the Accounts view from a `db_user_list` reply.
+    pub fn open_accounts(&mut self, list: &Value) {
+        let engine = s(&list["engine"]);
+        let rows = list["users"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|u| AccountRow {
+                name: s(&u["name"]),
+                database: u["database"].as_str().map(String::from),
+                password: s(&u["password"]),
+                main: u["main"] == true,
+            })
+            .collect();
+        self.mode = Mode::Accounts(AccountsView {
+            label: engine_label(&engine),
+            engine,
+            series: s(&list["series"]),
+            rows,
+            index: 0,
+        });
+    }
+
+    /// Show the password from a `db_user_add` or `db_user_password` reply.
+    pub fn open_secret(&mut self, v: &Value, added: bool) {
+        let (engine, name) = (s(&v["engine"]), s(&v["name"]));
+        let title = match (added, v["database"].as_str()) {
+            (true, Some(db)) => format!("New {} account {name}, with the database {db}", engine_label(&engine)),
+            (true, None) => format!("New {} account {name}", engine_label(&engine)),
+            (false, _) => format!("New password for {name} ({})", engine_label(&engine)),
+        };
+        let env = v["env"].as_array().into_iter().flatten().map(s).collect();
+        self.mode = Mode::Secret(Secret { engine, title, name, password: s(&v["password"]), env });
     }
 
     /// Show the Extensions view from `php_ext_catalog` and `php_ext_list` replies.
@@ -359,8 +463,124 @@ impl App {
             Page::Php => devid_daemon::php::SUPPORTED.len(),
             Page::Server => self.servers.len(),
             Page::Logs => self.logs.len(),
+            Page::Databases => self.databases().len(),
             Page::Mail | Page::Settings => 0,
         }
+    }
+
+    /// `status.databases` (D-061): one entry per engine, or none without a daemon (or with one older
+    /// than databases).
+    pub fn databases(&self) -> &[Value] {
+        self.status.as_ref().ok().and_then(|st| st["databases"].as_array()).map_or(&[], Vec::as_slice)
+    }
+
+    /// Actions for a database row.
+    pub fn db_menu(d: &Value) -> Vec<(char, String)> {
+        let label = s(&d["label"]);
+        if d["enabled"] != true {
+            let first = match d["installed"].as_array().is_some_and(|l| !l.is_empty()) {
+                true => "",
+                false => " (the first time, Devid downloads it)",
+            };
+            return vec![('s', format!("Start {label}{first}"))];
+        }
+        let main = devid_daemon::db::Engine::parse(&s(&d["engine"])).map_or("root", devid_daemon::db::main_account);
+        vec![
+            ('a', "Accounts… (add, new password, copy .env)".to_string()),
+            ('c', format!("Copy the .env lines of {main}, the main account")),
+            ('n', "New database…".to_string()),
+            ('o', format!("Port… ({})", d["port"])),
+            ('r', format!("Restart {label}")),
+            match d["state"] == "paused" {
+                true => ('s', format!("Start {label}")),
+                false => ('s', format!("Stop {label} (its data stays)")),
+            },
+        ]
+    }
+
+    fn db_action(&mut self, row: usize, choice: char) -> Action {
+        let Some(d) = self.databases().get(row).cloned() else { return Action::None };
+        let (engine, label) = (s(&d["engine"]), s(&d["label"]));
+        let daemon = |request, done: String| Action::Do(Effect::Daemon { request, done });
+        match choice {
+            's' if d["enabled"] != true => daemon(
+                Request::DbStart { engine: engine.clone(), series: None },
+                format!("{label} runs; enter → Accounts… adds one"),
+            ),
+            's' if d["state"] == "paused" => {
+                daemon(Request::ServiceStart { service: engine.clone() }, format!("started {label}"))
+            }
+            's' => {
+                self.mode = Mode::Confirm {
+                    question: format!("Stop {label}? Apps cannot reach it until you start it again; its data stays."),
+                    request: Box::new(Request::DbStop { engine }),
+                    done: format!("{label} is off; its data stays"),
+                };
+                Action::None
+            }
+            'r' => daemon(Request::Restart { service: engine }, format!("restarted {label}")),
+            'a' => Action::Do(Effect::LoadAccounts(engine)),
+            'c' => Action::Do(Effect::DbCopy { engine, name: None, password: false }),
+            'n' => {
+                self.mode = Mode::Input { purpose: InputFor::Database(engine), text: String::new() };
+                Action::None
+            }
+            'o' => {
+                let text = d["port"].as_u64().map(|p| p.to_string()).unwrap_or_default();
+                self.mode = Mode::Input { purpose: InputFor::DbPort(engine), text };
+                Action::None
+            }
+            _ => Action::None,
+        }
+    }
+
+    /// Keys in the Accounts view (D-061).
+    fn accounts_key(&mut self, key: KeyEvent, mut v: AccountsView) -> Action {
+        self.message = None;
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => return Action::None,
+            KeyCode::Up | KeyCode::Char('k') => v.index = v.index.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => v.index = (v.index + 1).min(v.rows.len().saturating_sub(1)),
+            KeyCode::Char('a') => {
+                self.mode = Mode::Input { purpose: InputFor::Account(v.engine), text: String::new() };
+                return Action::None;
+            }
+            KeyCode::Char(c @ ('p' | 'c' | 'y' | 'd')) => {
+                if let Some(row) = v.rows.get(v.index).cloned() {
+                    let (engine, name) = (v.engine.clone(), row.name.clone());
+                    match c {
+                        'c' | 'y' => {
+                            self.mode = Mode::Accounts(v);
+                            return Action::Do(Effect::DbCopy { engine, name: Some(name), password: c == 'y' });
+                        }
+                        'p' => {
+                            self.mode = Mode::ConfirmAccount {
+                                question: format!(
+                                    "Give {name} a new password? Apps that use the old one cannot connect until their .env has the new one."
+                                ),
+                                request: Box::new(Request::DbUserPassword { engine, name, password: None }),
+                                done: String::new(),
+                                back: Box::new(v),
+                            };
+                            return Action::None;
+                        }
+                        _ if row.main => self.message = Some((format!("{name} is the main account; it stays"), true)),
+                        _ => {
+                            self.mode = Mode::ConfirmAccount {
+                                question: format!("Remove the account {name}? Its databases and their data stay."),
+                                request: Box::new(Request::DbUserRemove { engine, name: name.clone() }),
+                                done: format!("removed {name}; its databases stay"),
+                                back: Box::new(v),
+                            };
+                            return Action::None;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.mode = Mode::Accounts(v);
+        Action::None
     }
 
     /// `status.mail` (D-049), or Null without a daemon (or with one older than Mail).
@@ -588,6 +808,40 @@ impl App {
                 }
             },
             Mode::Extensions(view) => self.extensions_key(key, view),
+            Mode::Accounts(view) => self.accounts_key(key, view),
+            Mode::ConfirmAccount { question, request, done, back } => match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => match *request {
+                    // A new password shows itself, then goes back to the view.
+                    r @ Request::DbUserPassword { .. } => Action::Do(Effect::DbAccount(r)),
+                    r => {
+                        self.reopen_accounts = Some(back.engine.clone());
+                        Action::Do(Effect::Daemon { request: r, done })
+                    }
+                },
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.mode = Mode::Accounts(*back);
+                    Action::None
+                }
+                _ => {
+                    self.mode = Mode::ConfirmAccount { question, request, done, back };
+                    Action::None
+                }
+            },
+            Mode::Secret(secret) => match key.code {
+                KeyCode::Char(c @ ('c' | 'y')) => {
+                    let (text, what) = match c {
+                        'c' => (format!("{}\n", secret.env.join("\n")), format!("{}'s .env lines", secret.name)),
+                        _ => (secret.password.clone(), format!("{}'s password", secret.name)),
+                    };
+                    self.mode = Mode::Secret(secret);
+                    Action::Do(Effect::CopyQuiet { text, what })
+                }
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => Action::Do(Effect::LoadAccounts(secret.engine)),
+                _ => {
+                    self.mode = Mode::Secret(secret);
+                    Action::None
+                }
+            },
             Mode::ConfirmExt { question, version, change, back } => match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => {
                     self.reopen = Some(version.clone());
@@ -629,7 +883,7 @@ impl App {
             KeyCode::Tab | KeyCode::BackTab => {
                 self.focus = if self.focus == Focus::Sidebar { Focus::Page } else { Focus::Sidebar };
             }
-            KeyCode::Char(c @ '1'..='6') => self.select_page(Page::ALL[c as usize - '1' as usize]),
+            KeyCode::Char(c @ '1'..='7') => self.select_page(Page::ALL[c as usize - '1' as usize]),
             KeyCode::Up | KeyCode::Char('k') => self.step(-1),
             KeyCode::Down | KeyCode::Char('j') => self.step(1),
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if self.focus == Focus::Sidebar => {
@@ -649,6 +903,12 @@ impl App {
                 self.mode = Mode::Menu { row: self.row, items, index: 0 };
             }
             KeyCode::Char('u') if self.page == Page::Php => return Action::Do(Effect::Update { check: true }),
+            KeyCode::Enter if self.page == Page::Databases && self.focus == Focus::Page => {
+                if let Some(d) = self.databases().get(self.row) {
+                    let items = Self::db_menu(d);
+                    self.mode = Mode::Menu { row: self.row, items, index: 0 };
+                }
+            }
             KeyCode::Enter if self.page == Page::Server && self.focus == Focus::Page => {
                 if let Some(server) = self.servers.get(self.row) {
                     let items = Self::server_menu(server);
@@ -786,6 +1046,9 @@ impl App {
         }
         if self.page == Page::Server {
             return self.server_action(row, choice);
+        }
+        if self.page == Page::Databases {
+            return self.db_action(row, choice);
         }
         let Some(site) = self.sites.get(row).cloned() else { return Action::None };
         let (name, url, path) = (s(&site["name"]), s(&site["url"]), s(&site["path"]));
@@ -995,7 +1258,13 @@ impl App {
 
     fn input_key(&mut self, key: KeyEvent, purpose: InputFor, mut text: String) -> Action {
         match key.code {
-            KeyCode::Esc => return Action::None,
+            // A new account goes back to the Accounts view it came from.
+            KeyCode::Esc => {
+                return match purpose {
+                    InputFor::Account(engine) => Action::Do(Effect::LoadAccounts(engine)),
+                    _ => Action::None,
+                };
+            }
             KeyCode::Enter => {
                 let text = text.trim();
                 let (request, done) = match &purpose {
@@ -1043,6 +1312,35 @@ impl App {
                             run: run.trim().to_string(),
                         };
                         (request, format!("added {name} to {site}; start it from the site's menu"))
+                    }
+                    InputFor::Account(engine) => {
+                        let mut words = text.split_whitespace();
+                        let Some(name) = words.next() else { return Action::Do(Effect::LoadAccounts(engine.clone())) };
+                        return Action::Do(Effect::DbAccount(Request::DbUserAdd {
+                            engine: engine.clone(),
+                            name: name.to_string(),
+                            database: words.next().map(String::from),
+                            password: None,
+                            no_database: false,
+                        }));
+                    }
+                    InputFor::Database(engine) => {
+                        if text.is_empty() {
+                            return Action::None;
+                        }
+                        let done = match engine.as_str() {
+                            "mongodb" => format!("MongoDB makes {text} when an app first writes to it"),
+                            _ => format!("made the {} database {text}", engine_label(engine)),
+                        };
+                        (Request::DbCreate { engine: engine.clone(), database: text.to_string() }, done)
+                    }
+                    InputFor::DbPort(engine) => {
+                        let Ok(port) = text.parse::<u16>() else {
+                            self.message = Some((format!("{text:?} is not a port (1024–65535)"), true));
+                            return Action::None;
+                        };
+                        let done = format!("{} is on port {port}; update DB_PORT in your apps", engine_label(engine));
+                        (Request::DbPort { engine: engine.clone(), port }, done)
                     }
                 };
                 return Action::Do(Effect::Daemon { request, done });
@@ -1200,6 +1498,11 @@ impl App {
             }
         }
     }
+}
+
+/// "MySQL" for "mysql".
+fn engine_label(engine: &str) -> String {
+    devid_daemon::db::Engine::parse(engine).map_or_else(|| engine.to_string(), |e| e.label().to_string())
 }
 
 /// `~/x` -> `$HOME/x`; the daemon needs absolute paths (it also checks they exist).
@@ -1779,8 +2082,134 @@ mod tests {
         app.handle_key(ch('X'));
         assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "mail_clear"}));
         assert_eq!(daemon_json(app.handle_key(ch('m')))["enabled"], false, "m turns a running Mail off");
-        app.handle_key(ch('6'));
-        assert_eq!(app.page, Page::Settings, "Mail is page 4, so Settings is 6");
+        app.handle_key(ch('7'));
+        assert_eq!(app.page, Page::Settings, "Databases is page 5, so Settings is 7");
+    }
+
+    fn with_databases() -> App {
+        let mut app = App::new(false);
+        app.page = Page::Databases;
+        app.focus = Focus::Page;
+        app.status = Ok(json!({"databases": [
+            {"engine": "mysql", "label": "MySQL", "series": "8.4", "enabled": true, "state": "running",
+             "port": 3307, "installed": ["8.4"]},
+            {"engine": "postgresql", "label": "PostgreSQL", "series": null, "enabled": false, "state": "off",
+             "port": null, "installed": []},
+        ]}));
+        app
+    }
+
+    /// D-061: start and stop a database, and its main account's `.env` lines.
+    #[test]
+    fn databases_page() {
+        let mut app = with_databases();
+        assert_eq!(app.rows(), 2);
+        let keys = |d: &Value| App::db_menu(d).iter().map(|(k, _)| *k).collect::<String>();
+        assert_eq!(keys(&app.databases()[0]), "acnors");
+        assert_eq!(keys(&app.databases()[1]), "s", "an engine that is off only starts");
+        assert!(App::db_menu(&app.databases()[1])[0].1.contains("downloads it"));
+
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(app.handle_key(ch('c')), Action::Do(Effect::DbCopy { name: None, password: false, .. })));
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ch('s'));
+        assert!(matches!(app.mode, Mode::Confirm { .. }), "stopping asks first");
+        assert_eq!(daemon_json(app.handle_key(ch('y'))), json!({"cmd": "db_stop", "engine": "mysql"}));
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ch('o'));
+        assert!(matches!(&app.mode, Mode::Input { text, .. } if text == "3307"), "the port to change");
+        app.handle_key(key(KeyCode::Backspace));
+        app.handle_key(ch('8'));
+        assert_eq!(
+            daemon_json(app.handle_key(key(KeyCode::Enter))),
+            json!({"cmd": "db_port", "engine": "mysql", "port": 3308})
+        );
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ch('n'));
+        for c in "blog".chars() {
+            app.handle_key(ch(c));
+        }
+        assert_eq!(
+            daemon_json(app.handle_key(key(KeyCode::Enter))),
+            json!({"cmd": "db_create", "engine": "mysql", "database": "blog"})
+        );
+
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            daemon_json(app.handle_key(ch('s'))),
+            json!({"cmd": "db_start", "engine": "postgresql", "series": null})
+        );
+    }
+
+    /// D-061: add accounts, give one a new password, copy, remove; the main account stays.
+    #[test]
+    fn accounts_view() {
+        let mut app = with_databases();
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(app.handle_key(ch('a')), Action::Do(Effect::LoadAccounts(e)) if e == "mysql"));
+        app.open_accounts(&json!({"engine": "mysql", "series": "8.4", "port": 3307, "users": [
+            {"name": "root", "database": null, "main": true, "password": "none"},
+            {"name": "shop", "database": "shop", "main": false, "password": "kept"},
+        ]}));
+        assert!(matches!(&app.mode, Mode::Accounts(v) if v.label == "MySQL" && v.rows.len() == 2));
+
+        app.handle_key(ch('d'));
+        assert!(matches!(app.mode, Mode::Accounts(_)), "the main account stays");
+        assert!(app.message.as_ref().is_some_and(|m| m.0.contains("main account")));
+
+        app.handle_key(ch('j'));
+        assert!(matches!(
+            app.handle_key(ch('y')),
+            Action::Do(Effect::DbCopy { name: Some(n), password: true, .. }) if n == "shop"
+        ));
+        assert!(matches!(app.mode, Mode::Accounts(_)), "copying keeps the view open");
+        app.handle_key(ch('p'));
+        assert!(matches!(app.mode, Mode::ConfirmAccount { .. }), "a new password asks first");
+        app.handle_key(ch('n'));
+        assert!(matches!(&app.mode, Mode::Accounts(v) if v.index == 1), "no goes back to the view");
+        app.handle_key(ch('p'));
+        match app.handle_key(ch('y')) {
+            Action::Do(Effect::DbAccount(r)) => assert_eq!(
+                serde_json::to_value(r).unwrap(),
+                json!({"cmd": "db_user_password", "engine": "mysql", "name": "shop", "password": null})
+            ),
+            other => panic!("expected a new password, got {other:?}"),
+        }
+        app.open_accounts(&json!({"engine": "mysql", "series": "8.4", "users": [
+            {"name": "shop", "database": "shop", "main": false, "password": "kept"}]}));
+        app.handle_key(ch('d'));
+        assert_eq!(
+            daemon_json(app.handle_key(ch('y'))),
+            json!({"cmd": "db_user_remove", "engine": "mysql", "name": "shop"})
+        );
+        assert_eq!(app.reopen_accounts.as_deref(), Some("mysql"), "the view comes back after a removal");
+
+        app.open_accounts(&json!({"engine": "mysql", "series": "8.4", "users": []}));
+        app.handle_key(ch('a'));
+        for c in "blog blogdb".chars() {
+            app.handle_key(ch(c));
+        }
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Do(Effect::DbAccount(r)) => assert_eq!(
+                serde_json::to_value(r).unwrap(),
+                json!({"cmd": "db_user_add", "engine": "mysql", "name": "blog", "database": "blogdb",
+                       "password": null, "no_database": false})
+            ),
+            other => panic!("expected a new account, got {other:?}"),
+        }
+        app.open_secret(
+            &json!({"engine": "mysql", "name": "blog", "database": "blogdb", "password": "pw123",
+                    "env": ["DB_CONNECTION=mysql", "DB_PASSWORD=pw123"]}),
+            true,
+        );
+        assert!(matches!(&app.mode, Mode::Secret(s) if s.title.contains("with the database blogdb")));
+        assert!(matches!(
+            app.handle_key(ch('c')),
+            Action::Do(Effect::CopyQuiet { text, .. }) if text == "DB_CONNECTION=mysql\nDB_PASSWORD=pw123\n"
+        ));
+        assert!(matches!(app.handle_key(ch('y')), Action::Do(Effect::CopyQuiet { text, .. }) if text == "pw123"));
+        assert!(matches!(app.handle_key(key(KeyCode::Esc)), Action::Do(Effect::LoadAccounts(_))));
     }
 
     #[test]

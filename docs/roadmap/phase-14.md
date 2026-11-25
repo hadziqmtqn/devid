@@ -2,7 +2,7 @@
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
 > Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results); D3 (the CLI, the TUI and accounts) is next.
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 built 2026-11-25** (the CLI, the TUI and accounts; see "D3 results"); its check on the M1 is next, then D4 (the app's page).
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -274,11 +274,86 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d2-daemon.md`.
     - the servers come back with the daemon;
     - `devid db stop` stops them, and the data stays.
 
-### Not yet: D3
+### Left for D3
+
+D3 did all of these; see "D3 results".
 
 - **Accounts:** `devid db user`, with `env`, `use`, `port`, `create` and `remove`.
 - **The rest of D3:** the TUI page, the terminal commands, and doctor.
 - **Uninstall:** today `devid uninstall --purge` would still delete `~/.devid/data`. D3 changes that before any release.
+
+## D3 results (2026-11-25)
+
+The record is `docs/implementation-timeline/databases/2026-11-25-d3-cli-tui-accounts.md`.
+
+### What shipped
+
+- **Accounts** (`db::Admin`, Devid's own way into a running server):
+  - **`devid db user add <engine> <name>`** makes an account with a generated password. By default it also gets a database of its own, named after it, with every right on it. `--database`, `--password` and `--no-database` change those defaults.
+    - MySQL: `'<name>'@'%'`, with `GRANT ALL` on its database.
+    - PostgreSQL: a login role that owns its database. A database that exists already passes to it. If the database step fails, the role goes again.
+    - MongoDB: an account in its own database, with `readWrite` and `dbAdmin` there.
+  - **`devid db user password <engine> <name>`** gives an account a new password, generated or given. On MySQL it changes every host the account has, `root@localhost` included.
+  - **`devid db user list <engine>`** lists the accounts and says for each password whether Devid keeps it, whether none is needed (the main account from this computer), or whether Devid does not know it.
+  - **`devid db user remove <engine> <name>`** removes the account; its databases stay. On PostgreSQL its objects pass to `postgres` first, database by database.
+  - **Checks:**
+    - an account that already exists, or does not, is refused before any SQL runs;
+    - `root`, `postgres`, `devid` and `admin` are not offered as new accounts;
+    - names take lowercase letters, digits and `_`, at most 32;
+    - passwords the user picks take 8 to 64 letters, digits and `-_.~!@#%^*+=`.
+
+    Nothing Devid writes into SQL, JavaScript or `.env` needs quoting.
+  - **`accounts.toml`** keeps each account's password and database. D2's file, which held the password alone, still reads.
+- **`.env` lines:** `devid db env <engine> [<account>]` prints only the lines, so `>> .env` works. They are:
+  - MySQL and PostgreSQL: `DB_CONNECTION`, `DB_HOST=127.0.0.1`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`;
+  - MongoDB: `DB_CONNECTION=mongodb`, `DB_URI` with the account, its database and `authSource`, and `DB_DATABASE`.
+
+  The main account has no database of its own, so its lines leave `DB_DATABASE` out. Laravel then keeps its default (`laravel`), which `artisan migrate` offers to create; an empty value would mean no database.
+- **More of `devid db`:**
+  - `use <engine> <series>` runs another series, each with its own data;
+  - `port <engine> <port>` moves a server; it restarts there. Mail's checks apply, and the port must be 1024 or higher;
+  - `create <engine> <name>` makes a database without an account (MongoDB makes one when an app first writes to it);
+  - `remove <engine> <series> [--delete-data]` removes a series that is not in use. Its data stays unless asked.
+- **Terminal commands** (D-053): `mysql`, `mysqldump`, `psql`, `pg_dump`, `pg_restore` and `mongosh`.
+  - **Linking:** they join `~/.devid/bin` once their engine is installed and leave when no series of it is left. `devid setup` and `self-update` link them again.
+  - **Where they connect:** each runs the client of the series in use and reaches Devid's server as its main account, unless the arguments say where to go:
+    - `mysql` and `mysqldump`: the socket, or 127.0.0.1 and the port. A port given alone goes over TCP, which plain `mysql` would ignore. A defaults file or login path of the user's own adds nothing.
+    - `psql`, `pg_dump` and `pg_restore`: `PGHOST`, `PGPORT` and `PGUSER=postgres`, unless set already or given as flags or a connection string.
+    - `mongosh`: `--port` only. Root's password never goes on a command line, which other users can read with `ps`; `mongosh -u root -p` asks for it.
+  - **Before the first start** there is no port yet, and the clients run as they are.
+- **The TUI:** a Databases page, number 5, so Logs and Settings move to 6 and 7.
+  - **The page** lists each engine's series, state and address.
+  - **Enter** opens the selected engine's actions: start or stop, restart, Accounts…, copy the main account's `.env` lines, a new database, and the port.
+  - **The Accounts view:**
+    - `a` adds an account, as `name` or `name database`;
+    - `p` gives one a new password, after a confirmation;
+    - `c` copies its `.env` lines and `y` its password;
+    - `d` removes it, after a confirmation.
+
+    A new password shows once, with the `.env` lines and keys to copy either.
+- **`devid doctor`** checks every database that is on. Its fix is the server's error, or how to start it.
+- **`devid uninstall --purge`** deletes all of `~/.devid` but `~/.devid/data`, then names the databases it kept. `--delete-databases` deletes them too. A plain `uninstall` keeps `~/.devid` as before.
+- **Stopping:** launchd's `ExitTimeOut` and systemd's `TimeoutStopSec` are now 75 s (`platform::EXIT_TIMEOUT`), and `stop_service` waits as long. A database may take up to 60 s to stop cleanly; launchd's default 20 s would have killed it halfway.
+- **Tests:**
+  - **Unit tests:** accounts, `.env` lines, D2's `accounts.toml`, the shims' arguments, the TUI's page, Accounts view and password popup, and the purge that keeps the data.
+  - **`crates/cli/tests/db.rs`:** a second test, with fake clients that remember the accounts made. It covers adding, listing, new passwords (`root`'s included), removing, the `.env` lines, `create`, `port`, `remove`, and every refusal.
+  - **`crates/cli/tests/shim.rs`:** the uninstall dry run keeps the databases unless `--delete-databases`.
+  - **`scripts/db-e2e.sh`** (CI's `db-e2e`, the real builds) covers each engine's accounts:
+    - an app's first migration over TCP with the generated password;
+    - a wrong password, and the old one after a reset, refused;
+    - another account kept out of the first one's database;
+    - the data still there after the account is removed;
+    - a PostgreSQL server moved to another port.
+
+### Differences from the plan
+
+- **PostgreSQL's `postgres`** gets no password from `devid db user password`. The plan said every account, the main one included. But `postgres` is trusted from this computer, so a password would never be checked; Devid says so instead.
+- **`devid db create`** takes the engine first (`devid db create mysql blog`), like the other commands.
+
+### Not yet
+
+- **The M1 check:** MySQL and PostgreSQL next to DBngin, two accounts and a new password from the CLI and the TUI, and a Laravel migration with each account.
+- **A real uninstall that keeps the data:** on the Linux VMs with the rc (D5). On the M1 only the dry run, since a real uninstall would undo the owner's own setup.
 
 ## Milestones
 
@@ -286,7 +361,7 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d2-daemon.md`.
 |---|---|---|
 | D1 | **Spike** | the answers are in this doc, and D-061 is accepted or changed to match them (done 2026-11-25, see "D1 results") |
 | D2 | **Daemon:** the second manifest, install and update, the supervisor's additions (stop timeout, readiness, log file, orphan check by path), config, ports, API | unit tests cover install, ports and the supervisor changes, and a CLI test starts and stops each engine from a local test release (done 2026-11-25, see "D2 results") |
-| D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data |
+| D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data (built 2026-11-25, see "D3 results") |
 | D4 | **The app's Databases page** (macOS), accounts included | the owner approves a design board, then adds an account and resets a password from the page on the M1 |
 | D5 | **CI, docs and release** | a database check runs on every pull request on macOS, Ubuntu and Arch; the README, the guide's new `/docs/databases` page, PROJECT_CONTEXT and CLAUDE.md are updated; 0.21.0 ships after an rc on the M1 and the Linux VMs |
 

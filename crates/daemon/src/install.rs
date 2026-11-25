@@ -263,7 +263,32 @@ pub fn install_binary(paths: &Paths) -> io::Result<()> {
         // (`artisan serve`, parallel tests) must come back through the shim, not run `devid`.
         fs::hard_link(&target, &link)?;
     }
+    // D-061: the installed databases' clients, onto the new binary too.
+    for engine in crate::db::ENGINES {
+        if !crate::db::installed_series(paths, engine).is_empty() {
+            link_clients(paths, engine, true);
+        }
+    }
     Ok(())
+}
+
+/// Put an engine's clients (`mysql`, `psql`, `mongosh`…) in `~/.devid/bin` as shims, or take them
+/// out (D-053, D-061). Only installed engines have them, since they come before DBngin's or
+/// Homebrew's clients on PATH. Without an installed devid (a test daemon) nothing is linked.
+pub fn link_clients(paths: &Paths, engine: crate::db::Engine, on: bool) {
+    let target = installed_bin(paths);
+    for name in crate::db::clients(engine) {
+        let link = bin_dir(paths).join(name);
+        let _ = fs::remove_file(&link);
+        if on && target.is_file() {
+            let _ = fs::hard_link(&target, &link);
+        }
+    }
+}
+
+/// The database clients `~/.devid/bin` holds now.
+pub fn linked_clients(paths: &Paths) -> Vec<&'static str> {
+    crate::db::CLIENTS.into_iter().filter(|c| bin_dir(paths).join(c).exists()).collect()
 }
 
 /// Download composer.phar with its published SHA-256, if missing.

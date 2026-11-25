@@ -127,9 +127,14 @@ pub fn bin(paths: &Paths, engine: Engine, series: &str, name: &str) -> PathBuf {
     dir(paths, engine, series).join("bin").join(name)
 }
 
+/// Where every database's data lives: `devid uninstall --purge` keeps it (D-061).
+pub fn data_root(paths: &Paths) -> PathBuf {
+    paths.home.join("data")
+}
+
 /// The server's data. Devid never deletes it unless asked.
 pub fn data(paths: &Paths, engine: Engine, series: &str) -> PathBuf {
-    paths.home.join("data").join(key(engine, series))
+    data_root(paths).join(key(engine, series))
 }
 
 pub fn log(paths: &Paths, engine: Engine) -> PathBuf {
@@ -420,6 +425,37 @@ pub fn pick_port(engine: Engine, taken: &[u16], in_use: impl Fn(u16) -> bool) ->
     (start..start.saturating_add(100)).find(|p| !taken.contains(p) && !in_use(*p))
 }
 
+/// An account whose password Devid set (D-061), and the database it was made for.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "AccountToml")]
+pub struct Account {
+    pub password: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+}
+
+/// How `accounts.toml` holds an account: a table, or D2's password alone (`root = "…"`).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AccountToml {
+    Password(String),
+    Table {
+        #[serde(default)]
+        password: String,
+        #[serde(default)]
+        database: Option<String>,
+    },
+}
+
+impl From<AccountToml> for Account {
+    fn from(entry: AccountToml) -> Self {
+        match entry {
+            AccountToml::Password(password) => Account { password, database: None },
+            AccountToml::Table { password, database } => Account { password, database },
+        }
+    }
+}
+
 /// The passwords Devid set on one server, in `accounts.toml` (mode 0600).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -427,8 +463,8 @@ pub struct Accounts {
     /// Devid's own account (`devid`), with every right: how Devid manages accounts and resets a
     /// lost password on MySQL and MongoDB.
     pub devid: String,
-    /// Accounts whose password Devid set: name -> password.
-    pub users: BTreeMap<String, String>,
+    /// Accounts whose password Devid set, by name.
+    pub users: BTreeMap<String, Account>,
 }
 
 pub fn read_accounts(paths: &Paths, engine: Engine, series: &str) -> Option<Accounts> {
@@ -465,6 +501,41 @@ pub fn password() -> String {
     out
 }
 
+/// Each engine's main account: MySQL's `root`, PostgreSQL's `postgres`, MongoDB's `root`.
+pub fn main_account(engine: Engine) -> &'static str {
+    match engine {
+        Engine::Postgresql => "postgres",
+        _ => "root",
+    }
+}
+
+/// Account and database names Devid makes: lowercase letters, digits and `_`, starting with a
+/// letter or `_`, at most 32 characters (MySQL's limit for account names). They need no quoting in
+/// SQL, in MongoDB or in `.env`, and PostgreSQL keeps them as typed.
+pub fn check_name(what: &str, name: &str) -> Result<(), String> {
+    let ok = !name.is_empty()
+        && name.len() <= 32
+        && name.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    match ok {
+        true => Ok(()),
+        false => Err(format!(
+            "{what} {name:?}: use lowercase letters, digits and _, starting with a letter or _ (at most 32)"
+        )),
+    }
+}
+
+/// A password the user picks: 8 to 64 letters, digits and `-_.~!@#%^*+=`, nothing that needs
+/// quoting in `.env` or SQL.
+pub fn check_password(password: &str) -> Result<(), String> {
+    let ok = (8..=64).contains(&password.len())
+        && password.chars().all(|c| c.is_ascii_alphanumeric() || "-_.~!@#%^*+=".contains(c));
+    match ok {
+        true => Ok(()),
+        false => Err("a password needs 8 to 64 letters, digits and -_.~!@#%^*+= (nothing to quote)".into()),
+    }
+}
+
 /// Devid's own way into a server it just started for the first time (D-061): MySQL gets the account
 /// `devid`, MongoDB the administrator `devid` (through MongoDB's localhost exception, D1) and the
 /// main account `root`, all with generated passwords kept in `accounts.toml`. PostgreSQL needs
@@ -476,16 +547,20 @@ pub fn bootstrap(paths: &Paths, engine: Engine, series: &str, port: u16) -> io::
     }
     let mut accounts = Accounts { devid: password(), users: BTreeMap::new() };
     match engine {
-        Engine::Mysql => mysql_as_root(
-            paths,
-            series,
-            port,
-            &format!(
-                "CREATE USER IF NOT EXISTS 'devid'@'localhost' IDENTIFIED BY '{}';\n\
-                 GRANT ALL ON *.* TO 'devid'@'localhost' WITH GRANT OPTION;\n",
-                accounts.devid
-            ),
-        )?,
+        Engine::Mysql => {
+            let mut cmd = Command::new(bin(paths, Engine::Mysql, series, "mysql"));
+            cmd.args(["--no-defaults", "-uroot", "--batch"]);
+            cmd.args(mysql_target(paths, port));
+            feed(
+                &mut cmd,
+                &format!(
+                    "CREATE USER IF NOT EXISTS 'devid'@'localhost' IDENTIFIED BY '{}';\n\
+                     GRANT ALL ON *.* TO 'devid'@'localhost' WITH GRANT OPTION;\n",
+                    accounts.devid
+                ),
+                "mysql",
+            )?;
+        }
         Engine::Mongodb => {
             let root = password();
             mongo_script(
@@ -498,46 +573,51 @@ pub fn bootstrap(paths: &Paths, engine: Engine, series: &str, port: u16) -> io::
                     accounts.devid, root
                 ),
             )?;
-            accounts.users.insert("root".into(), root);
+            accounts.users.insert("root".into(), Account { password: root, database: Some("admin".into()) });
         }
         Engine::Postgresql => unreachable!(),
     }
     write_accounts(&file, &accounts)
 }
 
-/// Run SQL as MySQL's `root` (no password, D-061), through the socket when it fits; the SQL goes in
-/// on stdin, so no password shows in `ps`.
-fn mysql_as_root(paths: &Paths, series: &str, port: u16, sql: &str) -> io::Result<()> {
-    let mut cmd = Command::new(bin(paths, Engine::Mysql, series, "mysql"));
-    cmd.args(["--no-defaults", "-uroot", "--batch"]);
+/// How a MySQL client reaches Devid's server: the socket when it fits and is there, else 127.0.0.1
+/// and the port. The host is always given, so a `host` in the user's option files cannot send the
+/// client elsewhere.
+pub fn mysql_target(paths: &Paths, port: u16) -> Vec<String> {
     let sock = socket(paths, Engine::Mysql, port);
-    if socket_fits(&sock) && sock.exists() {
-        cmd.arg(format!("--socket={}", sock.display()));
-    } else {
-        cmd.args(["-h127.0.0.1", &format!("-P{port}")]);
+    match socket_fits(&sock) && sock.exists() {
+        true => vec!["--host=localhost".into(), format!("--socket={}", sock.display())],
+        false => vec!["--host=127.0.0.1".into(), format!("--port={port}")],
     }
-    feed(&mut cmd, sql, "mysql")
 }
 
-/// Run a mongosh script against the server on `port`; the script, credentials included, goes in
-/// through a file only the user can read rather than the command line.
-fn mongo_script(paths: &Paths, port: u16, js: &str) -> io::Result<()> {
+/// Where a PostgreSQL client finds Devid's server (`-h`, `PGHOST`): the folder of its socket when
+/// the socket fits and is there, else 127.0.0.1.
+pub fn pg_host(paths: &Paths, port: u16) -> String {
+    let sock = socket(paths, Engine::Postgresql, port);
+    match socket_fits(&sock) && sock.exists() {
+        true => paths.run_dir().display().to_string(),
+        false => "127.0.0.1".into(),
+    }
+}
+
+/// Run a mongosh script against the server on `port` and return what it printed; the script,
+/// credentials included, goes in through a file only the user can read rather than the command line.
+fn mongo_script(paths: &Paths, port: u16, js: &str) -> io::Result<String> {
     let script = paths.run_dir().join(format!("mongosh-{}.js", std::process::id()));
     let _ = fs::remove_file(&script);
     let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&script)?;
     file.write_all(js.as_bytes())?;
     drop(file);
-    let result = run(
-        Command::new(mongosh(paths))
-            .args(["--quiet", "--norc", &format!("mongodb://127.0.0.1:{port}/admin"), "--file"])
-            .arg(&script),
-        "mongosh",
-    );
+    let mut cmd = Command::new(mongosh(paths));
+    cmd.args(["--quiet", "--norc", &format!("mongodb://127.0.0.1:{port}/admin"), "--file"]).arg(&script);
+    let result = feed(&mut cmd, "", "mongosh");
     let _ = fs::remove_file(&script);
     result
 }
 
-fn feed(cmd: &mut Command, input: &str, what: &str) -> io::Result<()> {
+/// Run `cmd` with `input` on stdin; what it printed, or why it failed.
+fn feed(cmd: &mut Command, input: &str, what: &str) -> io::Result<String> {
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -547,9 +627,310 @@ fn feed(cmd: &mut Command, input: &str, what: &str) -> io::Result<()> {
     child.stdin.take().expect("stdin is piped").write_all(input.as_bytes())?;
     let out = child.wait_with_output()?;
     if out.status.success() {
-        Ok(())
-    } else {
-        Err(err(format!("{what} failed ({}): {}", out.status, String::from_utf8_lossy(&out.stderr).trim())))
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
+    }
+    let text = String::from_utf8_lossy(&out.stderr);
+    let text = if text.trim().is_empty() { String::from_utf8_lossy(&out.stdout) } else { text };
+    Err(err(format!("{what} failed ({}): {}", out.status, tail(text.trim(), 600))))
+}
+
+/// Devid's own way into a running server (D-061), for accounts and databases.
+pub struct Admin<'a> {
+    paths: &'a Paths,
+    engine: Engine,
+    series: &'a str,
+    port: u16,
+}
+
+impl<'a> Admin<'a> {
+    pub fn new(paths: &'a Paths, engine: Engine, series: &'a str, port: u16) -> Self {
+        Self { paths, engine, series, port }
+    }
+
+    fn accounts(&self) -> io::Result<Accounts> {
+        match self.engine {
+            Engine::Postgresql => Ok(read_accounts(self.paths, self.engine, self.series).unwrap_or_default()),
+            _ => read_accounts(self.paths, self.engine, self.series).filter(|a| !a.devid.is_empty()).ok_or_else(|| {
+                err(format!(
+                    "Devid's own account on {} is missing; `devid db start {}` sets it up",
+                    self.engine.label(),
+                    self.engine.name()
+                ))
+            }),
+        }
+    }
+
+    fn save(&self, accounts: &Accounts) -> io::Result<()> {
+        write_accounts(&accounts_file(self.paths, self.engine, self.series), accounts)
+    }
+
+    /// SQL as Devid's own MySQL account, or as `postgres` through PostgreSQL's socket (or from
+    /// 127.0.0.1, which is trusted for it), in `database`; what it printed.
+    fn sql(&self, database: &str, sql: &str) -> io::Result<String> {
+        match self.engine {
+            Engine::Mysql => {
+                let cnf = self.paths.run_dir().join(format!("mysql-devid-{}.cnf", std::process::id()));
+                let _ = fs::remove_file(&cnf);
+                let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&cnf)?;
+                write!(file, "[client]\nuser=devid\npassword={}\n", self.accounts()?.devid)?;
+                drop(file);
+                let mut cmd = Command::new(bin(self.paths, Engine::Mysql, self.series, "mysql"));
+                cmd.arg(format!("--defaults-file={}", cnf.display())).args(["--batch", "-N"]);
+                cmd.args(mysql_target(self.paths, self.port));
+                let out = feed(&mut cmd, sql, "mysql");
+                let _ = fs::remove_file(&cnf);
+                out
+            }
+            Engine::Postgresql => {
+                let host = pg_host(self.paths, self.port);
+                let mut cmd = Command::new(bin(self.paths, Engine::Postgresql, self.series, "psql"));
+                cmd.args(["-X", "-q", "-A", "-t", "-w", "-v", "ON_ERROR_STOP=1", "-h", &host])
+                    .args(["-p", &self.port.to_string(), "-U", "postgres", "-d", database, "-f", "-"])
+                    .env_remove("PGPASSWORD");
+                feed(&mut cmd, sql, "psql")
+            }
+            Engine::Mongodb => unreachable!("MongoDB takes scripts"),
+        }
+    }
+
+    /// A mongosh script as Devid's administrator.
+    fn js(&self, js: &str) -> io::Result<String> {
+        let devid = self.accounts()?.devid;
+        mongo_script(
+            self.paths,
+            self.port,
+            &format!("db.getSiblingDB('admin').auth('devid', {});\n{js}", quote(&devid)),
+        )
+    }
+
+    /// The accounts on the server that people sign in with, Devid's own left out.
+    pub fn users(&self) -> io::Result<Vec<String>> {
+        let out = match self.engine {
+            Engine::Mysql => self.sql(
+                "",
+                "SELECT User FROM mysql.user WHERE User NOT IN ('devid', '') AND User NOT LIKE 'mysql.%' ORDER BY User;",
+            )?,
+            Engine::Postgresql => self.sql("postgres", "SELECT rolname FROM pg_roles WHERE rolcanlogin ORDER BY 1;")?,
+            Engine::Mongodb => self.js(
+                "db.getSiblingDB('admin').system.users.find({user: {$ne: 'devid'}}, {user: 1}).toArray()\
+                 .forEach(u => print(u.user));",
+            )?,
+        };
+        let mut users: Vec<String> = out.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
+        users.sort();
+        users.dedup();
+        Ok(users)
+    }
+
+    /// Make an account with `password`, and by default a database of its own with every right on
+    /// it (on MongoDB it lives in that database, and reads and writes it).
+    pub fn add_user(&self, name: &str, database: Option<&str>, password: &str) -> io::Result<()> {
+        let mut accounts = self.accounts()?;
+        match self.engine {
+            Engine::Mysql => {
+                let mut sql = format!("CREATE USER '{name}'@'%' IDENTIFIED BY '{password}';\n");
+                if let Some(db) = database {
+                    sql =
+                        format!("CREATE DATABASE IF NOT EXISTS `{db}`;\n{sql}GRANT ALL ON `{db}`.* TO '{name}'@'%';\n");
+                }
+                self.sql("", &sql)?;
+            }
+            Engine::Postgresql => {
+                self.sql("postgres", &format!("CREATE ROLE {name} LOGIN PASSWORD '{password}';\n"))?;
+                if let Some(db) = database {
+                    let owned = self.pg_own_database(name, db);
+                    if owned.is_err() {
+                        let _ = self.sql("postgres", &format!("DROP ROLE {name};\n"));
+                    }
+                    owned?;
+                }
+            }
+            Engine::Mongodb => {
+                let db = database.unwrap_or(name);
+                self.js(&format!(
+                    "db.getSiblingDB({0}).createUser({{user: {1}, pwd: {2}, roles: [{{role: 'readWrite', db: {0}}}, {{role: 'dbAdmin', db: {0}}}]}});",
+                    quote(db),
+                    quote(name),
+                    quote(password)
+                ))?;
+            }
+        }
+        let database = match self.engine {
+            Engine::Mongodb => Some(database.unwrap_or(name).to_string()),
+            _ => database.map(String::from),
+        };
+        accounts.users.insert(name.into(), Account { password: password.into(), database });
+        self.save(&accounts)
+    }
+
+    /// Give an account a new password; the main one included on MySQL and MongoDB.
+    pub fn set_password(&self, name: &str, password: &str) -> io::Result<()> {
+        let mut accounts = self.accounts()?;
+        match self.engine {
+            Engine::Mysql => {
+                let users: Vec<String> = self
+                    .mysql_hosts(name)?
+                    .iter()
+                    .map(|host| format!("'{name}'@'{}' IDENTIFIED BY '{password}'", mysql_str(host)))
+                    .collect();
+                self.sql("", &format!("ALTER USER {};\n", users.join(", ")))?;
+            }
+            Engine::Postgresql => {
+                self.sql("postgres", &format!("ALTER ROLE {name} PASSWORD '{password}';\n"))?;
+            }
+            Engine::Mongodb => {
+                let db = self.mongo_db(&accounts, name)?;
+                self.js(&format!(
+                    "db.getSiblingDB({}).changeUserPassword({}, {});",
+                    quote(&db),
+                    quote(name),
+                    quote(password)
+                ))?;
+            }
+        }
+        let entry = accounts.users.entry(name.into()).or_default();
+        entry.password = password.into();
+        if self.engine == Engine::Mongodb && entry.database.is_none() {
+            entry.database = Some(self.mongo_db(&Accounts::default(), name)?);
+        }
+        self.save(&accounts)
+    }
+
+    /// Remove an account; its databases and their data stay (on PostgreSQL they pass to `postgres`).
+    pub fn remove_user(&self, name: &str) -> io::Result<()> {
+        let mut accounts = self.accounts()?;
+        match self.engine {
+            Engine::Mysql => {
+                let users: Vec<String> =
+                    self.mysql_hosts(name)?.iter().map(|host| format!("'{name}'@'{}'", mysql_str(host))).collect();
+                self.sql("", &format!("DROP USER {};\n", users.join(", ")))?;
+            }
+            Engine::Postgresql => {
+                // The role's tables and databases pass to postgres, database by database.
+                let dbs = self.sql("postgres", "SELECT datname FROM pg_database WHERE datallowconn ORDER BY 1;")?;
+                for db in dbs.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                    self.sql(db, &format!("REASSIGN OWNED BY {name} TO postgres;\nDROP OWNED BY {name};\n"))?;
+                }
+                self.sql("postgres", &format!("DROP ROLE {name};\n"))?;
+            }
+            Engine::Mongodb => {
+                let db = self.mongo_db(&accounts, name)?;
+                self.js(&format!("db.getSiblingDB({}).dropUser({});", quote(&db), quote(name)))?;
+            }
+        }
+        accounts.users.remove(name);
+        self.save(&accounts)
+    }
+
+    /// A database without an account of its own; MongoDB makes one when an app first writes to it.
+    pub fn create_database(&self, name: &str) -> io::Result<()> {
+        match self.engine {
+            Engine::Mysql => self.sql("", &format!("CREATE DATABASE `{name}`;\n")).map(|_| ()),
+            Engine::Postgresql => self.sql("postgres", &format!("CREATE DATABASE {name};\n")).map(|_| ()),
+            Engine::Mongodb => Ok(()),
+        }
+    }
+
+    /// The hosts a MySQL account has: `%` for the ones Devid makes, `localhost` for `root`.
+    fn mysql_hosts(&self, name: &str) -> io::Result<Vec<String>> {
+        let out = self.sql("", &format!("SELECT Host FROM mysql.user WHERE User = '{name}';\n"))?;
+        let hosts: Vec<String> = out.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
+        match hosts.is_empty() {
+            true => Err(err(format!("MySQL has no account {name:?}"))),
+            false => Ok(hosts),
+        }
+    }
+
+    /// Give a new PostgreSQL account its database: a new one, or `db` if it is there already.
+    fn pg_own_database(&self, name: &str, db: &str) -> io::Result<()> {
+        let there = self.sql("postgres", &format!("SELECT 1 FROM pg_database WHERE datname = '{db}';\n"))?;
+        // CREATE DATABASE cannot run in a transaction, so on its own.
+        let sql = match there.trim().is_empty() {
+            true => format!("CREATE DATABASE {db} OWNER {name};\n"),
+            false => format!("ALTER DATABASE {db} OWNER TO {name};\n"),
+        };
+        self.sql("postgres", &sql).map(|_| ())
+    }
+
+    /// The database a MongoDB account lives in: from accounts.toml, else asked of the server.
+    fn mongo_db(&self, accounts: &Accounts, name: &str) -> io::Result<String> {
+        if let Some(db) = accounts.users.get(name).and_then(|a| a.database.clone()) {
+            return Ok(db);
+        }
+        let out = self.js(&format!(
+            "const u = db.getSiblingDB('admin').system.users.findOne({{user: {}}}); if (u) print(u.db);",
+            quote(name)
+        ))?;
+        out.lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(String::from)
+            .ok_or_else(|| err(format!("MongoDB has no account {name:?}")))
+    }
+}
+
+/// A MySQL string's inside, for a host name read back from `mysql.user`.
+fn mysql_str(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('\'', "''")
+}
+
+/// A JavaScript string literal for mongosh.
+fn quote(text: &str) -> String {
+    serde_json::to_string(text).expect("a string serializes")
+}
+
+/// The `.env` lines a Laravel app needs for an account (D-061). On MongoDB, `DB_URI` carries the
+/// account and the database it lives in (laravel-mongodb reads it).
+pub fn env_lines(engine: Engine, port: u16, user: &str, password: &str, database: Option<&str>) -> Vec<String> {
+    match engine {
+        Engine::Mongodb => {
+            let db = database.unwrap_or("admin");
+            vec![
+                "DB_CONNECTION=mongodb".into(),
+                format!("DB_URI=mongodb://{user}:{password}@127.0.0.1:{port}/{db}?authSource={db}"),
+                format!("DB_DATABASE={db}"),
+            ]
+        }
+        _ => {
+            let mut lines = vec![
+                format!("DB_CONNECTION={}", if engine == Engine::Mysql { "mysql" } else { "pgsql" }),
+                "DB_HOST=127.0.0.1".into(),
+                format!("DB_PORT={port}"),
+            ];
+            // An account without a database of its own (the main one) leaves DB_DATABASE as the app
+            // has it: an empty value would mean no database, while Laravel's default (`laravel`) is
+            // one `artisan migrate` offers to create.
+            if let Some(db) = database {
+                lines.push(format!("DB_DATABASE={db}"));
+            }
+            lines.push(format!("DB_USERNAME={user}"));
+            lines.push(format!("DB_PASSWORD={password}"));
+            lines
+        }
+    }
+}
+
+/// The clients Devid puts in `~/.devid/bin` once an engine is installed (D-053), each set to reach
+/// Devid's own server unless told otherwise.
+pub const CLIENTS: [&str; 6] = ["mysql", "mysqldump", "psql", "pg_dump", "pg_restore", "mongosh"];
+
+pub fn clients(engine: Engine) -> &'static [&'static str] {
+    match engine {
+        Engine::Mysql => &CLIENTS[0..2],
+        Engine::Postgresql => &CLIENTS[2..5],
+        Engine::Mongodb => &CLIENTS[5..],
+    }
+}
+
+pub fn client_engine(name: &str) -> Option<Engine> {
+    ENGINES.into_iter().find(|e| clients(*e).contains(&name))
+}
+
+/// The program behind a client: the series' own, or mongosh's folder.
+pub fn client_bin(paths: &Paths, engine: Engine, series: &str, name: &str) -> PathBuf {
+    match name {
+        "mongosh" => mongosh(paths),
+        _ => bin(paths, engine, series, name),
     }
 }
 
@@ -680,13 +1061,84 @@ mod tests {
     }
 
     #[test]
+    fn names_and_passwords_need_no_quoting() {
+        for ok in ["shop", "_tmp", "app_2", "a2345678901234567890123456789012"] {
+            assert!(check_name("account", ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "Shop", "2shop", "my-app", "a b", "x'; DROP", "a23456789012345678901234567890123"] {
+            assert!(check_name("account", bad).is_err(), "{bad}");
+        }
+        assert!(check_password("secret-1.2").is_ok());
+        assert!(check_password(&password()).is_ok(), "Devid's own pass its own check");
+        for bad in ["short", "has space1", "quote'1234", "back\\slash", "dollar$1234", &"x".repeat(65)] {
+            assert!(check_password(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// The `.env` lines Laravel reads (DB_URI for laravel-mongodb).
+    /// D2 kept the passwords alone; D3 adds the database, and reads D2's file as it is.
+    #[test]
+    fn accounts_from_d2_still_read() {
+        let d2: Accounts = toml::from_str("devid = \"d\"\n[users]\nroot = \"r\"\n").unwrap();
+        assert_eq!(d2.users["root"], Account { password: "r".into(), database: None });
+        let mut now = d2.clone();
+        now.users.insert("shop".into(), Account { password: "s".into(), database: Some("shop".into()) });
+        let text = toml::to_string_pretty(&now).unwrap();
+        assert!(text.contains("[users.shop]") && text.contains("database = \"shop\""), "{text}");
+        assert_eq!(toml::from_str::<Accounts>(&text).unwrap(), now);
+    }
+
+    #[test]
+    fn env_lines_for_laravel() {
+        assert_eq!(
+            env_lines(Engine::Mysql, 3307, "shop", "pw", Some("shop")),
+            [
+                "DB_CONNECTION=mysql",
+                "DB_HOST=127.0.0.1",
+                "DB_PORT=3307",
+                "DB_DATABASE=shop",
+                "DB_USERNAME=shop",
+                "DB_PASSWORD=pw"
+            ]
+        );
+        assert_eq!(
+            env_lines(Engine::Postgresql, 5433, "postgres", "", None),
+            ["DB_CONNECTION=pgsql", "DB_HOST=127.0.0.1", "DB_PORT=5433", "DB_USERNAME=postgres", "DB_PASSWORD="]
+        );
+        assert_eq!(
+            env_lines(Engine::Mongodb, 27017, "shop", "pw", Some("shop"))[1],
+            "DB_URI=mongodb://shop:pw@127.0.0.1:27017/shop?authSource=shop"
+        );
+        assert_eq!(main_account(Engine::Postgresql), "postgres");
+        assert_eq!(main_account(Engine::Mongodb), "root");
+    }
+
+    #[test]
+    fn each_engine_brings_its_clients() {
+        assert_eq!(clients(Engine::Mysql), ["mysql", "mysqldump"]);
+        assert_eq!(clients(Engine::Postgresql), ["psql", "pg_dump", "pg_restore"]);
+        assert_eq!(client_engine("mongosh"), Some(Engine::Mongodb));
+        assert_eq!(client_engine("php"), None);
+        let p = paths("/h/.devid");
+        assert_eq!(
+            client_bin(&p, Engine::Mongodb, "8.0", "mongosh"),
+            PathBuf::from("/h/.devid/db/mongosh/bin/mongosh")
+        );
+        assert_eq!(
+            client_bin(&p, Engine::Postgresql, "18", "psql"),
+            PathBuf::from("/h/.devid/db/postgresql-18/bin/psql")
+        );
+    }
+
+    #[test]
     fn accounts_are_written_for_the_user_only() {
         let home = std::env::temp_dir().join(format!("devid-db-accounts-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
         let p = Paths { home: home.clone() };
         fs::create_dir_all(data(&p, Engine::Mongodb, "8.0")).unwrap();
         let file = accounts_file(&p, Engine::Mongodb, "8.0");
-        let accounts = Accounts { devid: "a".into(), users: BTreeMap::from([("root".into(), "b".into())]) };
+        let root = Account { password: "b".into(), database: Some("admin".into()) };
+        let accounts = Accounts { devid: "a".into(), users: BTreeMap::from([("root".into(), root)]) };
         write_accounts(&file, &accounts).unwrap();
         assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(read_accounts(&p, Engine::Mongodb, "8.0"), Some(accounts));

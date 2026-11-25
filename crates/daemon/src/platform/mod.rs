@@ -21,6 +21,10 @@ pub use os::{
     terminal_command, unavailable_server, uninstall_actions,
 };
 
+/// Seconds the login service gives the daemon to stop: a database may take a minute to stop
+/// cleanly (`db::STOP_TIMEOUT`, D-061), and the rest stops alongside it.
+pub const EXIT_TIMEOUT: u64 = crate::db::STOP_TIMEOUT.as_secs() + 15;
+
 /// A health check for `devid doctor`: whether it holds, what it checks, and the fix.
 pub type Check = (bool, String, String);
 

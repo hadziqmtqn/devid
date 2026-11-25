@@ -118,6 +118,22 @@ fn setup_and_uninstall_dry_runs_change_nothing() {
     for expected in [service, "PATH line", "delete"].iter().chain(uninstall_os) {
         assert!(plan.contains(expected), "uninstall dry run mentions {expected}:\n{plan}");
     }
+    assert!(!plan.contains("all but"), "no databases, nothing to keep:\n{plan}");
+    // D-061: --purge keeps the databases unless --delete-databases.
+    fs::create_dir_all(home.join("data/mysql-8.4")).unwrap();
+    let plan = run(&["uninstall", "--dry-run", "--purge"]);
+    assert!(plan.contains(&format!("all but {}", home.join("data").display())), "{plan}");
+    assert!(plan.contains("kept your databases") && plan.contains("mysql-8.4"), "{plan}");
+    let plan = run(&["uninstall", "--dry-run", "--purge", "--delete-databases"]);
+    assert!(!plan.contains("all but") && !plan.contains("kept your databases"), "{plan}");
+    let alone = Command::new(BIN)
+        .args(["uninstall", "--dry-run", "--delete-databases"])
+        .env("DEVID_HOME", &home)
+        .env("HOME", &fake_home)
+        .output()
+        .unwrap();
+    assert!(!alone.status.success(), "--delete-databases needs --purge");
+    assert!(home.join("data/mysql-8.4").is_dir(), "a dry run deletes nothing");
     assert!(fs::read_dir(&fake_home).unwrap().next().is_none(), "nothing written to the user's home");
     assert!(!home.join("bin").exists(), "binary not installed");
     fs::remove_dir_all(&root).unwrap();
