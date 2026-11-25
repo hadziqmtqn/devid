@@ -81,15 +81,29 @@ fn mongod() -> String {
     )
 }
 
-/// A client: logs its arguments, and its script (stdin, or mongosh's --file).
-fn client(name: &str) -> String {
-    script(
-        name,
-        "file=; prev=\n\
-         for a in \"$@\"; do [ \"$prev\" = --file ] && file=\"$a\"; prev=\"$a\"; done\n\
-         if [ -n \"$file\" ]; then cat \"$file\"; else cat; fi >> \"$DEVID_HOME/db-calls.log\"\n\
-         exit 0",
-    )
+/// A client: logs its arguments, and its script (stdin, or mongosh's --file). It keeps the accounts
+/// a server would have in $DEVID_HOME/db-users-<name>, starting with the main one, so listing,
+/// new passwords and removals see the accounts made before (D3).
+fn client(name: &str, main: &str) -> String {
+    let body = r#"file=; prev=
+for a in "$@"; do [ "$prev" = --file ] && file="$a"; prev="$a"; done
+if [ -n "$file" ]; then sql=$(cat "$file"); else sql=$(cat); fi
+printf '%s\n' "$sql" >> "$DEVID_HOME/db-calls.log"
+users="$DEVID_HOME/db-users-@NAME@"
+[ -f "$users" ] || echo @MAIN@ > "$users"
+case "$sql" in
+  *"User NOT IN"*|*"FROM pg_roles"*|*"system.users.find("*) cat "$users" ;;
+  *"SELECT Host FROM mysql.user"*)
+    n=${sql#*User = \'}; n=${n%%\'*}
+    if grep -qx "$n" "$users"; then if [ "$n" = root ]; then echo localhost; else echo %; fi; fi ;;
+  *"WHERE datallowconn"*) echo postgres ;;
+esac
+printf '%s\n' "$sql" | sed -n "s/.*CREATE USER '\([a-z0-9_]*\)'.*/\1/p; s/.*CREATE ROLE \([a-z0-9_]*\) .*/\1/p; s/.*createUser({user: \"\([a-z0-9_]*\)\".*/\1/p" >> "$users"
+for n in $(printf '%s\n' "$sql" | sed -n "s/.*DROP USER '\([a-z0-9_]*\)'.*/\1/p; s/^DROP ROLE \([a-z0-9_]*\);/\1/p; s/.*dropUser(\"\([a-z0-9_]*\)\").*/\1/p"); do
+  grep -vx "$n" "$users" > "$users.new"; mv "$users.new" "$users"
+done
+exit 0"#;
+    script(name, &body.replace("@NAME@", name).replace("@MAIN@", main))
 }
 
 fn initdb() -> String {
@@ -121,11 +135,11 @@ fn asset(root: &Path, rel: &Path, name: &str, version: &str, files: &[(&str, Str
 fn publish(root: &Path, rel: &Path, tag: &str, mysql: &str) {
     let manifest = json!({
         "schema": 1, "tag": tag, "repo": "local/test",
-        "mysql": {"8.4": asset(root, rel, "mysql-8.4", mysql, &[("mysqld", mysqld()), ("mysql", client("mysql"))])},
+        "mysql": {"8.4": asset(root, rel, "mysql-8.4", mysql, &[("mysqld", mysqld()), ("mysql", client("mysql", "root"))])},
         "postgresql": {"18": asset(root, rel, "postgresql-18", "18.7",
-            &[("postgres", postgres()), ("initdb", initdb()), ("psql", client("psql"))])},
+            &[("postgres", postgres()), ("initdb", initdb()), ("psql", client("psql", "postgres"))])},
         "mongodb": {"8.0": asset(root, rel, "mongodb-8.0", "8.0.38", &[("mongod", mongod())])},
-        "mongosh": asset(root, rel, "mongosh", "2.14.3", &[("mongosh", client("mongosh"))]),
+        "mongosh": asset(root, rel, "mongosh", "2.14.3", &[("mongosh", client("mongosh", "root"))]),
     });
     fs::write(rel.join("manifest.json"), serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
     let runtime = rel.join("runtime");
@@ -148,6 +162,39 @@ fn out(o: &std::process::Output) -> String {
 
 fn pid_of(home: &Path, engine: &str) -> u64 {
     database(home, engine)["pid"].as_u64().unwrap_or_else(|| panic!("{engine} has no pid"))
+}
+
+/// The `password: …` line of `devid db user add|password`.
+fn password_in(text: &str) -> String {
+    text.lines().find_map(|l| l.strip_prefix("password: ")).unwrap_or_else(|| panic!("no password in {text}")).into()
+}
+
+/// A home with a database release and each engine's port in config.toml, and the daemon's env.
+fn setup(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, [u16; 3], [(String, String); 2]) {
+    let root = temp_root(tag);
+    let home = root.join("home");
+    let rel = root.join("release");
+    fs::create_dir_all(&rel).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    publish(&root, &rel, "db-test-1", "8.4.13");
+    let ports = [free_tcp_port(), free_tcp_port(), free_tcp_port()];
+    fs::write(
+        home.join("config.toml"),
+        format!(
+            "http_port = {TEST_HTTP_PORT}\nhttps_port = {TEST_HTTPS_PORT}\ndns_port = {}\nupdate_check_minutes = 0\n\
+             [databases.mysql]\nport = {}\n[databases.postgresql]\nport = {}\n[databases.mongodb]\nport = {}\n",
+            free_udp_port(),
+            ports[0],
+            ports[1],
+            ports[2]
+        ),
+    )
+    .unwrap();
+    let env = [
+        ("DEVID_DB_MANIFEST_URL".to_string(), format!("file://{}/manifest.json", rel.display())),
+        ("DEVID_MANIFEST_URL".to_string(), format!("file://{}/runtime/manifest.json", rel.display())),
+    ];
+    (root, home, ports, env)
 }
 
 #[test]
@@ -217,7 +264,7 @@ fn databases_install_start_stop_and_come_back() {
     let log = calls(&home);
     assert!(log.contains("--auth") && log.contains("--wiredTigerCacheSizeGB 0.25"), "{log}");
     assert!(log.contains("createUser({user: 'devid'") && log.contains("createUser({user: 'root'"), "{log}");
-    assert!(fs::read_to_string(home.join("data/mongodb-8.0/accounts.toml")).unwrap().contains("root = "));
+    assert!(fs::read_to_string(home.join("data/mongodb-8.0/accounts.toml")).unwrap().contains("[users.root]"));
 
     // A series the release does not build for this computer.
     let missing = devid(&home, &["db", "install", "mysql", "9.7"]);
@@ -262,6 +309,127 @@ fn databases_install_start_stop_and_come_back() {
     });
     assert_eq!(database(&home, "postgresql")["state"], "off");
     assert_eq!(fs::read_to_string(home.join("data/postgresql-18/PG_VERSION")).unwrap().trim(), "18");
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// D3 (D-061): accounts with generated passwords, their `.env` lines, a database of its own, a new
+/// port, and removing a series while its data stays.
+#[test]
+fn accounts_env_port_and_remove() {
+    let (root, home, [my, pg, mongo], env) = setup("devid-db-acc");
+    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let daemon = start_daemon_env(&home, &env);
+    let ok = |args: &[&str]| {
+        let o = devid(&home, args);
+        assert!(o.status.success(), "{args:?}: {}", stderr(&o));
+        out(&o)
+    };
+    let fails = |args: &[&str]| {
+        let o = devid(&home, args);
+        assert!(!o.status.success(), "{args:?} should fail: {}", out(&o));
+        stderr(&o)
+    };
+    assert!(fails(&["db", "user", "add", "mysql", "shop"]).contains("MySQL is not on"));
+    for engine in ["mysql", "postgresql", "mongodb"] {
+        ok(&["db", "start", engine]);
+    }
+
+    // MySQL: an account with a database of its own and a generated password, kept for `db env`.
+    let text = ok(&["db", "user", "add", "mysql", "shop"]);
+    assert!(text.contains("made the MySQL account shop, with the database shop"), "{text}");
+    let pw = password_in(&text);
+    assert_eq!(pw.len(), 24);
+    let lines = format!(
+        "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT={my}\nDB_DATABASE=shop\nDB_USERNAME=shop\nDB_PASSWORD={pw}\n"
+    );
+    assert!(text.contains(&lines), "{text}");
+    let log = calls(&home);
+    assert!(log.contains("CREATE DATABASE IF NOT EXISTS `shop`;"), "{log}");
+    assert!(log.contains(&format!("CREATE USER 'shop'@'%' IDENTIFIED BY '{pw}';")), "{log}");
+    assert!(log.contains("GRANT ALL ON `shop`.* TO 'shop'@'%';"), "{log}");
+    assert_eq!(ok(&["db", "env", "mysql", "shop"]), lines, "`db env` prints only the lines");
+    assert!(fails(&["db", "user", "add", "mysql", "shop"]).contains("has an account shop already"));
+    assert!(fails(&["db", "user", "add", "mysql", "Shop"]).contains("use lowercase letters"));
+    assert!(fails(&["db", "user", "add", "mysql", "root"]).contains("one of the server's own accounts"));
+    assert!(fails(&["db", "user", "add", "mysql", "x1", "--password", "short"]).contains("8 to 64"));
+
+    // A second account, without a database, with a password of the user's own.
+    let text = ok(&["db", "user", "add", "mysql", "blog", "--no-database", "--password", "blog-pass-1"]);
+    assert!(!text.contains("DB_DATABASE") && text.contains("DB_PASSWORD=blog-pass-1"), "{text}");
+    let list = ok(&["db", "user", "list", "mysql"]);
+    for want in ["root", "none from this computer", "shop", "kept by Devid", "blog"] {
+        assert!(list.contains(want), "{want}: {list}");
+    }
+
+    // New passwords: a generated one, and one of the user's own for the main account.
+    let new = password_in(&ok(&["db", "user", "password", "mysql", "shop"]));
+    assert_ne!(new, pw);
+    assert!(calls(&home).contains(&format!("ALTER USER 'shop'@'%' IDENTIFIED BY '{new}';")));
+    assert!(ok(&["db", "env", "mysql", "shop"]).contains(&format!("DB_PASSWORD={new}")));
+    let main = ok(&["db", "env", "mysql"]);
+    assert!(main.contains("DB_USERNAME=root\nDB_PASSWORD=\n") && !main.contains("DB_DATABASE"), "{main}");
+    ok(&["db", "user", "password", "mysql", "root", "--password", "root-pass-1"]);
+    assert!(calls(&home).contains("ALTER USER 'root'@'localhost' IDENTIFIED BY 'root-pass-1';"));
+    assert!(ok(&["db", "env", "mysql"]).contains("DB_PASSWORD=root-pass-1"));
+    assert!(fails(&["db", "user", "password", "mysql", "nobody"]).contains("has no account nobody"));
+
+    // Removing an account keeps its database; the main account stays.
+    ok(&["db", "user", "remove", "mysql", "shop"]);
+    assert!(calls(&home).contains("DROP USER 'shop'@'%';"));
+    assert!(!fs::read_to_string(home.join("data/mysql-8.4/accounts.toml")).unwrap().contains("[users.shop]"));
+    assert!(fails(&["db", "user", "remove", "mysql", "root"]).contains("it stays"));
+    ok(&["db", "create", "mysql", "news"]);
+    assert!(calls(&home).contains("CREATE DATABASE `news`;"));
+
+    // PostgreSQL: a role that owns its database; postgres needs no password from this computer.
+    let text = ok(&["db", "user", "add", "pg", "shop"]);
+    let pg_pw = password_in(&text);
+    assert!(
+        text.contains(&format!("DB_CONNECTION=pgsql\nDB_HOST=127.0.0.1\nDB_PORT={pg}\nDB_DATABASE=shop")),
+        "{text}"
+    );
+    let log = calls(&home);
+    assert!(log.contains("CREATE ROLE shop LOGIN PASSWORD") && log.contains(&format!("'{pg_pw}';")), "{log}");
+    assert!(log.contains("CREATE DATABASE shop OWNER shop;"), "{log}");
+    let accounts = home.join("data/postgresql-18/accounts.toml");
+    assert_eq!(fs::metadata(&accounts).unwrap().permissions().mode() & 0o777, 0o600, "only the user reads it");
+    assert!(fails(&["db", "user", "password", "postgresql", "postgres"]).contains("needs no password"));
+    ok(&["db", "user", "remove", "postgresql", "shop"]);
+    let log = calls(&home);
+    assert!(log.contains("REASSIGN OWNED BY shop TO postgres;") && log.contains("DROP ROLE shop;"), "{log}");
+
+    // MongoDB: the account lives in its database; the main account has a password.
+    let text = ok(&["db", "user", "add", "mongodb", "shop"]);
+    let m_pw = password_in(&text);
+    assert!(text.contains(&format!("DB_URI=mongodb://shop:{m_pw}@127.0.0.1:{mongo}/shop?authSource=shop")), "{text}");
+    assert!(calls(&home).contains("createUser({user: \"shop\""));
+    let root_env = ok(&["db", "env", "mongodb"]);
+    assert!(root_env.contains("DB_URI=mongodb://root:") && root_env.contains("/admin?authSource=admin"), "{root_env}");
+    assert!(fails(&["db", "user", "add", "mongodb", "x2", "--no-database"]).contains("lives in a database"));
+
+    // Another port: the server restarts there, and the `.env` lines follow.
+    let port = free_tcp_port();
+    let before = pid_of(&home, "mysql");
+    assert!(ok(&["db", "port", "mysql", &port.to_string()]).contains(&format!("runs on 127.0.0.1:{port} now")));
+    wait_for("mysql on its new port", || {
+        let d = database(&home, "mysql");
+        d["port"] == port && d["state"] == "running" && d["pid"].as_u64() != Some(before)
+    });
+    assert!(ok(&["db", "env", "mysql", "blog"]).contains(&format!("DB_PORT={port}")));
+    assert!(ok(&["db", "port", "mysql", &port.to_string()]).contains("on port"), "the same port changes nothing");
+    assert!(fails(&["db", "port", "mysql", &pg.to_string()]).contains("the port of Devid's PostgreSQL"));
+    assert!(fails(&["db", "port", "mysql", "80"]).contains("from 1024"));
+    let busy = TcpListener::bind("127.0.0.1:0").unwrap();
+    assert!(fails(&["db", "port", "mysql", &busy.local_addr().unwrap().port().to_string()]).contains("is in use"));
+
+    // Removing a series: never the one in use; its data stays unless asked.
+    assert!(fails(&["db", "remove", "mysql", "8.4"]).contains("in use"));
+    ok(&["db", "stop", "mysql"]);
+    assert!(ok(&["db", "remove", "mysql", "8.4"]).contains("its data stays in"));
+    assert!(!home.join("db/mysql-8.4").exists() && home.join("data/mysql-8.4/mysql").is_dir());
+    assert!(fails(&["db", "remove", "mysql", "8.4"]).contains("not installed"));
+    assert!(fails(&["db", "remove", "mysql", "../../x"]).contains("not installed"));
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();
 }
