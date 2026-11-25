@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import signal
@@ -128,6 +129,14 @@ def memory(root):
                          capture_output=True, text=True).stdout
     rss = sum(int(x) for x in out.split() if x.isdigit())
     result = {"processes": len(pids), "rss_mb": round(rss / 1024, 1)}
+    if not LINUX and os.path.exists("/usr/bin/footprint"):
+        # RSS leaves out what macOS's memory compressor holds; the footprint counts it.
+        kb = 0.0
+        for pid in pids:
+            m = re.search(r"Footprint: ([\d.]+) (B|KB|MB|GB)", sh(["/usr/bin/footprint", "-p", str(pid)])[1])
+            if m:
+                kb += float(m.group(1)) * {"B": 1 / 1024, "KB": 1, "MB": 1024, "GB": 1024 * 1024}[m.group(2)]
+        result["footprint_mb"] = round(kb / 1024, 1)
     if LINUX:
         pss = 0
         for pid in pids:
@@ -518,21 +527,29 @@ def checks(res):
     return "all %d ok" % len(tests) if not failed else "FAILED: " + ", ".join(failed)
 
 
+def fmt_mem(m):
+    if not m:
+        return ""
+    if "pss_mb" in m:
+        return f"{m['pss_mb']} PSS ({m['rss_mb']} RSS)"
+    if "footprint_mb" in m:
+        return f"{m['footprint_mb']} footprint ({m['rss_mb']} RSS)"
+    return f"{m['rss_mb']} RSS"
+
+
 def print_summary(rows):
-    print("\n| Server | Profile | Init s | Ready s | Idle MB | Stop s | Restart after SIGKILL s | Accounts | Laravel |")
-    print("|---|---|---|---|---|---|---|---|---|")
+    print("\n| Server | Profile | Init s | Ready s | Idle MB | After use MB | Stop s | Restart after SIGKILL s "
+          "| Accounts | Laravel |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
-        idle = r.get("idle", {})
-        mb = idle.get("pss_mb", idle.get("rss_mb", ""))
-        if "pss_mb" in idle:
-            mb = f"{idle['pss_mb']} PSS ({idle['rss_mb']} RSS)"
         after = r.get("after_kill", {})
         lv = r.get("laravel_migrate")
         print(f"| {r['engine']} {r['version']} | {r['profile']} | {r.get('init_s', '')} | {r.get('start_s', '')} "
-              f"| {mb} | {r.get('stop_s', '')} | {after.get('restart_s', '')} | {checks(r)} "
+              f"| {fmt_mem(r.get('idle'))} | {fmt_mem(r.get('used'))} | {r.get('stop_s', '')} "
+              f"| {after.get('restart_s', '')} | {checks(r)} "
               f"| {'' if lv is None else ('ok' if lv['ok'] else 'FAILED')} |")
         if r.get("error"):
-            print(f"|  | error: {r['error'][:200]} | | | | | | | |")
+            print(f"|  | error: {r['error'][:200]} | | | | | | | | |")
 
 
 if __name__ == "__main__":
