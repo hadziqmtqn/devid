@@ -14,6 +14,8 @@
     "allow-doctor",
     "allow-devid-check",
     "allow-in-terminal",
+    "allow-terminals",
+    "allow-open-db-client",
     "allow-login-item",
     "allow-self-update",
     "allow-self-update-progress",

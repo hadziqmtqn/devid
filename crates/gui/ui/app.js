@@ -51,6 +51,7 @@ const ICONS = {
   file: '<svg viewBox="0 0 16 16"><path d="M4 1.8h5.2L12.5 5v9.2H4z"/><path d="M9 1.8V5h3.5"/></svg>',
   download: '<svg viewBox="0 0 16 16"><path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13.5h10"/></svg>',
   info: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.3v4"/><circle class="f" cx="8" cy="5" r=".85"/></svg>',
+  terminal: '<svg viewBox="0 0 16 16"><rect x="1.8" y="2.5" width="12.4" height="11" rx="1.6"/><path d="m4.6 6.2 2 1.8-2 1.8M8.4 10.2h3"/></svg>',
 };
 
 const S = {
@@ -78,8 +79,9 @@ const S = {
   // message opened in the Unread view listed after it is read; `extra` is the Headers or Raw tab.
   inbox: { cur: null, msg: null, tab: 'preview', q: '', filter: 'all', stay: null, extra: null },
   // Databases (D-061): the engine on screen, its accounts (asked again only when its server changes
-  // or `stale`), a first start's download, the port being typed, and the series the release offers.
-  db: { eng: null, users: null, usersKey: '', usersErr: null, stale: false, dl: null, port: null, avail: null },
+  // or `stale`), a first start's download, the port being typed, the series the release offers, and
+  // the terminal apps on this Mac with the one picked last.
+  db: { eng: null, users: null, usersKey: '', usersErr: null, stale: false, dl: null, port: null, avail: null, terms: null, term: null },
 };
 const $ = (id) => document.getElementById(id);
 
@@ -959,6 +961,7 @@ async function loadDatabases() {
   const eng = dbEngine(list);
   const d = list.find((x) => x.engine === eng);
   if (!S.db.avail) loadDbAvailable();
+  if (!S.db.terms) loadTerminals();
   const key = [eng, d?.series, d?.state, d?.port].join(':');
   if (d?.state === 'running' && (S.db.usersKey !== key || S.db.stale)) {
     S.db.stale = false;
@@ -981,6 +984,40 @@ function loadDbAvailable() {
   if (dbAvailAsked) return;
   dbAvailAsked = true;
   daemon({ cmd: 'db_list', available: true }).then((r) => { S.db.avail = r.available || {}; refresh(true); }, () => { S.db.avail = {}; });
+}
+
+/** The terminal apps on this Mac (the app reads the Applications folders), asked once, and the one picked last. */
+const TERM_KEY = 'devid.terminal';
+let termsAsked = false;
+function loadTerminals() {
+  if (termsAsked) return;
+  termsAsked = true;
+  try { S.db.term = localStorage.getItem(TERM_KEY); } catch (e) { /* no storage: Terminal comes first */ }
+  invoke('terminals').then((t) => { S.db.terms = t; refresh(true); }, () => { S.db.terms = []; });
+}
+
+const DB_CLIENT = { mysql: 'mysql', postgresql: 'psql', mongodb: 'mongosh' };
+
+/** Opens the engine's client as its main account in terminal app `t`, which the page remembers. */
+function openDbClient(engine, t) {
+  S.db.term = t.path;
+  try { localStorage.setItem(TERM_KEY, t.path); } catch (e) { /* kept until the window closes */ }
+  act('Opening ' + t.name + '…', () => invoke('open_db_client', { engine, app: t.path }), (m) => m);
+}
+
+/** Open in Terminal: the terminal app picked last (Terminal at first); ▾ lists the others. */
+function dbTerminalBtn(d) {
+  const terms = S.db.terms || [];
+  const t = terms.find((x) => x.path === S.db.term) || terms[0];
+  if (!t) return null;
+  const e = DB_ENGINES[d.engine];
+  const open = btn([icon('terminal'), 'Open in ' + t.name], () => openDbClient(d.engine, t), '',
+    { title: 'Opens ' + DB_CLIENT[d.engine] + ' as ' + e.main + ' in ' + t.name });
+  if (terms.length < 2) return open;
+  return h('div.dv-split', { role: 'group', 'aria-label': 'Open ' + DB_CLIENT[d.engine] }, open,
+    h('button.dv-btn', { type: 'button', 'aria-label': 'Choose the terminal app', 'aria-haspopup': 'menu', 'aria-expanded': 'false', disabled: !!S.busy,
+      onclick: (ev) => menu(ev.currentTarget, [{ header: 'Open ' + DB_CLIENT[d.engine] + ' in' },
+        ...terms.map((x) => ({ label: x.name, checked: x.path === t.path, run: () => openDbClient(d.engine, x) }))], true) }, icon('chevron')));
 }
 
 function pickDb(eng) {
@@ -1059,7 +1096,8 @@ function dbServer(d, data) {
         h('label.dv-grow', { for: 'sw-db' }, h('div.ml-title', {}, h('span.dv-strong', {}, e.label + ' ' + (d.series || '')), h('span.dv-chip.' + tone, {}, label)),
           h('div.dv-sub.dv-mono', {}, [d.version, where].filter(Boolean).join(' · '))),
         stopped ? busyBtn('db-svc', 'Start', () => act('Starting ' + e.label + '…', () => daemon({ cmd: 'service_start', service: d.engine }), 'Started ' + e.label, 'db-svc')) : null,
-        h('input.dv-switch', { type: 'checkbox', role: 'switch', id: 'sw-db', checked: !!d.enabled, disabled: !!S.busy, 'aria-label': e.label + ' on',
+        d.state === 'running' ? dbTerminalBtn(d) : null,
+        h('input.dv-switch',{ type: 'checkbox', role: 'switch', id: 'sw-db', checked: !!d.enabled, disabled: !!S.busy, 'aria-label': e.label + ' on',
           onchange: (ev) => (ev.target.checked ? startDb(d.engine, d.series) : stopDb(d.engine)) }),
         moreBtn(e.label + ' actions', () => [
           { label: 'Restart ' + e.label, disabled: d.state !== 'running',
@@ -1078,7 +1116,8 @@ function dbServer(d, data) {
     card(
       d.data ? row(titledSub('Data', 'Stopping, updating or uninstalling Devid keeps it. Only devid db remove --delete-data, or devid uninstall --purge --delete-databases, deletes it.',
         h('div.dv-sub.dv-mono.dv-ellipsis', {}, d.data)), btn('Show in Finder', () => openTarget({ what: 'finder', path: d.data }))) : null,
-      row(titledSub('Terminal', 'These commands come first on PATH and reach this server as ' + e.main + ', unless you name another host or port.',
+      row(titledSub('Terminal', (S.status.terminal?.on === false ? 'Add to PATH in Settings lets a terminal run these commands by name. They reach'
+        : 'These commands come first on PATH and reach') + ' this server as ' + e.main + ', unless you name another host or port.',
         h('div.dv-sub.dv-mono', {}, e.clients)))),
   ];
 }

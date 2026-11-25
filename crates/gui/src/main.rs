@@ -37,6 +37,8 @@ fn main() {
             api::doctor,
             api::devid_check,
             api::in_terminal,
+            api::terminals,
+            api::open_db_client,
             api::login_item,
             api::self_update,
             api::self_update_progress,

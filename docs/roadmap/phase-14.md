@@ -393,6 +393,7 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d4-app-page.md`
   - **The server's card:**
     - the series, the state and the address;
     - a switch (`db start` / `db stop`), and Start while it is paused;
+    - **Open in Terminal** while it runs (the owner's change after the preview). It opens the client (`mysql`, `psql` or `mongosh`) as the main account in a terminal app, at its prompt. ▾ lists the terminal apps on this Mac, so cmux shows up next to Terminal, and the page remembers the last pick. With one terminal app there is no ▾;
     - ⋯: Restart, Copy `.env` for the main account, and Show log (the engine's log on the Logs page).
   - **Accounts:**
     - the main account first, then the rest by name;
@@ -403,7 +404,7 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d4-app-page.md`
   - **Settings:**
     - the port, applied on leaving the field (the daemon refuses a busy port and says who holds it);
     - the series offered by the release, or the installed ones offline. Picking one asks first, then downloads it if needed.
-  - **Storage:** the data folder with Show in Finder, and the terminal commands.
+  - **Storage:** the data folder with Show in Finder, and the terminal commands. While Devid's commands are off PATH, the (i) says that Add to PATH in Settings turns them on.
   - **Explanations** are behind (i) (D-055).
   - **First start:** a database that never ran shows what Devid will do, Start, then the download's progress. Another series shows its progress in the server's card.
 - **The window's quick menu and the menu-bar icon** list the databases that are on, with their port or "Stopped"; each opens the page.
@@ -411,6 +412,9 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d4-app-page.md`
   - `copy_db` copies an account's `.env` lines or its password through `db env`, so they never pass through the page.
   - `db_list`, `db_user_list` and `db_env` count as reads.
   - Show in Finder accepts a database's data folder.
+  - `terminals` lists the terminal apps in the Applications folders: apps whose document types run `.command` files (the `Shell` role), as Terminal, iTerm2 and cmux declare. Terminal comes first.
+  - `open_db_client(engine, app)` checks that the server runs and that `app` is a terminal app. It writes `~/.devid/run/devid-<engine>.command`, which runs Devid's shim, and opens that file with `open -a`.
+  - **MongoDB's login:** the main account `root` logs in through a script in `~/.devid/run` that only the user can read. mongosh runs it with `--shell`, the script deletes itself first, and no password is on a command line.
 - **The daemon:** `status.databases[].data` is the series' data folder.
 - **Accounts load only when they can change:** the page asks for them when the server on screen changes or after an action, not on every 2 s refresh, since each list runs the engine's client.
 
@@ -425,13 +429,25 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d4-app-page.md`
   - the quick menu's Databases;
   - the tabs' arrow keys;
   - the dark and light themes.
+- **Open in Terminal:**
+  - **The page, in the app's browser:**
+    - ▾ lists Terminal and cmux, and picking cmux opens it there;
+    - the pick is still there after a reload;
+    - a paused server has no button until it starts;
+    - Enter opens the list on the current pick, and Escape closes it;
+    - one terminal app gives a plain button, and none gives no button.
+  - **The scripts, against a test daemon:** the test daemon ran in its own home with MySQL 8.4, PostgreSQL 18 and MongoDB 8.0, next to DBngin. The `.command` files that `open_db_client` writes ran in a terminal (a pty), and each one reached its prompt:
+    - `postgres=#` as `postgres`;
+    - `mysql>` as `root@localhost`;
+    - `test>` logged in as `root` on `admin`, with the login script at mode 0600 and deleted while mongosh ran. The password was not in the `.command` file or in what the terminal showed.
+  - **Terminal apps on the M1:** Terminal and cmux 0.65.2. cmux's source (`TerminalDefaultFileOpenRequest`) runs an opened `.command` file in a new workspace by typing its path into the shell, as Terminal does.
 - **The repository's checks:**
   - `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass, with `-p devid-gui` too;
   - `node --check` passes on `app.js`.
 
 ### Not yet
 
-- **The owner's try on the M1:** adding an account and resetting a password from the page in the real app, against a real daemon. Either a test copy of the app with a test daemon now, or 0.21.0's rc in D5.
+- **The owner's try on the M1:** adding an account and resetting a password from the page in the real app, against a real daemon, and Open in Terminal in Terminal and in cmux. Either a test copy of the app with a test daemon now, or 0.21.0's rc in D5.
 
 ## Milestones
 

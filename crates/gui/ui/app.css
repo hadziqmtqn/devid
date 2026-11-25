@@ -128,6 +128,11 @@ p.dv-note { margin: 10px 4px 0; }
 .dv-btn.ghost:hover { background: var(--surface-2); color: var(--text); }
 .dv-btn.icon { width: 28px; height: 28px; padding: 0; }
 .dv-btn .dv-ico { width: 14px; height: 14px; }
+/* A button with a ▾ beside it that picks what the button uses (Open in Terminal). */
+.dv-split { display: inline-flex; }
+.dv-split > .dv-btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.dv-split > .dv-btn + .dv-btn { width: 22px; padding: 0; margin-left: 1px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.dv-split > .dv-btn + .dv-btn .dv-ico { width: 11px; height: 11px; stroke-width: 1.8; }
 @media (prefers-color-scheme: dark) {
   .dv-btn { background: rgba(255,255,255,.13); border-color: rgba(255,255,255,.06); }
   .dv-btn.primary { background: var(--accent); }
