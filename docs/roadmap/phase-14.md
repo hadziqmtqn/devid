@@ -2,7 +2,7 @@
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
 > Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 built 2026-11-25** (the app's Databases page, from the board the owner approved; see "D4 results"); the owner's own try on the M1 is next.
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 built 2026-11-25** (the app's Databases page, from the board the owner approved; see "D4 results"); the owner's own try on the M1 is next. **D2 and D3 shipped in 0.20.1** (2026-11-25), which was tagged on main for PHP 8.6: no database is installed or started until the user asks for one, and the docs come with 0.21.0 (D5).
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
