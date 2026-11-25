@@ -2,7 +2,7 @@
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
 > Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 built 2026-11-25** (the app's Databases page, from the board the owner approved; see "D4 results"); the owner's own try on the M1 is next. **D2 and D3 shipped in 0.20.1** (2026-11-25), which was tagged on main for PHP 8.6: no database is installed or started until the user asks for one, and the docs come with 0.21.0 (D5).
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 done 2026-11-25** (the app's Databases page with Open in Terminal, merged in #151; see "D4 results"); the owner's own try on the M1 moved to D5's rc. **D5 started 2026-11-25** (see "D5 plan"). **D2 and D3 shipped in 0.20.1** (2026-11-25), which was tagged on main for PHP 8.6: no database is installed or started until the user asks for one, and the docs come with 0.21.0 (D5).
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -448,6 +448,23 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d4-app-page.md`
 ### Not yet
 
 - **The owner's try on the M1:** adding an account and resetting a password from the page in the real app, against a real daemon, and Open in Terminal in Terminal and in cmux. Either a test copy of the app with a test daemon now, or 0.21.0's rc in D5.
+
+## D5 plan (2026-11-25)
+
+The owner started D5 after #151 merged: "Mulai D5". 0.20.1 already carries D2 and D3, off by default. 0.21.0 adds the app's page and makes databases part of the docs.
+
+1. **CI:** arch-e2e runs `scripts/db-e2e.sh` in its Arch VM with the musl build, after setup and uninstall (`scripts/arch-vm.sh db-e2e`). Together with `db-e2e` on Ubuntu and macOS, every pull request then checks the databases on macOS, Ubuntu and Arch.
+2. **0.21.0-rc.1:** a pre-release from main. Its release notes say that Devid runs MySQL, PostgreSQL and MongoDB on request, and that `--purge` keeps their data.
+3. **The rc on the owner's M1,** once the owner agrees to update Devid there. This is D4's try: an account added and a password reset from the app's page, and Open in Terminal in Terminal and in cmux. MySQL and PostgreSQL run next to DBngin's, which nothing touches.
+4. **The rc on the Linux VMs** (Ubuntu 24.04, Arch and CachyOS on the old Mac):
+   - `devid self-update` to the rc;
+   - each engine started, with an account and its `.env`;
+   - a real `devid uninstall --purge` that keeps `~/.devid/data`, then `--delete-databases`, which deletes it.
+5. **Docs with 0.21.0:**
+   - the README, CONTRIBUTING, PROJECT_CONTEXT and docs/README;
+   - CLAUDE.md only with the owner's OK;
+   - the guide's `/docs/databases` page in devid-site, merged after the release.
+6. **0.21.0:** a version PR with the docs, then the owner tags it.
 
 ## Milestones
 
