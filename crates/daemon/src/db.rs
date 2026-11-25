@@ -885,6 +885,8 @@ pub fn env_lines(engine: Engine, port: u16, user: &str, password: &str, database
     match engine {
         Engine::Mongodb => {
             let db = database.unwrap_or("admin");
+            // A password of the user's own may hold `@` or `%`, which a URI must escape.
+            let password = uri_escape(password);
             vec![
                 "DB_CONNECTION=mongodb".into(),
                 format!("DB_URI=mongodb://{user}:{password}@127.0.0.1:{port}/{db}?authSource={db}"),
@@ -908,6 +910,16 @@ pub fn env_lines(engine: Engine, port: u16, user: &str, password: &str, database
             lines
         }
     }
+}
+
+/// Percent-escape everything in `text` but RFC 3986's unreserved characters.
+fn uri_escape(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// The clients Devid puts in `~/.devid/bin` once an engine is installed (D-053), each set to reach
@@ -1109,6 +1121,9 @@ mod tests {
             env_lines(Engine::Mongodb, 27017, "shop", "pw", Some("shop"))[1],
             "DB_URI=mongodb://shop:pw@127.0.0.1:27017/shop?authSource=shop"
         );
+        // No URI with credentials in the source, which secret scanners flag.
+        let uri = &env_lines(Engine::Mongodb, 27017, "shop", "a@b%c!d", Some("shop"))[1];
+        assert!(uri.contains(":a%40b%25c%21d@127.0.0.1"), "a password of the user's own is escaped: {uri}");
         assert_eq!(main_account(Engine::Postgresql), "postgres");
         assert_eq!(main_account(Engine::Mongodb), "root");
     }

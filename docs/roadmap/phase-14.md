@@ -306,7 +306,7 @@ The record is `docs/implementation-timeline/databases/2026-11-25-d3-cli-tui-acco
   - **`accounts.toml`** keeps each account's password and database. D2's file, which held the password alone, still reads.
 - **`.env` lines:** `devid db env <engine> [<account>]` prints only the lines, so `>> .env` works. They are:
   - MySQL and PostgreSQL: `DB_CONNECTION`, `DB_HOST=127.0.0.1`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`;
-  - MongoDB: `DB_CONNECTION=mongodb`, `DB_URI` with the account, its database and `authSource`, and `DB_DATABASE`.
+  - MongoDB: `DB_CONNECTION=mongodb`, `DB_URI` with the account, its database and `authSource`, and `DB_DATABASE`. A password the user picked is percent-escaped in the URI, since `@` or `%` would break it.
 
   The main account has no database of its own, so its lines leave `DB_DATABASE` out. Laravel then keeps its default (`laravel`), which `artisan migrate` offers to create; an empty value would mean no database.
 - **More of `devid db`:**
