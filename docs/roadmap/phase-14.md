@@ -2,7 +2,7 @@
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
 > Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). D4, the app's page, is next.
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 built 2026-11-25** (the app's Databases page, from the board the owner approved; see "D4 results"); the owner's own try on the M1 is next.
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -374,6 +374,65 @@ D3's build ran in a test daemon with a home of its own and spare ports, one engi
   - The dry run of `--purge` deleted all but `data/` and kept `mysql-8.4` and `postgresql-18`; with `--delete-databases` it deleted them too.
   - A real uninstall would undo the owner's own setup, so it runs on the Linux VMs with the rc (D5).
 
+## D4 results (2026-11-25)
+
+The record is `docs/implementation-timeline/databases/2026-11-25-d4-app-page.md`.
+
+### The board
+
+- **Where:** the canvas "Devid Redesign", page "Fase 14: databases" (https://claude.ai/artifact/TS8URDyBeQ4D5PaozQsDUa#page-fase14).
+- **What it holds:**
+  - an interactive prototype, `Databases.dc.html`;
+  - four boards that open it in one state each: a new account, the password and its `.env` lines, an account's actions, and MongoDB's first start.
+- **Approval:** the owner approved it: "Setuju, lanjutkan D4".
+
+### What shipped
+
+- **The Databases page** in the app, after Mail in the sidebar. The sidebar counts the databases that run.
+  - **Tabs** for MySQL, PostgreSQL and MongoDB, each with a dot and its port while it runs. The arrow keys, Home and End move between them.
+  - **The server's card:**
+    - the series, the state and the address;
+    - a switch (`db start` / `db stop`), and Start while it is paused;
+    - ⋯: Restart, Copy `.env` for the main account, and Show log (the engine's log on the Logs page).
+  - **Accounts:**
+    - the main account first, then the rest by name;
+    - Copy `.env` on each one;
+    - ⋯: Copy password, New password… and Remove…. What cannot be done is disabled, with its reason: `postgres` gets no password, and the main account stays.
+    - Add account opens a dialog: a name, a database of its own (it follows the name until edited), and a password, Generate or Choose.
+    - A new account or a new password shows the password and the `.env` lines, each with Copy.
+  - **Settings:**
+    - the port, applied on leaving the field (the daemon refuses a busy port and says who holds it);
+    - the series offered by the release, or the installed ones offline. Picking one asks first, then downloads it if needed.
+  - **Storage:** the data folder with Show in Finder, and the terminal commands.
+  - **Explanations** are behind (i) (D-055).
+  - **First start:** a database that never ran shows what Devid will do, Start, then the download's progress. Another series shows its progress in the server's card.
+- **The window's quick menu and the menu-bar icon** list the databases that are on, with their port or "Stopped"; each opens the page.
+- **The app's API:**
+  - `copy_db` copies an account's `.env` lines or its password through `db env`, so they never pass through the page.
+  - `db_list`, `db_user_list` and `db_env` count as reads.
+  - Show in Finder accepts a database's data folder.
+- **The daemon:** `status.databases[].data` is the series' data folder.
+- **Accounts load only when they can change:** the page asks for them when the server on screen changes or after an action, not on every 2 s refresh, since each list runs the engine's client.
+
+### Checked
+
+- **In the app's browser:** the real `app.js` and `app.css`, with a fake `invoke` that answers like a daemon with MySQL running, PostgreSQL paused and MongoDB not installed. Every action on the board ran there:
+  - adding an account, giving one a new password, and removing one;
+  - a busy port, refused with its holder;
+  - the paused PostgreSQL started, with `postgres`'s actions disabled and their reasons;
+  - MongoDB's first start, with its progress;
+  - MySQL moved to 9.7;
+  - the quick menu's Databases;
+  - the tabs' arrow keys;
+  - the dark and light themes.
+- **The repository's checks:**
+  - `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass, with `-p devid-gui` too;
+  - `node --check` passes on `app.js`.
+
+### Not yet
+
+- **The owner's try on the M1:** adding an account and resetting a password from the page in the real app, against a real daemon. Either a test copy of the app with a test daemon now, or 0.21.0's rc in D5.
+
 ## Milestones
 
 | # | Milestone | Done when |
@@ -381,7 +440,7 @@ D3's build ran in a test daemon with a home of its own and spare ports, one engi
 | D1 | **Spike** | the answers are in this doc, and D-061 is accepted or changed to match them (done 2026-11-25, see "D1 results") |
 | D2 | **Daemon:** the second manifest, install and update, the supervisor's additions (stop timeout, readiness, log file, orphan check by path), config, ports, API | unit tests cover install, ports and the supervisor changes, and a CLI test starts and stops each engine from a local test release (done 2026-11-25, see "D2 results") |
 | D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data (done 2026-11-25, see "D3 results"; a real uninstall runs on the VMs in D5) |
-| D4 | **The app's Databases page** (macOS), accounts included | the owner approves a design board, then adds an account and resets a password from the page on the M1 |
+| D4 | **The app's Databases page** (macOS), accounts included | the owner approves a design board, then adds an account and resets a password from the page on the M1 (board approved and page built 2026-11-25, see "D4 results") |
 | D5 | **CI, docs and release** | a database check runs on every pull request on macOS, Ubuntu and Arch; the README, the guide's new `/docs/databases` page, PROJECT_CONTEXT and CLAUDE.md are updated; 0.21.0 ships after an rc on the M1 and the Linux VMs |
 
 ## Where it is tested

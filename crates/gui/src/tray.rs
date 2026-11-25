@@ -43,6 +43,8 @@ pub struct View {
     pub shares: Vec<String>,
     /// Mail (D-049): None while it is off.
     pub mail: Option<MailView>,
+    /// The databases that are on (D-061), as (label, 127.0.0.1 port while running).
+    pub databases: Vec<(String, Option<u64>)>,
 }
 
 /// Mail as the icon sees it (D-049, D-050).
@@ -98,6 +100,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
             sleeping: Vec::new(),
             shares: Vec::new(),
             mail: None,
+            databases: Vec::new(),
         };
     };
     let failed = s["php"].as_array().into_iter().flatten().filter(|p| p["status"] == "failed").count()
@@ -139,6 +142,16 @@ pub fn view(status: Result<&Value, &str>) -> View {
             subject: text(&m["latest"]["subject"]),
         }),
     });
+    let databases = s["databases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["enabled"] == true)
+        .map(|d| {
+            let label = d["label"].as_str().unwrap_or("?").to_string();
+            (label, d["port"].as_u64().filter(|_| d["state"] == "running"))
+        })
+        .collect();
     View {
         icon: if failed > 0 || ports_off {
             "bad"
@@ -155,6 +168,7 @@ pub fn view(status: Result<&Value, &str>) -> View {
         sleeping,
         shares,
         mail,
+        databases,
     }
 }
 
@@ -308,6 +322,17 @@ fn menu(app: &AppHandle, v: &View, error: Option<&str>) -> tauri::Result<Menu<Wr
             }
             None => m.append(&item("mail-page", "Turn on Mail…", true, None)?)?,
         }
+        if !v.databases.is_empty() {
+            m.append(&sep()?)?;
+            m.append(&item("databases", "Databases", false, None)?)?;
+            for (label, port) in &v.databases {
+                let text = match port {
+                    Some(port) => format!("{label} · 127.0.0.1:{port}"),
+                    None => format!("{label} · Stopped"),
+                };
+                m.append(&item(&format!("db-page:{label}"), &text, true, None)?)?;
+            }
+        }
     }
     match v.running {
         Some(true) => {
@@ -335,6 +360,7 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
         "settings" | "updates" => crate::open_window(app, Some("settings")),
         // The inbox is the window's Mail page (D-051).
         "mail-page" | "mail-open" => crate::open_window(app, Some("mail")),
+        id if id.starts_with("db-page:") => crate::open_window(app, Some("databases")),
         "mail-test" => {
             let app = app.clone();
             std::thread::spawn(move || {
@@ -451,6 +477,17 @@ mod tests {
         let paused = json!({"server": "nginx", "server_status": "running", "php": [],
             "mail": {"enabled": true, "state": "paused", "unread": null}});
         assert_eq!(view(Ok(&paused)).mail.map(|m| (m.running, m.unread)), Some((false, 0)));
+        // D-061: the databases that are on, with their port while they run.
+        let dbs = json!({"server": "nginx", "server_status": "running", "php": [], "databases": [
+            {"label": "MySQL", "enabled": true, "state": "running", "port": 3307},
+            {"label": "PostgreSQL", "enabled": true, "state": "paused", "port": 5433},
+            {"label": "MongoDB", "enabled": false, "state": "off", "port": null}]});
+        assert_eq!(
+            view(Ok(&dbs)).databases,
+            [("MySQL".to_string(), Some(3307)), ("PostgreSQL".to_string(), None)],
+            "an engine that is off is not listed"
+        );
+        assert!(view(Ok(&running)).databases.is_empty(), "a daemon without databases");
         assert_eq!(
             view(Ok(&commands)).commands,
             [("erd".to_string(), "dev:pg:local".to_string()), ("erd".to_string(), "tauri".to_string())]

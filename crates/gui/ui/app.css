@@ -62,6 +62,7 @@ p.dv-note { margin: 10px 4px 0; }
 .dv-nav:nth-child(2) .dv-ico { background: #5E5CE6; }
 .dv-nav:nth-child(3) .dv-ico { background: #30B158; }
 .dv-nav.is-mail .dv-ico { background: #F07818; }
+.dv-nav.is-db .dv-ico { background: #0E7C8A; }
 .dv-nav .dv-chip { background: none; color: var(--text-2); font-weight: 400; }
 .dv-nav.is-active .dv-chip { color: rgba(255,255,255,.85); }
 .dv-navdot { width: 7px; height: 7px; flex: none; margin-right: 4px; border-radius: 50%; background: var(--switch-on); }
@@ -402,3 +403,27 @@ p.dv-note { margin: 10px 4px 0; }
 .mx-empty-btns { display: flex; justify-content: center; gap: 8px; margin-top: 18px; }
 .mx-empty-btns .dv-btn { height: 28px; padding: 0 14px; }
 @media (max-width: 900px) { .mx-list { width: 248px; } }
+
+/* Databases (Phase 14, D-061) */
+.db-tabs { display: flex; gap: 2px; margin-top: 20px; padding: 2px; border-radius: 8px; background: var(--surface-2); }
+.db-tabs button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 28px; border: 0; border-radius: 6px; background: none; color: var(--text); font-size: 12.5px; }
+.db-tabs button[aria-selected="true"] { background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.14); font-weight: 600; }
+@media (prefers-color-scheme: dark) { .db-tabs button[aria-selected="true"] { background: rgba(255,255,255,.18); } }
+.db-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--switch-off); }
+.db-dot.on { background: var(--switch-on); }
+.db-tile { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 8px; color: #fff; }
+.db-tile .dv-ico { width: 18px; height: 18px; stroke-width: 1.7; }
+.db-tile.lg { width: 56px; height: 56px; margin: 0 auto; border-radius: 13px; }
+.db-tile.lg .dv-ico { width: 30px; height: 30px; stroke-width: 1.5; }
+.db-status { margin-top: 16px; }
+.db-h2row { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.db-h2row .dv-btn { margin-bottom: 4px; }
+.db-name { font-weight: 600; }
+.db-off { margin-top: 12px; padding: 18px 16px; border: .5px dashed var(--border-strong); border-radius: 10px; text-align: center; }
+.db-checkrow { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; }
+.db-pwrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; }
+.db-pw { width: 100%; height: 28px; margin-top: 8px; }
+.db-secret { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 8px 8px 8px 12px; border: .5px solid var(--border); border-radius: 8px; background: var(--log-bg); }
+.db-secret code { flex: 1; min-width: 0; font: 13px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .02em; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.db-secret + .ml-env { padding: 0; margin-top: 10px; }
+.db-secret + .ml-env .ml-copy { right: 8px; }
