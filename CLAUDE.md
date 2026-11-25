@@ -16,7 +16,7 @@ Phase 1 (spike) is done. Phase 2 (daemon + CLI) is in progress; the milestones a
 
 - Target machine (D-052): Apple M1, 8 cores, 8 GB RAM, macOS 26. Idle RAM, CPU and battery cost matter in every design choice, and RAM is the tightest. Intel Macs stay supported, so work that is heavy on 2 cores still needs a reason.
 - No Homebrew and no VM dependency at runtime.
-- PHP 8.3, 8.4 and 8.5 (see D-009), static builds, php-fpm with `pm = ondemand`.
+- PHP 8.3, 8.4, 8.5 and 8.6 (see D-009 and D-062), static builds, php-fpm with `pm = ondemand`.
 - One global web server: nginx by default, Caddy or Apache as alternatives (D-015).
 - Databases are out of scope (the owner uses DBngin).
 

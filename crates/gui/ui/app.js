@@ -5,7 +5,7 @@
 
 const { invoke } = window.__TAURI__.core;
 const daemon = (req) => invoke('daemon', { req });
-const SUPPORTED_PHP = ['8.3', '8.4', '8.5']; // php::SUPPORTED (D-009)
+const SUPPORTED_PHP = ['8.3', '8.4', '8.5', '8.6']; // php::SUPPORTED (D-009, D-062)
 const SERVERS = {
   nginx: { label: 'nginx', hint: 'Fast and familiar if you come from Valet or Forge.', recommended: true },
   caddy: { label: 'Caddy', hint: 'Short, readable config.' },
@@ -291,7 +291,7 @@ const PAGES = {
     // A site's detail opens it, which is also what wakes an on-demand site (D-054).
     tools: () => S.site ? [btn('Open in browser', () => openTarget({ what: 'site', name: S.site }), '', { title: 'Open ' + (openedSite()?.url || '') })] : [
       h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Link a site', title: 'Link a site', onclick: linkSite, disabled: !!S.busy }, icon('plus'))] },
-  php: { title: 'PHP', sub: () => 'PHP 8.3, 8.4 and 8.5 side by side; pick one per site.',
+  php: { title: 'PHP', sub: () => 'PHP 8.3 to 8.6 side by side; pick one per site.',
     load: () => daemon({ cmd: 'php_list' }), render: phpPage },
   server: { title: 'Web Server', sub: () => 'Status, engine choice and configuration.', load: () => daemon({ cmd: 'server_list' }), render: serverPage },
   mail: { title: 'Mail', heading: () => (S.mailSettings && S.status?.mail?.state === 'running' ? 'Mail settings' : 'Mail'), sub: mailSub,

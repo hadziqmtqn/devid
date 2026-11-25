@@ -17,7 +17,7 @@ Thanks for helping. Devid is a personal project: one maintainer, who uses it dai
 These limits are decisions (see [`docs/structure-of-app/DECISIONS.md`](docs/structure-of-app/DECISIONS.md)), so a change that breaks one needs a discussion first:
 
 - **No Homebrew and no VM at runtime.** Devid downloads its own static builds.
-- **PHP 8.3, 8.4 and 8.5**, each with php-fpm in `pm = ondemand`.
+- **PHP 8.3, 8.4, 8.5 and 8.6**, each with php-fpm in `pm = ondemand`.
 - **One web server for every site:** nginx by default, Caddy or Apache instead.
 - **No databases.** Use DBngin, Docker or anything else next to Devid.
 - **Idle cost matters.** Devid is built on an Apple M1 with 8 GB of RAM, and it also runs on 2-core Intel Macs. Background work, polling and memory at idle need a reason.

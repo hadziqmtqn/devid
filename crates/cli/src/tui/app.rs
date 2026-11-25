@@ -1853,7 +1853,7 @@ mod tests {
         ]}));
         app.page = Page::Php;
         app.focus = Focus::Page;
-        assert_eq!(app.rows(), 3, "8.3, 8.4, 8.5 (D-009)");
+        assert_eq!(app.rows(), 4, "8.3 to 8.6 (D-009, D-062)");
 
         // 8.3 is not installed: the only action is install.
         app.handle_key(key(KeyCode::Enter));
