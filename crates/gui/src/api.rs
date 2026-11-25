@@ -6,6 +6,7 @@
 //! Every command is async, so it runs off the main thread.
 
 use devid_daemon::{
+    db::{self, Engine},
     install,
     paths::Paths,
     protocol::{Request, request},
@@ -13,10 +14,12 @@ use devid_daemon::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
+    ffi::OsStr,
     io::Write,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 /// Any daemon request the CLI and TUI send, except `stop` (the daemon itself) and `login_item`
@@ -377,11 +380,156 @@ pub async fn in_terminal(action: String) -> Result<String, String> {
     }
     let paths = Paths::from_env();
     let script = paths.run_dir().join(format!("devid-{action}.command"));
-    let quoted = devid_bin().display().to_string().replace('\'', r"'\''");
-    std::fs::write(&script, format!("#!/bin/sh\nexec '{quoted}' {action}\n")).map_err(|e| e.to_string())?;
+    let devid = sh_quote(&devid_bin().display().to_string());
+    std::fs::write(&script, format!("#!/bin/sh\nexec {devid} {action}\n")).map_err(|e| e.to_string())?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
     run(Command::new("/usr/bin/open").arg(&script))?;
     Ok(format!("Opened Terminal for `devid {action}`"))
+}
+
+/// What macOS calls a `.command` file, and the type it belongs to.
+const SCRIPT_TYPES: [&str; 2] = ["com.apple.terminal.shell-script", "public.shell-script"];
+
+/// The terminal apps in the Applications folders, Terminal first: apps whose document types run
+/// `.command` files (the `Shell` role), as Terminal, iTerm2 and cmux declare. Editors that open
+/// such a file as text declare another role.
+#[tauri::command]
+pub async fn terminals() -> Vec<Value> {
+    find_terminals(&[
+        PathBuf::from("/System/Applications/Utilities"),
+        PathBuf::from("/Applications"),
+        PathBuf::from("/Applications/Utilities"),
+        devid_daemon::paths::user_home().join("Applications"),
+    ])
+}
+
+fn find_terminals(dirs: &[PathBuf]) -> Vec<Value> {
+    let mut found: Vec<(String, PathBuf)> = Vec::new();
+    for dir in dirs {
+        let mut apps: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+        apps.sort();
+        for app in apps {
+            match terminal_name(&app) {
+                Some(name) if !found.iter().any(|(n, _)| *n == name) => found.push((name, app)),
+                _ => {}
+            }
+        }
+    }
+    found.sort_by_key(|(name, _)| (name != "Terminal", name.to_lowercase()));
+    found.into_iter().map(|(name, app)| json!({"name": name, "path": app.display().to_string()})).collect()
+}
+
+/// An app's name when it runs `.command` files. A look at the bytes rules out most apps first: the
+/// role's name is in the Info.plist as text, XML or binary.
+fn terminal_name(app: &Path) -> Option<String> {
+    if app.extension()? != "app" {
+        return None;
+    }
+    let plist = app.join("Contents/Info.plist");
+    if !std::fs::read(&plist).ok()?.windows(5).any(|w| w == b"Shell") {
+        return None;
+    }
+    let mut cmd = Command::new("/usr/bin/plutil");
+    cmd.args(["-extract", "CFBundleDocumentTypes", "json", "-o", "-"]).arg(&plist);
+    let types: Value = serde_json::from_str(&output(&mut cmd, Duration::from_secs(5)).ok()?.stdout).ok()?;
+    match runs_scripts(&types) {
+        true => Some(app.file_stem()?.to_string_lossy().into_owned()),
+        false => None,
+    }
+}
+
+/// Whether an app's `CFBundleDocumentTypes`, as JSON, run `.command` files.
+fn runs_scripts(types: &Value) -> bool {
+    items(types).any(|t| {
+        t["CFBundleTypeRole"] == "Shell"
+            && (items(&t["LSItemContentTypes"]).any(|c| c.as_str().is_some_and(|c| SCRIPT_TYPES.contains(&c)))
+                || items(&t["CFBundleTypeExtensions"]).any(|e| e.as_str() == Some("command")))
+    })
+}
+
+/// Opens a running database's client in a terminal app (one that `terminals` lists), as the
+/// engine's main account (D-061). A `.command` file runs Devid's shim, which reaches the server. MongoDB's `root`
+/// logs in through a script only the user can read, and the script deletes itself.
+#[tauri::command]
+pub async fn open_db_client(engine: String, app: String) -> Result<String, String> {
+    let paths = Paths::from_env();
+    let eng = Engine::parse(&engine).ok_or(format!("unknown database {engine}"))?;
+    let terminal = terminal_name(Path::new(&app)).ok_or(format!("{app} is not a terminal app"))?;
+    let status = request(&paths, &Request::Status)?;
+    if !items(&status["databases"]).any(|d| d["engine"] == eng.name() && d["state"] == "running") {
+        return Err(format!("{} is not running", eng.label()));
+    }
+    let client = match eng {
+        Engine::Mysql => "mysql",
+        Engine::Postgresql => "psql",
+        Engine::Mongodb => "mongosh",
+    };
+    let shim = install::bin_dir(&paths).join(client);
+    if !shim.is_file() {
+        return Err(format!("{} is missing", shim.display()));
+    }
+    let login = match eng {
+        Engine::Mongodb => {
+            let user = db::main_account(eng);
+            let v = request(&paths, &Request::DbEnv { engine: engine.clone(), name: Some(user.into()) })?;
+            v["password"].as_str().filter(|p| !p.is_empty()).map(|p| (user, p.to_string()))
+        }
+        _ => None,
+    };
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let js = paths.run_dir().join(format!("devid-mongosh-{stamp}.js"));
+    let home = std::env::var_os("DEVID_HOME").filter(|h| !h.is_empty());
+    let (sh, script) =
+        client_files(&shim, home.as_deref(), login.as_ref().map(|(u, p)| (js.as_path(), *u, p.as_str())));
+    if let Some(script) = script {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&js)
+            .map_err(|e| e.to_string())?;
+        file.write_all(script.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let file = paths.run_dir().join(format!("devid-{}.command", eng.name()));
+    std::fs::write(&file, sh).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    if let Err(e) = run(Command::new("/usr/bin/open").arg("-a").arg(&app).arg(&file)) {
+        let _ = std::fs::remove_file(&js);
+        return Err(e);
+    }
+    Ok(format!("Opened {client} in {terminal}"))
+}
+
+/// The `.command` file that runs a client's shim and, with a login (MongoDB), the script that the
+/// client runs first. The password stays out of every command line; a JSON string is also a
+/// JavaScript string literal.
+fn client_files(shim: &Path, home: Option<&OsStr>, login: Option<(&Path, &str, &str)>) -> (String, Option<String>) {
+    let mut sh = String::from("#!/bin/sh\n");
+    if let Some(home) = home {
+        sh += &format!("export DEVID_HOME={}\n", sh_quote(&home.to_string_lossy()));
+    }
+    let shim = sh_quote(&shim.display().to_string());
+    let Some((js, user, password)) = login else {
+        sh += &format!("exec {shim}\n");
+        return (sh, None);
+    };
+    let file = js.display().to_string();
+    sh += &format!("{shim} --shell --file {0}\nrm -f {0}\n", sh_quote(&file));
+    let lit = |text: &str| Value::from(text).to_string();
+    let script = format!(
+        "try {{ require('fs').unlinkSync({file}); }} catch (e) {{}}\n\
+         try {{ db.getSiblingDB('admin').auth({user}, {password}); }} \
+         catch (e) {{ print('Could not log in as ' + {user} + ': ' + e.message); }}\n",
+        file = lit(&file),
+        user = lit(user),
+        password = lit(password),
+    );
+    (sh, Some(script))
+}
+
+/// A word for `sh`, in single quotes.
+fn sh_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 fn devid_bin() -> std::path::PathBuf {
@@ -536,5 +684,77 @@ mod tests {
         assert!(!is_read(&Request::StopAll) && !is_read(&Request::Update { check: false }));
         assert!(is_read(&Request::MailList { query: String::new(), unread: false, limit: None }));
         assert!(!is_read(&Request::MailMessage { id: "a1".into() }), "opening a message marks it read");
+    }
+
+    #[test]
+    fn terminal_apps_run_command_files() {
+        let runs = |types: Value| runs_scripts(&types);
+        assert!(runs(
+            json!([{"CFBundleTypeRole": "Shell", "LSItemContentTypes": ["com.apple.terminal.shell-script"]}])
+        ));
+        assert!(runs(json!([{"CFBundleTypeRole": "Shell", "LSItemContentTypes": ["public.shell-script"]}])));
+        assert!(runs(json!([{"CFBundleTypeRole": "Shell", "CFBundleTypeExtensions": ["command", "tool"]}])));
+        assert!(
+            !runs(json!([{"CFBundleTypeRole": "Editor", "LSItemContentTypes": ["public.shell-script"]}])),
+            "an editor"
+        );
+        assert!(
+            !runs(json!([
+                {"CFBundleTypeRole": "Viewer", "LSItemContentTypes": ["com.apple.terminal.shell-script"]},
+                {"CFBundleTypeRole": "Shell", "LSItemContentTypes": ["public.unix-executable"]}
+            ])),
+            "the role and the type belong to one entry"
+        );
+        assert!(!runs(Value::Null));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminals_come_from_the_app_folders_terminal_first() {
+        let root = std::env::temp_dir().join(format!("devid-terminals-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (dir, app, role) in [
+            ("a", "Zeta", "Shell"),
+            ("a", "Terminal", "Shell"),
+            ("a", "Notes", "Editor"),
+            ("b", "Zeta", "Shell"),
+            ("b", "alpha", "Shell"),
+        ] {
+            let contents = root.join(dir).join(format!("{app}.app/Contents"));
+            std::fs::create_dir_all(&contents).unwrap();
+            let plist = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
+                 <key>CFBundleDocumentTypes</key><array><dict><key>CFBundleTypeRole</key><string>{role}</string>\
+                 <key>LSItemContentTypes</key><array><string>com.apple.terminal.shell-script</string></array>\
+                 </dict></array></dict></plist>\n"
+            );
+            std::fs::write(contents.join("Info.plist"), plist).unwrap();
+        }
+        std::fs::create_dir_all(root.join("a/NoPlist.app")).unwrap();
+        let found = find_terminals(&[root.join("a"), root.join("b"), root.join("missing")]);
+        let names: Vec<&str> = found.iter().filter_map(|t| t["name"].as_str()).collect();
+        assert_eq!(names, ["Terminal", "alpha", "Zeta"]);
+        assert_eq!(found[2]["path"], root.join("a/Zeta.app").display().to_string(), "the first folder wins");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_client_runs_through_its_shim() {
+        let (sh, js) = client_files(Path::new("/Users/o'neil/.devid/bin/psql"), None, None);
+        assert_eq!(sh, "#!/bin/sh\nexec '/Users/o'\\''neil/.devid/bin/psql'\n");
+        assert_eq!(js, None);
+        let (sh, _) = client_files(Path::new("/t/bin/mysql"), Some(OsStr::new("/t")), None);
+        assert_eq!(sh, "#!/bin/sh\nexport DEVID_HOME='/t'\nexec '/t/bin/mysql'\n", "a test home goes along");
+    }
+
+    #[test]
+    fn mongodb_logs_in_from_a_file_not_the_command_line() {
+        let secret = db::password();
+        let (sh, js) =
+            client_files(Path::new("/h/bin/mongosh"), None, Some((Path::new("/h/run/in.js"), "root", &secret)));
+        assert_eq!(sh, "#!/bin/sh\n'/h/bin/mongosh' --shell --file '/h/run/in.js'\nrm -f '/h/run/in.js'\n");
+        let js = js.unwrap();
+        assert!(js.starts_with("try { require('fs').unlinkSync(\"/h/run/in.js\"); }"), "{js}");
+        assert!(js.contains(&format!("db.getSiblingDB('admin').auth(\"root\", \"{secret}\")")), "{js}");
     }
 }

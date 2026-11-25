@@ -1240,6 +1240,10 @@ See ARCHITECTURE, "PHP runtime".
     - explanations behind (i) (D-055).
   - **Secrets stay out of the page:** passwords and `.env` lines reach the clipboard through the app's `copy_db`, which asks the daemon. The page holds a password only while it shows a new one.
   - **Accounts are listed when the server on screen changes or after an action,** not on every refresh, since each list runs the engine's client.
+  - **Open in Terminal** was the owner's change after the preview: "ada tombol buka di terminal dan terminal ini bukan hanya bawaan macOS, contohnya di laptop saya ada Cmux maka muncul juga dipilihan itu".
+    - **What it opens:** the server's client at its prompt, as the main account, through Devid's shim.
+    - **Which terminal apps:** the app lists the apps whose document types run `.command` files (the `Shell` role), as Finder's Open With does. A fixed list of terminals would miss new ones, and an app that only shows scripts as text is left out. The page remembers the last pick.
+    - **MongoDB's password** goes through a script only the user can read, which deletes itself, never through a command line.
 
 ## D-062: PHP 8.6 joins 8.3, 8.4 and 8.5 (accepted 2026-11-25, amends D-009)
 

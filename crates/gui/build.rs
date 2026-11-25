@@ -12,6 +12,8 @@ fn main() {
         "doctor",
         "devid_check",
         "in_terminal",
+        "terminals",
+        "open_db_client",
         "login_item",
         "self_update",
         "self_update_progress",
