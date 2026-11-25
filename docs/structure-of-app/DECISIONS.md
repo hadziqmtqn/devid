@@ -1244,6 +1244,7 @@ See ARCHITECTURE, "PHP runtime".
     - **What it opens:** the server's client at its prompt, as the main account, through Devid's shim.
     - **Which terminal apps:** the app lists the apps whose document types run `.command` files (the `Shell` role), as Finder's Open With does. A fixed list of terminals would miss new ones, and an app that only shows scripts as text is left out. The page remembers the last pick.
     - **MongoDB's password** goes through a script only the user can read, which deletes itself, never through a command line.
+- **Released so far (2026-11-25):** 0.20.1 was tagged on main for PHP 8.6 (D-062), so it carries D2 and D3: the daemon's databases, `devid db` and the TUI's page. Nothing is installed or started until the user asks for a database. The app's page (D4) and the docs come with 0.21.0.
 
 ## D-062: PHP 8.6 joins 8.3, 8.4 and 8.5 (accepted 2026-11-25, amends D-009)
 
