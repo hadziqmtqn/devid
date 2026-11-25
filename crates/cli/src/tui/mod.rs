@@ -60,6 +60,29 @@ fn load_extensions(app: &mut App, paths: &Paths, version: &str) {
     }
 }
 
+/// Fetch an engine's accounts and show them (D-061). Only when the view opens, never on the 2 s
+/// refresh: listing them runs the engine's client.
+fn load_accounts(app: &mut App, paths: &Paths, engine: &str) {
+    match request(paths, &Request::DbUserList { engine: engine.to_string() }) {
+        Ok(v) => app.open_accounts(&v),
+        Err(e) => app.message = Some((format!("accounts: {e}"), true)),
+    }
+}
+
+/// Put text on the clipboard with the first tool that is there and works (pbcopy; wl-copy, xclip
+/// or xsel).
+fn copy(text: &str) -> bool {
+    use std::process::{Command, Stdio};
+    platform::COPY_COMMANDS.iter().any(|argv| {
+        let Ok(mut child) = Command::new(argv[0]).args(&argv[1..]).stdin(Stdio::piped()).spawn() else {
+            return false;
+        };
+        let wrote = std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes());
+        drop(child.stdin.take());
+        wrote.is_ok() && child.wait().is_ok_and(|s| s.success())
+    })
+}
+
 /// Opens a terminal in `path` without waiting for it: macOS's `open` returns at once, but most Linux
 /// terminals run until their window closes, and the TUI would wait with them. A failure within half a
 /// second is reported; after that a thread reaps the terminal when it closes.
@@ -149,7 +172,32 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
         | Effect::View(_)
         | Effect::Doctor
         | Effect::LoadExtensions(_)
-        | Effect::ExtInstall { .. } => ("internal: handled by the loop".into(), true),
+        | Effect::ExtInstall { .. }
+        | Effect::LoadAccounts(_)
+        | Effect::DbAccount(_) => ("internal: handled by the loop".into(), true),
+        Effect::DbCopy { engine, name, password } => match request(paths, &Request::DbEnv { engine, name }) {
+            Ok(v) => {
+                let name = v["name"].as_str().unwrap_or("?");
+                let (text, what) = match (password, v["password"].as_str().filter(|p| !p.is_empty())) {
+                    (true, Some(p)) => (p.to_string(), format!("{name}'s password")),
+                    (true, None) => return (format!("{name} needs no password from this computer"), false),
+                    (false, _) => {
+                        let lines: Vec<&str> =
+                            v["env"].as_array().into_iter().flatten().filter_map(|l| l.as_str()).collect();
+                        (format!("{}\n", lines.join("\n")), format!("{name}'s .env lines"))
+                    }
+                };
+                match copy(&text) {
+                    true => (format!("copied {what}"), false),
+                    false => ("could not copy to the clipboard".into(), true),
+                }
+            }
+            Err(e) => (e, true),
+        },
+        Effect::CopyQuiet { text, what } => match copy(&text) {
+            true => (format!("copied {what}"), false),
+            false => ("could not copy to the clipboard".into(), true),
+        },
         Effect::CheckUpdates => {
             let current = devid_daemon::VERSION;
             let devid = match crate::setup::latest_devid(paths) {
@@ -174,18 +222,10 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
                 Err(e) => (e, true),
             }
         }
-        Effect::Copy(text) => {
-            // The first clipboard tool that is there and works (pbcopy; wl-copy, xclip or xsel).
-            let copied = platform::COPY_COMMANDS.iter().any(|argv| {
-                let Ok(mut child) = Command::new(argv[0]).args(&argv[1..]).stdin(Stdio::piped()).spawn() else {
-                    return false;
-                };
-                let wrote = std::io::Write::write_all(child.stdin.as_mut().expect("piped stdin"), text.as_bytes());
-                drop(child.stdin.take());
-                wrote.is_ok() && child.wait().is_ok_and(|s| s.success())
-            });
-            if copied { (format!("copied {text}"), false) } else { ("could not copy to the clipboard".into(), true) }
-        }
+        Effect::Copy(text) => match copy(&text) {
+            true => (format!("copied {text}"), false),
+            false => ("could not copy to the clipboard".into(), true),
+        },
     }
 }
 
@@ -246,6 +286,32 @@ pub fn run(paths: &Paths) -> Result<Option<Vec<String>>, String> {
                         }
                         last = None;
                     }
+                    Action::Do(Effect::LoadAccounts(engine)) => {
+                        app.message = Some(("⏳ loading the accounts…".into(), false));
+                        terminal.draw(|frame| ui::draw(frame, &app))?;
+                        app.message = None;
+                        load_accounts(&mut app, paths, &engine);
+                    }
+                    Action::Do(Effect::DbAccount(req)) => {
+                        app.message = Some(("⏳ working…".into(), false));
+                        terminal.draw(|frame| ui::draw(frame, &app))?;
+                        let (added, engine) = match &req {
+                            Request::DbUserAdd { engine, .. } => (true, engine.clone()),
+                            Request::DbUserPassword { engine, .. } => (false, engine.clone()),
+                            _ => (false, String::new()),
+                        };
+                        match request(paths, &req) {
+                            Ok(v) => {
+                                app.message = None;
+                                app.open_secret(&v, added);
+                            }
+                            Err(e) => {
+                                load_accounts(&mut app, paths, &engine);
+                                app.message = Some((e, true));
+                            }
+                        }
+                        last = None;
+                    }
                     Action::Do(Effect::View(path)) => {
                         ratatui::restore();
                         let _ = std::process::Command::new("sh")
@@ -285,9 +351,12 @@ pub fn run(paths: &Paths) -> Result<Option<Vec<String>>, String> {
                             terminal.draw(|frame| ui::draw(frame, &app))?;
                         }
                         app.message = Some(perform(effect, paths));
-                        // An action from the Extensions view returns to it, with fresh data.
+                        // An action from the Extensions or the Accounts view returns to it, with fresh data.
                         if let Some(v) = app.reopen.take() {
                             load_extensions(&mut app, paths, &v);
+                        }
+                        if let Some(engine) = app.reopen_accounts.take() {
+                            load_accounts(&mut app, paths, &engine);
                         }
                         last = None; // show the change right away
                     }
@@ -350,7 +419,7 @@ mod tests {
         let (text, _) = render(&app(false));
         assert!(text.contains("Devid") && text.contains("● running") && text.contains("nginx"));
         assert!(text.contains("PHP 8.5 default") && text.contains("2 sites"));
-        for page in ["1 Sites", "2 PHP", "3 Server", "4 Mail", "5 Logs", "6 Settings"] {
+        for page in ["1 Sites", "2 PHP", "3 Server", "4 Mail", "5 Databases", "6 Logs", "7 Settings"] {
             assert!(text.contains(page), "sidebar shows {page}");
         }
         assert!(text.contains("https://erdbpro-saas.test"));
@@ -386,6 +455,59 @@ mod tests {
         assert!(render(&a).0.contains("Vite (Safari): set APP_URL=https://erdbpro-saas.test in .env"));
         a.sites[0]["vite"] = json!({"tls": "devid"});
         assert!(!render(&a).0.contains("Vite"), "nothing when Devid gives Vite its certificate");
+    }
+
+    /// D-061: the Databases page, the Accounts view and a new password.
+    #[test]
+    fn databases_page() {
+        use super::app::Mode;
+        let mut a = app(false);
+        a.page = Page::Databases;
+        assert!(render(&a).0.contains("This daemon has no databases yet"), "a daemon older than databases");
+        let mut st = status();
+        st["databases"] = json!([
+            {"engine": "mysql", "label": "MySQL", "series": "8.4", "version": "8.4.13", "enabled": true,
+             "state": "running", "port": 3307, "socket": "/Users/me/.devid/run/mysql.sock", "installed": ["8.4"]},
+            {"engine": "postgresql", "label": "PostgreSQL", "series": null, "enabled": false, "state": "off",
+             "port": null, "installed": []},
+            {"engine": "mongodb", "label": "MongoDB", "series": "8.0", "enabled": true, "state": "failed",
+             "port": 27017, "error": "port 27017 is in use by mongod", "installed": ["8.0"]},
+        ]);
+        a.status = Ok(st);
+        a.focus = Focus::Page;
+        let text = render(&a).0;
+        for want in [
+            "8.4 (8.4.13)",
+            "● running",
+            "127.0.0.1:3307",
+            "○ off",
+            "✗ failed",
+            "Main account: root",
+            "/data/mysql-8.4",
+            "enter actions",
+        ] {
+            assert!(text.contains(want), "{want:?} in\n{text}");
+        }
+        a.row = 2;
+        assert!(render(&a).0.contains("Problem:      port 27017 is in use by mongod"));
+        a.row = 1;
+        assert!(render(&a).0.contains("PostgreSQL is off. Enter starts it"));
+
+        a.open_accounts(&json!({"engine": "mysql", "series": "8.4", "users": [
+            {"name": "root", "database": null, "main": true, "password": "none"},
+            {"name": "shop", "database": "shop", "main": false, "password": "kept"}]}));
+        let text = render(&a).0;
+        assert!(text.contains("MySQL 8.4 · Accounts") && text.contains("none from this computer"));
+        assert!(text.contains("kept by Devid") && text.contains("a add · p new password"));
+        a.open_secret(
+            &json!({"engine": "mysql", "name": "shop", "database": "shop", "password": "Pw1",
+            "env": ["DB_CONNECTION=mysql", "DB_PASSWORD=Pw1"]}),
+            true,
+        );
+        let text = render(&a).0;
+        assert!(text.contains("New MySQL account shop, with the database shop") && text.contains("Password: Pw1"));
+        assert!(text.contains("devid db env mysql shop"));
+        assert!(matches!(a.mode, Mode::Secret(_)));
     }
 
     #[test]

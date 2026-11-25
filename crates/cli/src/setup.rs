@@ -3,7 +3,7 @@
 
 use crate::{HelperAction, helper, helper_plan, request};
 use devid_daemon::{
-    ca, config::Config, helper as h, install, paths::Paths, php, phpext, platform, protocol::Request, webserver,
+    ca, config::Config, db, helper as h, install, paths::Paths, php, phpext, platform, protocol::Request, webserver,
 };
 use std::{
     net::ToSocketAddrs,
@@ -363,6 +363,26 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
                     mail["error"].as_str().unwrap_or("`devid start mail`; its log is ~/.devid/log/mailpit.log"),
                 );
             }
+            // D-061: every database that is on.
+            for d in s["databases"].as_array().into_iter().flatten().filter(|d| d["enabled"] == true) {
+                let engine = d["engine"].as_str().unwrap_or("?");
+                let state = d["state"].as_str().unwrap_or("?");
+                let fix = match (state, d["error"].as_str()) {
+                    (_, Some(error)) => error.to_string(),
+                    ("not installed", _) => format!("`devid db start {engine}` downloads it again"),
+                    _ => format!("`devid start {engine}`; its log is ~/.devid/log/{engine}.log"),
+                };
+                check(
+                    state == "running",
+                    &format!(
+                        "{} {} {state} on 127.0.0.1:{}",
+                        d["label"].as_str().unwrap_or("?"),
+                        d["series"].as_str().unwrap_or("?"),
+                        d["port"]
+                    ),
+                    &fix,
+                );
+            }
         }
         Err(e) => check(false, "daemon answers", &format!("{e}; or `devid setup`")),
     }
@@ -404,7 +424,7 @@ pub fn doctor_checks(paths: &Paths) -> Result<Vec<Check>, String> {
     Ok(checks)
 }
 
-pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String> {
+pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool, delete_databases: bool) -> Result<(), String> {
     println!("devid uninstall{}:", if dry_run { " (dry run, nothing changes)" } else { "" });
     let plan = helper_plan(paths)?;
     if dry_run || h::status(&plan).iter().any(|(_, ok)| *ok) {
@@ -437,18 +457,51 @@ pub fn uninstall(paths: &Paths, dry_run: bool, purge: bool) -> Result<(), String
             .map(|changed| changed.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "))
             .map_err(|e| e.to_string())
     })?;
+    // D-061: the databases cannot be rebuilt, so `--purge` keeps them unless told otherwise.
+    let data = db::data_root(paths);
+    let databases: Vec<String> = std::fs::read_dir(&data)
+        .map(|entries| entries.flatten().filter_map(|e| e.file_name().to_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let keep = purge && !delete_databases && !databases.is_empty();
     let target = if purge { paths.home.clone() } else { install::bin_dir(paths) };
-    step(dry_run, &format!("delete {}", target.display()), || {
-        let _ = std::fs::remove_dir_all(&target);
+    let what = match keep {
+        true => format!("delete {}, all but {}", target.display(), data.display()),
+        false => format!("delete {}", target.display()),
+    };
+    step(dry_run, &what, || {
+        delete_all_but(&target, keep.then_some(data.as_path()));
         Ok(String::new())
     })?;
+    if keep {
+        let mut sorted = databases;
+        sorted.sort();
+        println!(
+            "  kept your databases in {} ({}); `devid uninstall --purge --delete-databases` deletes them too",
+            data.display(),
+            sorted.join(", ")
+        );
+    }
     if !purge {
         println!(
-            "  kept {} (PHP, config, CA, certificates); `devid uninstall --purge` removes it",
+            "  kept {} (PHP, config, CA, certificates, databases); `devid uninstall --purge` removes all but the databases",
             paths.home.display()
         );
     }
     Ok(())
+}
+
+/// Delete `target`, or with `keep`, everything in it but that.
+fn delete_all_but(target: &Path, keep: Option<&Path>) {
+    let Some(keep) = keep else {
+        let _ = std::fs::remove_dir_all(target);
+        return;
+    };
+    for entry in std::fs::read_dir(target).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path != keep {
+            let _ = std::fs::remove_dir_all(&path).or_else(|_| std::fs::remove_file(&path));
+        }
+    }
 }
 
 fn fetch_latest(paths: &Paths, name: &str) -> Result<std::path::PathBuf, String> {
@@ -521,6 +574,24 @@ pub fn self_update(paths: &Paths, check: bool, no_sudo: bool) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::php_plan;
+
+    /// D-061: `uninstall --purge` deletes everything in ~/.devid but the databases.
+    #[test]
+    fn purge_keeps_the_databases() {
+        use std::fs;
+        let dir = std::env::temp_dir().join(format!("devid-purge-{}", std::process::id()));
+        for d in ["bin", "php/8.4/bin", "data/mysql-8.4/mysql"] {
+            fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        fs::write(dir.join("config.toml"), "").unwrap();
+        std::os::unix::fs::symlink(dir.join("php"), dir.join("php-link")).unwrap();
+        super::delete_all_but(&dir, Some(&dir.join("data")));
+        let left: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(left, ["data"]);
+        assert!(dir.join("data/mysql-8.4/mysql").is_dir());
+        super::delete_all_but(&dir, None);
+        assert!(!dir.exists());
+    }
 
     /// Devid.app is macOS only, and these tests use macOS's `ditto` (CI's Linux job has none).
     #[cfg(target_os = "macos")]

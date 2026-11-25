@@ -1218,6 +1218,17 @@ See ARCHITECTURE, "PHP runtime".
   - **The database release:** a second manifest, `downloads/db-manifest.json`.
   - **The daemon:** `devid db list|install|start|stop`, and `devid update` within a series.
   - **Tests:** CLI tests with fake servers, and `scripts/db-e2e.sh` with the real builds in CI.
+- **D3 (2026-11-25):** the CLI, the TUI and accounts. The decision holds, with these details:
+  - **Commands:** `devid db user add|password|list|remove`, `devid db env|use|port|create|remove`, and a Databases page in the TUI with an Accounts view.
+  - **PostgreSQL's `postgres`** keeps no password. `devid db user password` refuses it, since `postgres` is trusted from this computer and a password would never be checked. Every other account can get a new one, MySQL's `root` and MongoDB's `root` included.
+  - **`.env` lines** of the main account leave `DB_DATABASE` out, so Laravel's default stays.
+  - **The clients** reach Devid's server unless told where to go. `mongosh` gets no password on its command line, which `ps` would show.
+  - **`uninstall --purge`** keeps `~/.devid/data` unless `--delete-databases`.
+  - **Stop time:** the login service now gives the daemon 75 s to stop (launchd's `ExitTimeOut`, systemd's `TimeoutStopSec`), so a database's clean stop is never cut short.
+  - **The M1 check:**
+    - MySQL 8.4 ran on 3307 and PostgreSQL 18 on 5433, next to DBngin's servers, which Devid never touched.
+    - On each engine, the CLI and the TUI made two accounts each and gave one a new password.
+    - A Laravel app migrated with each account.
 
 ## D-063: `devid new` creates projects with the frameworks' own tools (accepted 2026-11-25, Phase 15)
 
