@@ -1,8 +1,8 @@
 # Phase 14 Plan: Databases
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
-> Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 done 2026-11-25** (the app's Databases page with Open in Terminal, merged in #151; see "D4 results"); the owner's own try on the M1 moved to D5's rc. **D5 done 2026-11-26:** 0.21.0-rc.1 passed on the owner's M1 and on the Ubuntu, Arch and CachyOS VMs, and 0.21.0 is the release (see "D5 plan" and the two D5 sections after it). **D2 and D3 shipped in 0.20.1** (2026-11-25), which was tagged on main for PHP 8.6: no database is installed or started until the user asks for one, and the docs come with 0.21.0 (D5).
+> Verified against: 2026-11-26 (Devid 0.20.0, 0.20.1, 0.21.0-rc.1 and 0.21.0; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458; rc.1's release run 45646037964; 0.21.0's release run 45755040242)
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 done 2026-11-25** (the app's Databases page with Open in Terminal, merged in #151; see "D4 results"); the owner's own try on the M1 moved to D5's rc. **Done 2026-11-26:** Devid 0.21.0 runs MySQL, PostgreSQL and MongoDB. D5 shipped as 0.21.0 on 2026-11-26, after rc.1 passed on the owner's M1 and on the Ubuntu, Arch and CachyOS VMs (see "D5 plan", the two D5 sections after it and "0.21.0"). **D2 and D3 shipped in 0.20.1** (2026-11-25), which was tagged on main for PHP 8.6: no database is installed or started until the user asks for one, and the docs come with 0.21.0 (D5).
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -494,6 +494,14 @@ Ubuntu 24.04.5 (bash), Arch with KDE Plasma (bash) and CachyOS (fish), all x86_6
 - **Seen on the way, not changed:**
   - The VMs had no desktop login and no lingering, so the user manager, and with it Devid and its databases, ran only while an SSH session was open. That is how a systemd user unit works.
   - Right after the daemon starts, `devid doctor` reports a database that is still starting as a problem, for up to about 20 s (MongoDB is the slowest).
+
+## 0.21.0 (2026-11-26)
+
+- **Released:** #154 merged (main c785148) and the owner tagged `v0.21.0`. Release run 45755040242 passed every job on its first run: both macOS builds, the Linux build, `arch-e2e` and publish.
+- **Published:** `devid-v0.21.0` in devid-binaries is GitHub's Latest, with 9 files, and `devid-latest` carries it. The arm64 binary's sha256 matched `checksums.txt`, and it answers `devid 0.21.0`.
+- **Left after the release:**
+  - the guide's `/docs/databases` page, devid-site#23, to merge now that 0.21.0 is out;
+  - the owner's M1 is still on 0.21.0-rc.1, and `devid self-update` takes it to 0.21.0.
 
 ## Milestones
 
