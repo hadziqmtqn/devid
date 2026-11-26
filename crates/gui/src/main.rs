@@ -32,6 +32,8 @@ fn main() {
             api::copy_log_path,
             api::copy_mail_env,
             api::copy_db,
+            api::copy_text,
+            api::sites_folder,
             api::server_config,
             api::choose_folder,
             api::doctor,

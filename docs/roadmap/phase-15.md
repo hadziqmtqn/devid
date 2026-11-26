@@ -2,7 +2,7 @@
 
 > Scope: `devid new` creates a PHP, Laravel, WordPress, Symfony, CodeIgniter 4, static or Node.js project and serves it at `https://<name>.test` right away, through the CLI, the TUI and the app (D-063)
 > Verified against: 2026-11-26 (Devid 0.21.0, main e6d9537; N1's runs on the owner's M1 and the Ubuntu VM: Laravel 13.44, its starter kits' `dev-main`, Symfony 8.1, CodeIgniter 4.7, create-vite 9.3, create-next-app 16.4, create-nuxt 4.1, sv 1.7, create-astro 5.3, WP-CLI 2.12.0, WordPress 7.1.5)
-> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results"). **N3 done 2026-11-26:** the nine Node.js templates, proxied with their dev server on demand, and the TUI's wizard (see "N3 results").
+> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results"). **N3 done 2026-11-26:** the nine Node.js templates, proxied with their dev server on demand, and the TUI's wizard (see "N3 results"). **N4 built 2026-11-26:** the app's New project sheet, from the board the owner approved; the owner's own try comes with the rc (see "N4 results").
 
 On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitur baru untuk create project PHP, Laravel, Wordpress, NodeJs, dll". They asked for suggestions before any documentation. This plan records the suggestions they accepted.
 
@@ -405,6 +405,108 @@ D-063 stands. N1 settles these details for N2 and N3:
 - **Nuxt, SvelteKit and Astro listen on `[::1]` only.** Devid's proxy reaches them, since nginx's retry tries `127.0.0.1` and `[::1]`.
 - **Next.js 16's HMR socket is `/_next/hmr`.** The proxy's rewritten Origin passes Next's cross-origin check.
 
+## N4 results (2026-11-26)
+
+### The board
+
+- **Where:** the Devid Redesign canvas, page "Fase 15: new project".
+- **Its eight boards:**
+  - the + menu on Sites;
+  - the form, for Laravel and for Next.js;
+  - the job running;
+  - the job ready, for Laravel with MySQL and a starter kit, and for WordPress;
+  - WordPress during MySQL's first download;
+  - a failure.
+- **The owner's questions** (2026-11-26):
+  - **How WordPress makes its database:** the answer added three things to the board, all in this build:
+    - MySQL's first download, shown under "Making the database account";
+    - a taken account name refused before Create;
+    - "Show in Databases" in place of "Copy URL" for WordPress.
+  - **WordPress Multisite and multi-tenant Laravel:** left for later; see "Not in this phase".
+- **Approved** on 2026-11-26: "Board N4 sudah oke, lanjut bangun".
+
+### What shipped
+
+- **Sites' +** is a menu: New project… (⌘N, also from other pages) and Link a folder….
+- **The New project sheet:**
+  - **The template list** (PHP; JavaScript · Node.js) comes from `new_templates`. A template this Mac lacks something for has a dot and the daemon's reason.
+  - **Name:**
+    - a hint shows the URL and the folder;
+    - the checks: the name rule, the sites, and the accounts of a MySQL or PostgreSQL that runs (`db_user_list`). An engine that is off is checked when the job starts, and the sheet says so.
+  - **Folder:**
+    - the parked folders;
+    - with none, `~/Sites`, which the page makes (`sites_folder`) and parks before the job;
+    - or another folder from the picker, which links the project.
+  - **The template's options:**
+    - PHP, for the PHP templates;
+    - the starter kit, whose buttons are off, with the reason, when Node is too old or missing;
+    - Symfony's kind;
+    - the database.
+  - **One line each on what Devid sets up,** from the daemon's state:
+    - the database server: running, off and started first, or not installed and downloaded first;
+    - the account;
+    - Mail;
+    - the Node the job uses (`new_templates` now reports it);
+    - a Node template's dev port.
+  - **A note** blocks Create when this Mac cannot make the template, with the daemon's reason.
+- **The job:**
+  - **The steps:** `new_project` runs, and the page reads `new_project_progress` every 0.5 s. It shows each step with the time it took, and the last lines of the job's log (`log_read`).
+  - **A first download:** during "Making the database account", the engine's download from `status` shows as a bar.
+  - **Hide** leaves the job running. A toast says how it ended, and a failure while hidden shows again from the + menu.
+- **Ready:**
+  - the URL;
+  - the folder, with Show in Finder and Open in Terminal;
+  - what serves it, and a Node project's dev port;
+  - the kits' `vite` command, with Start;
+  - **the database account:**
+    - Copy password;
+    - Copy .env for Laravel;
+    - Show in Databases for the others;
+  - **WordPress's admin login,** marked "Shown once":
+    - Copy, through the new `copy_text`;
+    - Open, which opens `/wp-admin/` through `open` with a page path, checked to be a path on the site only;
+  - Done and Open in browser.
+- **Failed:**
+  - the steps, with the failed one marked;
+  - the daemon's message, which names what stays;
+  - Show log and Show in Finder.
+
+### Different from the board
+
+- **The name field starts empty,** with a placeholder, rather than with a suggested name.
+- **Symfony's "Copy URL"** became "Show in Databases": the page gets an account's password from Devid, not its Doctrine URL.
+- **"What stays" on a failure** is the daemon's own message, with Show in Finder, rather than a separate card.
+- **The new project** shows in the Sites list after the refresh, without a "New" chip.
+
+### Checked
+
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` (the app included) and `cargo test` pass.
+  - **New unit test:** `site_page`'s paths.
+  - **`tests/new.rs`:** asserts `new_templates`' `node`.
+- `node --check` passes on `app.js`.
+- **In a browser,** with the real `app.js` and `app.css` and a fake `invoke` that answers like the N3 daemon. Its status and sites came from the owner's daemon, read only; the owner has no parked folder.
+  - **The entry points:** the + menu and ⌘N.
+  - **WordPress with MySQL not installed:**
+    - `sites_folder`, `park`, then `new_project`;
+    - the download bar under the account step;
+    - Ready, with the admin password copied through `copy_text` and `/wp-admin/` opened.
+  - **Laravel with MySQL:**
+    - `shop`, a taken account name, refused before Create;
+    - the React kit's tool line and steps;
+    - Hide, then the toast when the job ended.
+  - **A failed `create-project`:** the failed step, the message, Show in Finder and Close.
+  - **Next.js:** Ready, with its dev port.
+  - **No Node:**
+    - the Node.js templates marked;
+    - the kits off;
+    - Create blocked, with the reason.
+  - **The rest:** the list's arrow keys, Escape, and the light and dark themes.
+
+### Not yet
+
+- **The real app against a real daemon:** the owner's own try on the M1 comes with the rc in N5, as Phase 14's D4 did.
+- **N5:** the weekly CI job, the guide's `/docs/new-project` page, and 0.22.0.
+
 ## Milestones
 
 | # | Milestone | Done when |
@@ -412,7 +514,7 @@ D-063 stands. N1 settles these details for N2 and N3:
 | N1 | **Spike:** each official tool without prompts, on macOS and Ubuntu | the fixed options, the time, the disk use and the Node versions of every template are in this doc. That includes the starter kits' package names, WP-CLI's release files, and whether `wp core download` checks its archive (done 2026-11-26, see "N1 results") |
 | N2 | **Daemon and CLI:** the templates, the job and its progress, the PHP templates, Laravel with the database and Mail, WordPress with WP-CLI and `wp` | on the M1, `devid new` makes a Laravel project with each database and a WordPress site. Each opens at `https://<name>.test`, next to DBngin (done 2026-11-26, see "N2 results") |
 | N3 | **Node.js templates and the TUI wizard** | every Node template opens through the proxy with hot reload, and the TUI makes a Laravel project and a Vite project (done 2026-11-26, see "N3 results") |
-| N4 | **The app's New project page** (macOS) | the owner approves a design board, then makes a project from the page on the M1 |
+| N4 | **The app's New project page** (macOS) | the owner approves a design board, then makes a project from the page on the M1 (board approved and page built 2026-11-26, see "N4 results"; the owner's own try comes with the rc) |
 | N5 | **CI, docs and release** | a weekly CI job makes every template with the real tools on macOS and Ubuntu, so a changed option shows within a week. The guide gets a `/docs/new-project` page. 0.22.0 ships after an rc on the M1 and the Linux VMs |
 
 ## Where it is tested
@@ -453,3 +555,13 @@ D-063 stands. N1 settles these details for N2 and N3:
   - Statamic, Drupal, Craft CMS, Magento, Angular and React Router;
   - each is one more row in the template table later.
 - **Deploying projects.**
+- **WordPress Multisite** (`devid new wordpress --multisite subdir|subdomain`). Later, as the owner answered on 2026-11-26 ("ya nanti kamu catat"), since Devid cannot serve a network yet:
+  - **Subdirectory networks** (`name.test/shop2`) need WordPress's multisite rewrite rules. Apache reads WordPress's own `.htaccess`, because sites get `AllowOverride All`. nginx and Caddy have no such rules, so a sub-site's `wp-admin` and files break there.
+  - **Subdomain networks** (`shop2.name.test`) need `*.name.test` routed to the site, and certificates for those names. nginx matches each site's exact host, and Devid makes one certificate per site host.
+  - **Once Devid serves both,** `devid new` runs `wp core multisite-install` instead of `wp core install`. Until then, `wp core multisite-convert` turns a site into a network by hand; a subdirectory network then works on Apache.
+- **A multi-tenant option for Laravel.** It is not a template option, as the owner answered on 2026-11-26 ("Ya, catat"):
+  - **Why:** tenancy comes from a package (`stancl/tenancy`, `spatie/laravel-multitenancy`) and from design choices inside the app, which no official create tool makes.
+  - **What Devid can add later** is the serving that such apps need:
+    - **Subdomains of a site** (`acme.shop.test`): `*.name.test` routed to the site, with certificates for those names. WordPress's subdomain networks need the same, and so does Laravel's `Route::domain()`.
+    - **An account that may create databases,** for a database per tenant. A Devid account has rights on its own database only. Until then, MySQL's `root` and PostgreSQL's `postgres`, which need no password from this computer (D-061), can create them.
+  - **What works today:** tenants told apart by path, and tenants sharing one database.

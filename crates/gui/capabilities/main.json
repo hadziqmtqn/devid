@@ -9,6 +9,8 @@
     "allow-copy-log-path",
     "allow-copy-mail-env",
     "allow-copy-db",
+    "allow-copy-text",
+    "allow-sites-folder",
     "allow-server-config",
     "allow-choose-folder",
     "allow-doctor",

@@ -7,6 +7,8 @@ fn main() {
         "copy_log_path",
         "copy_mail_env",
         "copy_db",
+        "copy_text",
+        "sites_folder",
         "server_config",
         "choose_folder",
         "doctor",

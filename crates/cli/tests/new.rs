@@ -196,6 +196,8 @@ fn new_node_projects_are_proxied_and_start_on_demand() {
     let s = |p: &Path| p.to_str().unwrap().to_string();
     let daemon = start_daemon_env(&home, &[("SHELL", "/bin/sh")]);
     ok(&home, &["park", &s(&sites)]);
+    // The app's sheet shows which Node it will use (N4).
+    assert_eq!(request_json(&home, r#"{"cmd":"new_templates"}"#)["node"], "24.22.3");
 
     // Vite's React: created without installing or starting, then npm install; a proxy site whose
     // first visit starts `dev` on its own port.

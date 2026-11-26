@@ -34,7 +34,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 - Phase 12 (accepted 2026-11-23, done in 0.19.0): Linux, Ubuntu 24.04 and 26.04 on x86_64, with the CLI and the TUI (D-057).
 - Phase 13 (accepted 2026-11-24, done in 0.20.0): Arch-based Linux, Arch Linux and the distributions built on it, such as CachyOS, on x86_64 (D-059).
 - Phase 14 (accepted 2026-11-25, done in 0.21.0): databases. Devid runs MySQL, PostgreSQL and MongoDB, with accounts and passwords in one step, in the CLI, the TUI and the app (D-061). D2 and D3 shipped in 0.20.1, off by default.
-- Phase 15 (accepted 2026-11-25; N1 to N3 done 2026-11-26: `devid new` in the CLI and the TUI, for the PHP, WordPress and Node.js templates): `devid new` creates projects with each framework's own tool (D-063).
+- Phase 15 (accepted 2026-11-25; N1 to N3 done 2026-11-26: `devid new` in the CLI and the TUI, for the PHP, WordPress and Node.js templates; N4, the app's New project sheet, built 2026-11-26): `devid new` creates projects with each framework's own tool (D-063).
 
 **Non-goals:**
 - Databases beyond MySQL, PostgreSQL and MongoDB (Redis or Valkey, MariaDB, Elasticsearch), databases started on demand, and upgrades or imports across series other than dump and restore (D-061). The owner still uses DBngin, next to Devid's servers.

@@ -1121,7 +1121,11 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
             let (env, _) = state.commands.env_for(&crate::paths::user_home());
             let runner = newproject::Runner::new(paths, "", env, paths.log_dir().join("new.log"));
             let node = runner.node(&crate::paths::user_home()).ok();
-            Ok(json!({"ok": true, "templates": newproject::templates_json(!php::installed(paths).is_empty(), node)}))
+            Ok(json!({
+                "ok": true,
+                "templates": newproject::templates_json(!php::installed(paths).is_empty(), node),
+                "node": node.map(|v| format!("{}.{}.{}", v.0, v.1, v.2)),
+            }))
         }
         Request::NewProject { template, name, path, php, db, kit } => {
             new_project(state, &template, &name, path, php, db.as_deref(), kit.as_deref())
