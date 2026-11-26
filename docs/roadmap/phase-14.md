@@ -466,6 +466,26 @@ The owner started D5 after #151 merged: "Mulai D5". 0.20.1 already carries D2 an
    - the guide's `/docs/databases` page in devid-site, merged after the release.
 6. **0.21.0:** a version PR with the docs, then the owner tags it.
 
+## D5: the rc on the Linux VMs (2026-11-26)
+
+Ubuntu 24.04.5 (bash), Arch with KDE Plasma (bash) and CachyOS (fish), all x86_64 in Parallels on the old Mac, over SSH. Each VM still had 0.20.0 installed and running.
+
+- **Install:** `install.sh` with `DEVID_VERSION=0.21.0-rc.1` replaced 0.20.0, not `devid self-update`, which only follows the latest stable release. Setup found everything in place and needed no sudo. `devid doctor`: all good.
+- **The databases,** through the systemd user unit and the shims on PATH, the same on all three VMs (32 checks each, none failed):
+  - `devid db start` downloaded and started MySQL 8.4.13 on 3306, PostgreSQL 18.7 on 5432 and MongoDB 8.0.38 on 27017. The first start took 32–36 s, 8–12 s and 92–100 s, the download included.
+  - `mysql`, `mysqldump`, `psql`, `pg_dump`, `pg_restore` and `mongosh` on PATH were Devid's shims.
+  - MySQL's `root` and PostgreSQL's `postgres` logged in over TCP without a password. MongoDB's `root` needed its password, and a read without credentials was refused.
+  - On each engine, `devid db user add` made `rcshop` with a 24-character password. `rcshop` created a table with a row in its own database through the shim, a wrong password was refused, and `devid db env` showed the password.
+  - Idle PSS: MySQL 216–239 MB, PostgreSQL 23–24 MB, MongoDB 170–191 MB.
+  - `systemctl --user restart devid` brought all three back on the same ports in 4–5 s, with `rcshop`'s row in place.
+  - `devid doctor` listed each server as running.
+- **`devid uninstall --purge`** (with the system undo through sudo, the Arch VM's resolved and resolv.conf included) left only `~/.devid/data` (`mongodb-8.0`, `mysql-8.4`, `postgresql-18`; 434 MB). The unit, the PATH lines, the CA and the system files were gone, no database process ran, and 3306, 5432 and 27017 were free.
+- **Reinstalled on the kept data:** after `install.sh` again, `devid db start` started each engine on its old data in 4–27 s. `rcshop` logged in with its old password and found its row.
+- **`devid uninstall --purge --delete-databases`** deleted `~/.devid` entirely. The VMs are left without Devid.
+- **Seen on the way, not changed:**
+  - The VMs had no desktop login and no lingering, so the user manager, and with it Devid and its databases, ran only while an SSH session was open. That is how a systemd user unit works.
+  - Right after the daemon starts, `devid doctor` reports a database that is still starting as a problem, for up to about 20 s (MongoDB is the slowest).
+
 ## Milestones
 
 | # | Milestone | Done when |
