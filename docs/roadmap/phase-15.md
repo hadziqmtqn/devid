@@ -1,8 +1,8 @@
 # Phase 15 Plan: Creating projects
 
 > Scope: `devid new` creates a PHP, Laravel, WordPress, Symfony, CodeIgniter 4, static or Node.js project and serves it at `https://<name>.test` right away, through the CLI, the TUI and the app (D-063)
-> Verified against: 2026-11-25 (Devid 0.20.0, main 1340d22; Laravel 13 docs; WordPress 7.1; create-vite 9; WP-CLI's handbook)
-> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers".
+> Verified against: 2026-11-26 (Devid 0.21.0, main e6d9537; N1's runs on the owner's M1 and the Ubuntu VM: Laravel 13.44, its starter kits' `dev-main`, Symfony 8.1, CodeIgniter 4.7, create-vite 9.3, create-next-app 16.4, create-nuxt 4.1, sv 1.7, create-astro 5.3, WP-CLI 2.12.0, WordPress 7.1.5)
+> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results").
 
 On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitur baru untuk create project PHP, Laravel, Wordpress, NodeJs, dll". They asked for suggestions before any documentation. This plan records the suggestions they accepted.
 
@@ -123,11 +123,132 @@ On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitu
 - **WordPress** needs MySQL, which needs macOS 14 or later (D-058).
 - **The network:** every template but the blank PHP and static ones downloads from the official sources (Packagist, wordpress.org, GitHub, the npm registry).
 
+## N1 results (2026-11-26)
+
+**Where it ran:**
+- **The owner's M1** (8 GB, macOS 26): Devid 0.21.0's PHP 8.5.13 and Composer 2.11.2, Node 24.22.3 from nvm, npm 11.19.1.
+- **The Ubuntu 24.04 VM** (x86_64, 2 cores, 2 GB):
+  - PHP: Devid's 8.5.13 build from devid-binaries (`2026.11.25-22`);
+  - Composer 2.11.3, and Node 24.22.3 from nodejs.org;
+  - each checked against its published checksum and unpacked into a folder in the home directory, with nothing installed system-wide;
+  - the folder was removed afterwards. Git is not installed there.
+- **Every run** had no terminal (stdin was `/dev/null`) and its own empty Composer, npm and WP-CLI caches, so the times are those of a first run.
+- **The script** is `spike/new/spike.sh`.
+
+### What each template runs, and what it costs
+
+| Template | The command, with the options that keep it from asking | M1 | Ubuntu VM | Disk | Node |
+|---|---|---|---|---|---|
+| Laravel | `composer create-project laravel/laravel <name> --prefer-dist --no-interaction` | 18 s | 26 s | 71 MB | — |
+| Laravel, React kit | `composer create-project laravel/react-starter-kit <name> --stability=dev --prefer-dist --no-interaction` | 87 s | 200 s | 462 MB | 22.18+ or 24.11+ |
+| Laravel, Vue kit | the same with `laravel/vue-starter-kit` | 94 s | 186 s | 479 MB | the same |
+| Laravel, Svelte kit | the same with `laravel/svelte-starter-kit` | 73 s | 194 s | 456 MB | the same |
+| Laravel, Livewire kit | the same with `laravel/livewire-starter-kit` | 69 s | 139 s | 377 MB | the same |
+| Symfony (web app) | `composer create-project symfony/skeleton <name> --no-interaction`, then `composer config --json extra.symfony.docker false` and `composer require webapp --no-interaction` | 28 s | 43 s | 96 MB | — |
+| Symfony (`--kit skeleton`) | `composer create-project symfony/skeleton <name> --no-interaction` | 10 s | 16 s | 12 MB | — |
+| CodeIgniter 4 | `composer create-project codeigniter4/appstarter <name> --no-interaction` | 5 s | 9 s | 27 MB | — |
+| React (Vite) | `npm create vite@latest <name> -- --template react-ts --no-interactive --no-immediate`, then `npm install` | 18 s | 36 s | 89 MB | 20.19+ or 22.12+ |
+| Vue (Vite) | the same with `vue-ts` | 14 s | 41 s | 78 MB | the same |
+| Svelte (Vite) | the same with `svelte-ts` | 31 s | 42 s | 72 MB | the same |
+| Vanilla (Vite) | the same with `vanilla-ts` | 11 s | 25 s | 62 MB | the same |
+| Next.js | `npx --yes create-next-app@latest <name> --yes --use-npm` | 61 s | 139 s | 470 MB | 20.9+ |
+| Nuxt | `npm create nuxt@latest <name> -- --template minimal --packageManager npm --no-gitInit --modules=` | 89 s | 173 s | 171 MB | 22.22.3+ or 24.15+ |
+| SvelteKit | `npx --yes sv@latest create <name> --template minimal --types ts --no-add-ons --install npm` | 23 s | 35 s | 71 MB | 22.17+ |
+| Astro | `npm create astro@latest <name> -- --yes --skip-houston` | 30 s | 105 s | 175 MB | 22.23.4+ |
+| Express API | `npm init -y`, `npm install express`, and Devid's `server.js` | 3 s | 9 s | 3 MB | 18+ |
+| WordPress | `wp core download <zip URL>`, `wp config create`, `wp core install` | 18 s | 31 s, the download only | 114 MB | — |
+
+- **Disk use** is the M1's. Ubuntu's was within 8 % of it.
+- **The starter kits' times** include an `npm install` and `npm run build` that the spike ran after Composer. The kits had already done both (see "Laravel"), so Devid needs neither.
+- **Node** is the framework's own `engines.node`, which can be stricter than its create tool: `create-nuxt` accepts 22.21, Nuxt 4.7 needs 22.22.3. The kits' minimum comes from Vite+ (`vite-plus` 1.8).
+- **What they made:**
+  - Laravel 13.44.1; Symfony 8.1.12; CodeIgniter 4.7.6;
+  - from create-vite 9.3.4, Vite 8.3; from create-next-app 16.4.6, Next.js 16.4.6; from create-nuxt 4.1.0, Nuxt 4.7.0;
+  - from sv 1.7.1, SvelteKit 3; from create-astro 5.3.2, Astro 7.4; Express 5.3;
+  - WordPress 7.1.5, with WP-CLI 2.12.0.
+- **Dev servers:** every Node template answered 200 on the port the spike gave it:
+  - `npm run dev -- --port <port>`, Next.js's `-p <port>`, and the Express template's `PORT`;
+  - 2 to 3 s after starting on the M1, 1 to 8 s on the VM.
+
+### Answers
+
+1. **No tool asked anything** with the options above and no terminal.
+   - **Vite:** `--no-immediate` keeps it from installing and starting the dev server itself.
+   - **Next.js:** `--yes` takes the user's saved preferences when there are any. With none saved it chose TypeScript, ESLint, Tailwind 4, the App Router, no `src/`, and an `AGENTS.md`. N2 passes each choice explicitly, so a user's saved preferences cannot change what Devid makes.
+   - **Nuxt:** an empty `--modules=` skips its question about modules.
+   - **Astro:** `--yes` takes the `basics` template.
+2. **Git repositories:**
+   - Next.js and Astro make one by default when Git is installed. On the Ubuntu VM, which has no Git, both went on without one.
+   - The other tools, Laravel's installer included, make none.
+3. **A tool's own install can fail and still exit 0.**
+   - On the VM, create-astro's `npm install` failed ("Dependencies failed to install"). create-astro still printed "Project initialized!" and exited 0, with no `node_modules`.
+   - A second `npm install` in that folder passed in 25 s, and its dev server answered.
+   - The cause is unknown. The VM had memory to spare, and it did not happen again.
+4. **Laravel:**
+   - **`create-project` runs Laravel's own scripts:** `.env` from `.env.example`, `key:generate`, an SQLite file, and `migrate`. That suits `--db sqlite`.
+   - **Laravel's installer** runs `create-project` with `--no-scripts` instead, then runs `post-root-package-install` and `key:generate` itself, and migrates once the database is chosen.
+   - **The `.env` it writes** has `APP_URL=http://localhost:8000` and `MAIL_MAILER=log`.
+   - **The starter kits' packages:**
+     - `laravel/react-starter-kit`, `laravel/vue-starter-kit`, `laravel/svelte-starter-kit` and `laravel/livewire-starter-kit`.
+     - Their tagged releases are v1.0.x from February 2025, for Laravel 12. The Svelte kit has no tagged release.
+     - Laravel's installer takes each kit's `dev-main` with `--stability=dev`. That branch is the Laravel 13 kit (`laravel/framework ^13.17`), updated 2026-11-25.
+     - The branches `dev-teams`, `dev-workos` and `dev-workos-teams` are the installer's `--teams` and `--workos`.
+   - **Inside `create-project`,** every kit runs `php artisan install:features`. That step runs `npm install`, generates Wayfinder's files and builds the assets, so a kit needs Node before Composer starts.
+   - **Vite+:** the kits build with Vite+ (`vite-plus` 1.8; `"dev": "vp dev"`). They keep `laravel-vite-plugin` 3, through which D-056 gives Vite its HTTPS certificate.
+5. **Symfony:**
+   - **Docker:** without a terminal, `composer require webapp` added Docker Compose files (`compose.yaml`, `compose.override.yaml`). With `composer config --json extra.symfony.docker false` before it, it added none (checked on the M1).
+   - **The database:** `.env` points `DATABASE_URL` at PostgreSQL on 127.0.0.1:5432, with the account `app` and the password `!ChangeMe!`. On the owner's M1 that port is DBngin's.
+   - **Mail:** `MAILER_DSN` is `null://null`.
+6. **CodeIgniter 4** ships an `env` file, not `.env`. Inside it, `CI_ENVIRONMENT` and `app.baseURL` are commented out.
+7. **WP-CLI:**
+   - **The release:** its latest is 2.12.0, from 2025-05-07. Its files are `wp-cli-2.12.0.phar`, with `.md5`, `.sha256`, `.sha512`, `.asc` and `.gpg` beside it. The phar matched its SHA-512 on both machines. The `wp-cli.phar` in WP-CLI's builds repository is the same file.
+   - **On PHP 8.5** the phar prints a deprecation notice (from `react/promise`, inside it) before every command's output. With `error_reporting = E_ALL & ~E_DEPRECATED` it prints none.
+8. **WordPress:**
+   - **`wp core download` checks the archive** against the MD5 that wordpress.org publishes ("md5 hash verified").
+   - **Its default archive breaks WordPress 7.1:**
+     - The default is the `.tar.gz`, which WP-CLI unpacks with PHP's `PharData`.
+     - On the M1 that cut 46 file names in `wp-includes/php-ai-client` at 100 characters, and `wp core verify-checksums` failed.
+     - On the VM, `PharData` ran out of PHP's 128 MB memory limit. The VM's PHP ran without Devid's `php.ini`, which sets 512 MB.
+   - **The zip works:** wordpress.org's version API (`api.wordpress.org/core/version-check/1.7/`) offers a zip as `packages.full`. It downloaded, matched its MD5, and passed `verify-checksums` on both machines.
+   - **`wp config create`** used a Devid MySQL account with `--dbhost=127.0.0.1:3307`, next to DBngin. It checked the connection and wrote fresh salts. `wp core install` then took about 1 s.
+   - **`siteurl` depends on where the phar is:**
+     - With the phar in a parent folder of the site, WordPress took the folder between them as part of the URL (`https://n1wp.test/site-zip`), even with `wp` run from the site's folder.
+     - With the phar elsewhere, `siteurl` and `home` were `https://n1wp.test`.
+   - **Clean-up:** the test account and its database were removed afterwards.
+9. **Time and disk:**
+   - On the M1, a project took 3 to 94 s, and 18 to 30 s for most templates. The VM was 1.5 to 3.5 times slower.
+   - The starter kits and Next.js take 380 to 480 MB each, most of it `node_modules`.
+
+### What this changes in the plan
+
+D-063 stands. N1 settles these details for N2 and N3:
+- **Node templates:**
+  - Devid runs each tool without its own install step: Vite's `--no-immediate`, Next.js's `--skip-install`, and `--no-install` for Nuxt, SvelteKit and Astro.
+  - Then Devid runs the package manager itself, so a failed install stops the job with the package manager's error.
+- **No Git repository:** Next.js gets `--disable-git`, Astro `--no-git`, and Nuxt `--no-gitInit`, as no other template makes one.
+- **Node minimums:** each template's minimum is its framework's `engines.node`, read from the npm registry when `devid new` runs, so it follows each release. The starter kits use Vite+'s.
+- **Laravel:**
+  - **SQLite:** `create-project` with Laravel's scripts.
+  - **MySQL or PostgreSQL:** `--no-scripts`, then Laravel's `post-root-package-install` and `key:generate`, then Devid's `.env` lines, then `migrate`.
+  - **Every database:** Devid then sets `APP_URL` and Mail's lines.
+  - **The kits** come from `dev-main` with `--stability=dev`, as Laravel's installer takes them. Node is checked before Composer starts.
+  - **N3** checks D-056's Vite over HTTPS with `vp dev`.
+- **Symfony:**
+  - `extra.symfony.docker` is set to `false` before `composer require webapp`.
+  - Devid writes `DATABASE_URL` and `MAILER_DSN` to `.env.local`.
+  - This plan gives Symfony no `--db`. N1's proposal is SQLite by default, with `--db mysql|pgsql` as for Laravel; the owner decides in N2.
+- **CodeIgniter 4:** Devid copies `env` to `.env`, with `CI_ENVIRONMENT = development` and `app.baseURL = 'https://<name>.test/'`.
+- **WordPress:**
+  - `wp core download` gets the zip URL from wordpress.org's version API.
+  - `wp core verify-checksums` runs after it.
+  - `wp` runs with `error_reporting = E_ALL & ~E_DEPRECATED`. The phar stays under `~/.devid`, outside every parked folder.
+  - After `wp core install`, Devid checks that `siteurl` and `home` are `https://<name>.test`.
+
 ## Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
-| N1 | **Spike:** each official tool without prompts, on macOS and Ubuntu | the fixed options, the time, the disk use and the Node versions of every template are in this doc. That includes the starter kits' package names, WP-CLI's release files, and whether `wp core download` checks its archive |
+| N1 | **Spike:** each official tool without prompts, on macOS and Ubuntu | the fixed options, the time, the disk use and the Node versions of every template are in this doc. That includes the starter kits' package names, WP-CLI's release files, and whether `wp core download` checks its archive (done 2026-11-26, see "N1 results") |
 | N2 | **Daemon and CLI:** the templates, the job and its progress, the PHP templates, Laravel with the database and Mail, WordPress with WP-CLI and `wp` | on the M1, `devid new` makes a Laravel project with each database and a WordPress site. Each opens at `https://<name>.test`, next to DBngin |
 | N3 | **Node.js templates and the TUI wizard** | every Node template opens through the proxy with hot reload, and the TUI makes a Laravel project and a Vite project |
 | N4 | **The app's New project page** (macOS) | the owner approves a design board, then makes a project from the page on the M1 |
