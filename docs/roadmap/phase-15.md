@@ -2,7 +2,7 @@
 
 > Scope: `devid new` creates a PHP, Laravel, WordPress, Symfony, CodeIgniter 4, static or Node.js project and serves it at `https://<name>.test` right away, through the CLI, the TUI and the app (D-063)
 > Verified against: 2026-11-26 (Devid 0.21.0, main e6d9537; N1's runs on the owner's M1 and the Ubuntu VM: Laravel 13.44, its starter kits' `dev-main`, Symfony 8.1, CodeIgniter 4.7, create-vite 9.3, create-next-app 16.4, create-nuxt 4.1, sv 1.7, create-astro 5.3, WP-CLI 2.12.0, WordPress 7.1.5)
-> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results").
+> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results").
 
 On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitur baru untuk create project PHP, Laravel, Wordpress, NodeJs, dll". They asked for suggestions before any documentation. This plan records the suggestions they accepted.
 
@@ -244,12 +244,104 @@ D-063 stands. N1 settles these details for N2 and N3:
   - `wp` runs with `error_reporting = E_ALL & ~E_DEPRECATED`. The phar stays under `~/.devid`, outside every parked folder.
   - After `wp core install`, Devid checks that `siteurl` and `home` are `https://<name>.test`.
 
+## N2 results (2026-11-26)
+
+### What shipped
+
+- **`devid new <template> <name>`** in the CLI, for `php`, `laravel` (with `--kit react|vue|svelte|livewire`), `wordpress`, `symfony` (with `--kit skeleton`), `codeigniter` and `static`.
+  - **Options:** `--db sqlite|mysql|pgsql` for Laravel and Symfony, `--php`, `--path` and `--open`.
+  - **`devid new --list`** (or no template) lists the templates, with what this computer lacks for each: no PHP, or Node.js too old or missing for the starter kits.
+  - **The Node.js templates** answer "comes in a later version" (N3).
+  - **No parked folder and no `--path`:** in a terminal, the CLI offers to create `~/Sites` and park it.
+- **The daemon** (`newproject.rs`, and `NewTemplates`, `NewProject` and `NewProjectProgress` in the protocol):
+  - **Checks before anything is written:**
+    - the name: a site name that starts with a letter, at most 32 characters, so `-` → `_` gives the database and account name;
+    - no site with that name;
+    - a new or empty folder whose parent exists; in a parked folder, the folder takes the project's name;
+    - the template's kit and `--db`;
+    - the PHP version installed, and `composer.phar` present;
+    - one job at a time.
+  - **The job:**
+    - **Each step** is reported to `NewProjectProgress`, and the CLI prints it as it starts.
+    - **The tools' output** goes to `~/.devid/log/new-<name>.log`. Passwords in arguments show as `--dbpass=…`.
+    - **The tools run** as Devid's commands do (D-036): the login shell's environment and nvm's Node, with Devid's PHP and its ini for Composer, artisan and WP-CLI, and no stdin.
+  - **At the end:**
+    - **The site:** a project outside a parked folder is linked; `--php` pins the site.
+    - **The kits** get `vite: npm run dev` as a saved command.
+    - **The reply** has the URL, the folder, the database account with its password, WordPress's admin password (shown once, not kept), the commands and the log.
+  - **A failure** stops at the failed step, marks it failed in the progress, and names what stays: the folder, and the database account.
+- **Laravel:**
+  - **`APP_URL`;**
+  - **Mail's lines** while Mail is on;
+  - **with `--db mysql|pgsql`:** a Devid account and database named after the project, the `.env` lines, and `artisan migrate`. The database's engine starts first if it is off.
+  - **The kits** check Node.js (22.18+, 24.11+ or 26+) before Composer starts.
+- **Symfony:**
+  - the web app without Docker files;
+  - `DATABASE_URL` in `.env.local`: SQLite, or a Devid account (the owner's answer, 2026-11-26);
+  - `MAILER_DSN` while Mail is on.
+- **CodeIgniter 4:** `.env` from its `env`, with `CI_ENVIRONMENT = development` and `app.baseURL`.
+- **WordPress:**
+  - **WP-CLI:** downloaded on first use from its newest GitHub release, checked against its SHA-512, and kept at `~/.devid/wp-cli/wp-cli.phar`.
+  - **Its steps:** MySQL (started if off), the account, `wp core download` of the zip, `wp core verify-checksums`, `wp config create`, `wp core install` with a generated admin password, and a check of `siteurl` and `home`.
+- **`wp`** is a terminal command (D-053): WP-CLI on the current folder's PHP, without PHP 8.5's deprecation notices. An install gets it with `devid setup`, which `self-update` runs.
+
+### Different from the plan
+
+- **Laravel with MySQL or PostgreSQL** keeps Laravel's own scripts, rather than `--no-scripts` as N1 proposed:
+  - The starter kits' `npm install` and build run from those scripts (`install:features`).
+  - So `create-project` runs as for SQLite, then Devid writes the database's lines, removes the SQLite file Laravel made, and migrates again on the account's database.
+
+### Checked
+
+- **Unit tests** (`newproject.rs`):
+  - names, kits and databases per template;
+  - Node versions for the kits;
+  - `.env` editing: replace, uncomment, append, and CodeIgniter's spacing;
+  - folder checks, steps, progress;
+  - secrets kept out of the log, and Doctrine's URL escaping.
+- **`crates/cli/tests/new.rs`:**
+  - a fake PHP plays Composer and artisan, and every PHP template runs end to end, in a parked folder and elsewhere;
+  - the checks fail before anything runs;
+  - the kit path runs when Node.js is there;
+  - a failed `create-project` keeps the folder and says so.
+- **On the owner's M1:**
+  - **The setup:** the N2 build ran as a second daemon with its own `DEVID_HOME` and ports (18088 and 18443, Mail on 12525). The owner's Devid 0.21.0 and its sites were left alone.
+  - **The databases:** that daemon's MySQL took 3308, next to DBngin's MySQL on 3306 and Devid 0.21.0's on 3307. Its PostgreSQL took 5432, which was free because DBngin's PostgreSQL was off.
+  - **Every template made a project,** and each site answered over HTTPS:
+
+    | Project | Time | The page |
+    |---|---|---|
+    | `php` | 0 s | 200 |
+    | `static` | 1 s | 200 |
+    | `laravel` (SQLite) | 11 s | 200 |
+    | `laravel --db mysql` (MySQL's first start included) | 28 s | 200; 9 tables in its database |
+    | `laravel --db pgsql` (PostgreSQL's download included) | 20 s | 200 |
+    | `laravel --kit react` | 55 s | 200, the built Inertia app |
+    | `symfony` | 21 s | "Welcome to Symfony!" (with a 404, as Symfony's dev welcome page has) |
+    | `symfony --db pgsql` | 12 s | "Welcome to Symfony!" (the same 404) |
+    | `codeigniter` | 9 s | 200 |
+    | `wordpress` (WP-CLI's download included) | 19 s | 200, and `/wp-login.php` |
+
+  - **WordPress:**
+    - `siteurl` and `home` were the site's URL;
+    - `wp core verify-checksums` passed;
+    - the log has no deprecation notices and no passwords;
+    - `wp option get home`, `wp core version` (7.1.5) and `wp user list` worked through the `wp` command.
+  - **A second `devid new wordpress`** with the same name was refused: "a site named n2wp exists already".
+  - **Clean-up:** the second daemon was stopped, and its home and projects were removed.
+
+### Not yet
+
+- **N3:** the Node.js templates, and the TUI's wizard.
+- **Not run:** `--open`, and the offer to park `~/Sites`. Both need a terminal and a browser.
+- **The kits' Vite over HTTPS** (D-056) with `vp dev` is N3's check.
+
 ## Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
 | N1 | **Spike:** each official tool without prompts, on macOS and Ubuntu | the fixed options, the time, the disk use and the Node versions of every template are in this doc. That includes the starter kits' package names, WP-CLI's release files, and whether `wp core download` checks its archive (done 2026-11-26, see "N1 results") |
-| N2 | **Daemon and CLI:** the templates, the job and its progress, the PHP templates, Laravel with the database and Mail, WordPress with WP-CLI and `wp` | on the M1, `devid new` makes a Laravel project with each database and a WordPress site. Each opens at `https://<name>.test`, next to DBngin |
+| N2 | **Daemon and CLI:** the templates, the job and its progress, the PHP templates, Laravel with the database and Mail, WordPress with WP-CLI and `wp` | on the M1, `devid new` makes a Laravel project with each database and a WordPress site. Each opens at `https://<name>.test`, next to DBngin (done 2026-11-26, see "N2 results") |
 | N3 | **Node.js templates and the TUI wizard** | every Node template opens through the proxy with hot reload, and the TUI makes a Laravel project and a Vite project |
 | N4 | **The app's New project page** (macOS) | the owner approves a design board, then makes a project from the page on the M1 |
 | N5 | **CI, docs and release** | a weekly CI job makes every template with the real tools on macOS and Ubuntu, so a changed option shows within a week. The guide gets a `/docs/new-project` page. 0.22.0 ships after an rc on the M1 and the Linux VMs |

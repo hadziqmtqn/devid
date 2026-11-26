@@ -348,6 +348,25 @@ pub enum Request {
         #[serde(default)]
         delete_data: bool,
     },
+    /// D-063: the templates `devid new` offers, with what each needs that this computer lacks.
+    NewTemplates,
+    /// D-063: make a project with its framework's own tool, then serve it at `<name>.<tld>`. `path`
+    /// is the project's folder (default: `<first parked folder>/<name>`); `php` pins the site to a
+    /// version. Replies when the job ends; `NewProjectProgress` shows its steps meanwhile.
+    NewProject {
+        template: String,
+        name: String,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        php: Option<String>,
+        #[serde(default)]
+        db: Option<String>,
+        #[serde(default)]
+        kit: Option<String>,
+    },
+    /// The running (or the last) `NewProject`: its steps, and how it ended.
+    NewProjectProgress,
 }
 
 /// Send one request to the daemon's socket and return its JSON reply.

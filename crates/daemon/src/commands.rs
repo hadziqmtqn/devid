@@ -29,7 +29,7 @@ use std::{
 const LOG_MAX: u64 = 10 * 1024 * 1024;
 const LOG_KEEP: u64 = 1024 * 1024;
 
-type Env = Vec<(OsString, OsString)>;
+pub type Env = Vec<(OsString, OsString)>;
 
 /// One start of a command. Its pid is also its process group (`setsid`).
 struct Run {
@@ -265,7 +265,7 @@ impl Commands {
 
     /// The environment for a command in `dir`, and a note for its log when the login shell's
     /// could not be read.
-    fn env_for(&self, dir: &Path) -> (Env, Option<String>) {
+    pub fn env_for(&self, dir: &Path) -> (Env, Option<String>) {
         let mut cached = self.env.lock().unwrap();
         let login = cached.get_or_insert_with(|| {
             let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());

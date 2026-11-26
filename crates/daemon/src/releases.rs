@@ -215,7 +215,16 @@ pub fn artifact(manifest: &Value, tool: &str, minor: Option<&str>) -> Option<Art
 }
 
 pub fn sha256_hex(path: &Path) -> io::Result<String> {
-    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+    digest_hex(path, &ring::digest::SHA256)
+}
+
+/// A file's SHA-512, as WP-CLI publishes it (D-063).
+pub fn sha512_hex(path: &Path) -> io::Result<String> {
+    digest_hex(path, &ring::digest::SHA512)
+}
+
+fn digest_hex(path: &Path, algorithm: &'static ring::digest::Algorithm) -> io::Result<String> {
+    let mut ctx = ring::digest::Context::new(algorithm);
     let mut file = fs::File::open(path)?;
     let mut buf = vec![0u8; 1 << 20];
     loop {
