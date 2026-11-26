@@ -40,7 +40,7 @@ On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitu
 | **PHP** (blank) | a folder with `index.php` | the site |
 | **Laravel**: plain, or the React, Vue, Svelte or Livewire starter kit | `composer create-project laravel/laravel`, or the kit's package, such as `laravel/livewire-starter-kit`; no Laravel installer | `APP_URL`, the database, Mail, the migration, the kit's front end, and `npm run dev` as a command |
 | **WordPress** | WP-CLI: `wp core download`, `wp config create`, `wp core install` | a MySQL account and database from Devid, `wp-config.php` with fresh salts, an admin account |
-| **Symfony** | `composer create-project symfony/skeleton`, then `composer require webapp` for Symfony's full web app (`--kit skeleton` keeps the bare skeleton) | the site, served from `public/` |
+| **Symfony** | `composer create-project symfony/skeleton`, then `composer require webapp` for Symfony's full web app (`--kit skeleton` keeps the bare skeleton) | the site, served from `public/`; the database, as for Laravel; Mail |
 | **CodeIgniter 4** | `composer create-project codeigniter4/appstarter` | `.env` with `CI_ENVIRONMENT = development` and `app.baseURL` |
 | **Static** | a folder with `index.html` | a static site |
 | **React, Vue, Svelte or vanilla (Vite)** | `npm create vite@latest <name> -- --template react-ts` (or `vue-ts`, `svelte-ts`, `vanilla-ts`) | a proxy site, and `npm run dev` on its port, started on demand |
@@ -111,7 +111,7 @@ On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitu
   - `devid new <template> <name> [--path <dir>] [--php <version>] [--db sqlite|mysql|pgsql] [--kit <kit>] [--pm npm|pnpm|yarn|bun] [--open]`;
   - the templates: `php`, `laravel`, `wordpress`, `symfony`, `codeigniter`, `static`, `react`, `vue`, `svelte`, `vite` (vanilla), `next`, `nuxt`, `sveltekit`, `astro` and `express`;
   - `--kit`: Laravel's `react`, `vue`, `svelte` or `livewire`; Symfony's `skeleton`;
-  - `--db` applies to Laravel; WordPress always uses MySQL;
+  - `--db` applies to Laravel and Symfony (the owner's answer, 2026-11-26); WordPress always uses MySQL;
   - `devid new --list` lists the templates, and says why one cannot run here (no Node, Node too old, no MySQL on this macOS).
 - **TUI:** `n` on the Sites page opens a wizard: template, name, the template's options, then the progress, and Open.
 - **The app:** a New project page, built from a design board the owner approves first (D-026), as for Phase 14's Databases page.
@@ -236,7 +236,7 @@ D-063 stands. N1 settles these details for N2 and N3:
 - **Symfony:**
   - `extra.symfony.docker` is set to `false` before `composer require webapp`.
   - Devid writes `DATABASE_URL` and `MAILER_DSN` to `.env.local`.
-  - This plan gives Symfony no `--db`. N1's proposal is SQLite by default, with `--db mysql|pgsql` as for Laravel; the owner decides in N2.
+  - **The database:** Symfony gets `--db` as Laravel does: SQLite by default, `--db mysql` or `--db pgsql` through a Devid account. The owner chose this on 2026-11-26: "Ya, seperti Laravel".
 - **CodeIgniter 4:** Devid copies `env` to `.env`, with `CI_ENVIRONMENT = development` and `app.baseURL = 'https://<name>.test/'`.
 - **WordPress:**
   - `wp core download` gets the zip URL from wordpress.org's version API.
@@ -276,6 +276,13 @@ D-063 stands. N1 settles these details for N2 and N3:
   7. Templates from a Git repository later, not in this phase.
   8. Phase 15, after Phase 14, since WordPress needs Phase 14's MySQL.
 - **Node.js:** asked "untuk aplikasi nodeJS perlukah mengikuti template bawaan misal reactJS, dll?". Claude recommended running each framework's official create tool, plus Devid's small Express template, rather than Devid's own copies. The owner agreed: "Ya, tulis rencananya".
+
+## Owner's answers (2026-11-26)
+
+- **Symfony's database,** asked after N1: should Symfony get `--db` like Laravel? The answer was "Ya, seperti Laravel".
+  - The default is SQLite.
+  - `--db mysql` or `--db pgsql` makes a Devid account and its database (D-061).
+  - Devid writes `DATABASE_URL` to `.env.local`.
 
 ## Not in this phase
 

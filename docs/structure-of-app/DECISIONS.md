@@ -1311,6 +1311,7 @@ See ARCHITECTURE, "PHP runtime".
 - **Owner's answers (2026-11-25):**
   - "saya ikut rekomendasi kamu", for the eight recommendations in `phase-15.md`.
   - For Node.js, the official create tools rather than Devid's own templates: "Ya, tulis rencananya".
+- **Owner's answer (2026-11-26):** "Ya, seperti Laravel". Symfony gets `--db`, with SQLite by default and MySQL or PostgreSQL through a Devid account (D-061), written to `.env.local`.
 - **Not in this decision:**
   - templates from a Git repository;
   - Devid's own Node and Bun (D-060);
@@ -1321,7 +1322,7 @@ See ARCHITECTURE, "PHP runtime".
   - **Node templates:** Devid runs each tool without its own install step, then the package manager itself, since create-astro exited 0 after a failed `npm install`. Next.js, Astro and Nuxt make no Git repository.
   - **Node minimums:** each template's minimum is its framework's `engines.node`, read when `devid new` runs. Astro needs 22.23.4, Nuxt 22.22.3, and Laravel's starter kits 22.18, for Vite+.
   - **Laravel's starter kits** come from each kit's `dev-main` with `--stability=dev`, as Laravel's installer takes them. They run `npm install` and a build inside `create-project`.
-  - **Symfony's web app** is made without Docker files (`extra.symfony.docker` set to `false`). Devid writes `DATABASE_URL` and `MAILER_DSN` to `.env.local`. Whether Symfony gets `--db` is the owner's call in N2.
+  - **Symfony's web app** is made without Docker files (`extra.symfony.docker` set to `false`). Devid writes `DATABASE_URL` and `MAILER_DSN` to `.env.local`. Symfony gets `--db` as Laravel does (the owner's answer below).
   - **WordPress:**
     - `wp core download`'s default `.tar.gz` loses 46 long file names in WordPress 7.1 when WP-CLI 2.12.0 unpacks it, so Devid passes the zip from wordpress.org's version API and runs `wp core verify-checksums` after it;
     - `wp` runs without PHP 8.5's deprecation notices.
