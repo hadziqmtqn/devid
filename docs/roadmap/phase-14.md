@@ -2,7 +2,7 @@
 
 > Scope: Devid installs and runs D-058's MySQL, PostgreSQL and MongoDB builds through the daemon, the CLI, the TUI and the app, on macOS and Linux (D-060)
 > Verified against: 2026-11-25 (Devid 0.20.0, main d91d3b8; `db-latest` = `db-2026.11.24-8`; DBngin on the owner's M1; spike runs 45522275157 and 45523404458)
-> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 done 2026-11-25** (the app's Databases page with Open in Terminal, merged in #151; see "D4 results"); the owner's own try on the M1 moved to D5's rc. **D5 started 2026-11-25** (see "D5 plan"). **D2 and D3 shipped in 0.20.1** (2026-11-25), which was tagged on main for PHP 8.6: no database is installed or started until the user asks for one, and the docs come with 0.21.0 (D5).
+> Status: accepted 2026-11-25 (D-061, "Ikuti rekomendasi"), with the owner's answers in "Owner's answers". **D1 and D2 done 2026-11-25** (see each one's results). **D3 done 2026-11-25** (the CLI, the TUI and accounts, checked on the M1; see "D3 results"). **D4 done 2026-11-25** (the app's Databases page with Open in Terminal, merged in #151; see "D4 results"); the owner's own try on the M1 moved to D5's rc. **D5 done 2026-11-26:** 0.21.0-rc.1 passed on the owner's M1 and on the Ubuntu, Arch and CachyOS VMs, and 0.21.0 is the release (see "D5 plan" and the two D5 sections after it). **D2 and D3 shipped in 0.20.1** (2026-11-25), which was tagged on main for PHP 8.6: no database is installed or started until the user asks for one, and the docs come with 0.21.0 (D5).
 
 D-060 put this phase right after Phase 13. D-058's builds are published in devid-binaries' `db-latest` release, but no Devid release reads them yet. macOS users have DBngin; Linux users have nothing comparable from Devid.
 
@@ -466,6 +466,15 @@ The owner started D5 after #151 merged: "Mulai D5". 0.20.1 already carries D2 an
    - the guide's `/docs/databases` page in devid-site, merged after the release.
 6. **0.21.0:** a version PR with the docs, then the owner tags it.
 
+## D5: the rc on the owner's M1 (2026-11-25 and 2026-11-26)
+
+- **Install:** with the owner's OK ("Boleh"), `install.sh` with `DEVID_VERSION=0.21.0-rc.1` and `--gui --no-sudo` replaced 0.20.1. The daemon restarted on the rc and resumed the owner's three on-demand commands (D-040). `devid doctor` was all good, the sites answered, and DBngin's servers kept their pids.
+- **Found and fixed:** the app's `--page` start option did not know `databases` (only a relaunch passes it, always with `settings`). This pull request adds it, with a test that every page can be a start page.
+- **The owner's try** in the app, 0.21.0-rc.1, after reopening it ("Sudah saya coba, semua berjalan normal"):
+  - PostgreSQL 18.7 started from the Databases page on 5433, since DBngin's PostgreSQL holds 5432 and its MySQL 3306;
+  - an account added and its password reset from the page;
+  - Open in Terminal, in Terminal and in cmux.
+
 ## D5: the rc on the Linux VMs (2026-11-26)
 
 Ubuntu 24.04.5 (bash), Arch with KDE Plasma (bash) and CachyOS (fish), all x86_64 in Parallels on the old Mac, over SSH. Each VM still had 0.20.0 installed and running.
@@ -494,7 +503,7 @@ Ubuntu 24.04.5 (bash), Arch with KDE Plasma (bash) and CachyOS (fish), all x86_6
 | D2 | **Daemon:** the second manifest, install and update, the supervisor's additions (stop timeout, readiness, log file, orphan check by path), config, ports, API | unit tests cover install, ports and the supervisor changes, and a CLI test starts and stops each engine from a local test release (done 2026-11-25, see "D2 results") |
 | D3 | **CLI, TUI, accounts, terminal commands, doctor, uninstall** | on the M1, MySQL and PostgreSQL run next to DBngin's on their own ports. Two accounts are created and one password is reset from the CLI and from the TUI. A Laravel site migrates with each account, and uninstall keeps the data (done 2026-11-25, see "D3 results"; a real uninstall runs on the VMs in D5) |
 | D4 | **The app's Databases page** (macOS), accounts included | the owner approves a design board, then adds an account and resets a password from the page on the M1 (board approved and page built 2026-11-25, see "D4 results") |
-| D5 | **CI, docs and release** | a database check runs on every pull request on macOS, Ubuntu and Arch; the README, the guide's new `/docs/databases` page, PROJECT_CONTEXT and CLAUDE.md are updated; 0.21.0 ships after an rc on the M1 and the Linux VMs |
+| D5 | **CI, docs and release** | a database check runs on every pull request on macOS, Ubuntu and Arch; the README, the guide's new `/docs/databases` page, PROJECT_CONTEXT and CLAUDE.md are updated; 0.21.0 ships after an rc on the M1 and the Linux VMs (done 2026-11-26: arch-e2e checks the databases, the docs are updated, and 0.21.0-rc.1 passed on the M1 and the three VMs; see the D5 sections) |
 
 ## Where it is tested
 

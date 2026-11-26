@@ -25,8 +25,20 @@ The owner started D5 after D4 merged ("Mulai D5"). 0.20.1 already carries D2 and
   - `cargo test` passes, 169 tests in 19 binaries. It ran under a fake `HOME`, which skips only `passwd_home_matches_home` because that test needs the real home.
 - **On the pull request:** the new Arch step is the check that matters, since only CI can boot the VM.
 
+## Step 2: the rc on the M1 and the Linux VMs (2026-11-25 and 2026-11-26)
+
+- **The release:** #153 merged and the owner made the pre-release `v0.21.0-rc.1`; release run 45646037964 passed. `devid-latest` stayed on 0.20.1.
+- **The M1:** with the owner's OK, `install.sh` put the rc there over 0.20.1, app included. The app's `--page` did not know `databases`; commit b4a2808 in the release pull request fixes it, with a test. The owner then tried the page in the app: PostgreSQL on 5433 next to DBngin's 5432, an account added and its password reset, and Open in Terminal in Terminal and in cmux. "Semua berjalan normal".
+- **The VMs** (Ubuntu 24.04, Arch with KDE Plasma, CachyOS with fish; old Mac, over SSH): `install.sh` replaced the 0.20.0 each one still had. The same 32 checks passed on each: the three engines through the systemd user unit and the shims, an account per engine, a unit restart with the data kept. Then `uninstall --purge` kept only `~/.devid/data`, a reinstall used it again with the old passwords, and `--purge --delete-databases` left no `~/.devid`. The numbers and two side notes are in `phase-14.md`, "D5: the rc on the Linux VMs". The VMs are left without Devid.
+
+## Step 3: 0.21.0
+
+- `0.21.0` in `Cargo.toml` and `Cargo.lock`; the README's status says v0.21.
+- D5's results in `phase-14.md` (its status, the M1 and the VM sections, the D5 row), D-061's row and a D5 bullet, the docs index and Phase 14's row in PROJECT_CONTEXT, dated 2026-11-26.
+- The release notes in `release.yml` already name the databases since the rc.
+
 ## Next
 
-- The owner tags `v0.21.0-rc.1` once this merges.
-- The rc goes on the owner's M1 (with the owner's OK) and on the Ubuntu, Arch and CachyOS VMs.
-- Then the docs, the guide page and 0.21.0.
+- The owner merges the release pull request and tags `v0.21.0`.
+- The guide (devid-site#23, roadmap dated 26 November 2026) merges once the release is out.
+- Then Phase 15, N1.
