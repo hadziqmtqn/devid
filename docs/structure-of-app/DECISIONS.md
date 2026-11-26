@@ -45,7 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
-| D-063 | 2026-11-25 | accepted 2026-11-25 (Phase 15; builds on D-035, D-036, D-054 and D-061) | `devid new` creates projects with each framework's official tool: blank PHP, Laravel and its starter kits, WordPress (WP-CLI, a Devid MySQL account), Symfony, CodeIgniter 4, static, and Node.js (Vite's React, Vue, Svelte and vanilla, Next.js, Nuxt, SvelteKit, Astro, an Express API) on the user's own Node; the daemon runs the job, and the project is served at `https://<name>.test` with its database, Mail and dev-server commands set up |
+| D-063 | 2026-11-25 | accepted 2026-11-25 (Phase 15; builds on D-035, D-036, D-054 and D-061); N1 done 2026-11-26 | `devid new` creates projects with each framework's official tool: blank PHP, Laravel and its starter kits, WordPress (WP-CLI, a Devid MySQL account), Symfony, CodeIgniter 4, static, and Node.js (Vite's React, Vue, Svelte and vanilla, Next.js, Nuxt, SvelteKit, Astro, an Express API) on the user's own Node; the daemon runs the job, and the project is served at `https://<name>.test` with its database, Mail and dev-server commands set up |
 | D-062 | 2026-11-25 | accepted 2026-11-25 (amends D-009); done in 0.20.1 2026-11-25 | PHP 8.6 joins 8.3, 8.4 and 8.5 in devid 0.20.1, built with static-php-cli 2.8.5 plus small fixes for 8.6 only, Xdebug 3.6.0alpha1, phpredis 6.4.0RC1 and pcov's fix commit; 8.3 stays until 2027-12-31; 8.5 stays the default until Xdebug 3.6.0 is stable and the catalog builds for 8.6, which has imagick, ldap and mongodb so far |
 | D-061 | 2026-11-25 | accepted 2026-11-25 (Phase 14; supersedes what D-006 left, builds on D-058 and D-060); D2 and D3 in 0.20.1, off by default; done in 0.21.0 2026-11-26 | Devid runs D-058's MySQL, PostgreSQL and MongoDB: one server per engine under the daemon, on 127.0.0.1 at the usual port or the next free one, data in `~/.devid/data` that `uninstall --purge` keeps, accounts with generated passwords that one command creates or resets, the main MySQL and PostgreSQL account without a password, and `devid db` in the CLI, the TUI and the app |
 | D-060 | 2026-11-24 | accepted 2026-11-24 (an order; D-035 stands) | After Phase 13, the next phase wires D-058's databases into Devid; Node and Bun runtimes come later, in a phase of their own |
@@ -1317,4 +1317,12 @@ See ARCHITECTURE, "PHP runtime".
   - more frameworks;
   - deploying.
 - **Plan:** `docs/roadmap/phase-15.md`, milestones N1 to N5, towards 0.22.0, after Phase 14.
-- **Status:** accepted on 2026-11-25. N1, the spike, starts after Phase 14.
+- **N1 (2026-11-26):** every official tool ran without prompts on the owner's M1 and the Ubuntu VM. D-063 stands, and N1 settles details for N2 and N3 (`phase-15.md`, "N1 results"):
+  - **Node templates:** Devid runs each tool without its own install step, then the package manager itself, since create-astro exited 0 after a failed `npm install`. Next.js, Astro and Nuxt make no Git repository.
+  - **Node minimums:** each template's minimum is its framework's `engines.node`, read when `devid new` runs. Astro needs 22.23.4, Nuxt 22.22.3, and Laravel's starter kits 22.18, for Vite+.
+  - **Laravel's starter kits** come from each kit's `dev-main` with `--stability=dev`, as Laravel's installer takes them. They run `npm install` and a build inside `create-project`.
+  - **Symfony's web app** is made without Docker files (`extra.symfony.docker` set to `false`). Devid writes `DATABASE_URL` and `MAILER_DSN` to `.env.local`. Whether Symfony gets `--db` is the owner's call in N2.
+  - **WordPress:**
+    - `wp core download`'s default `.tar.gz` loses 46 long file names in WordPress 7.1 when WP-CLI 2.12.0 unpacks it, so Devid passes the zip from wordpress.org's version API and runs `wp core verify-checksums` after it;
+    - `wp` runs without PHP 8.5's deprecation notices.
+- **Status:** accepted on 2026-11-25. N1 done on 2026-11-26.
