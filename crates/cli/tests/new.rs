@@ -74,14 +74,23 @@ fn new_projects_from_the_php_templates() {
 
     // The list, and the checks made before anything is written.
     let list = ok(&home, &["new", "--list"]);
-    for t in ["laravel", "wordpress", "symfony", "codeigniter", "static", "--kit react, vue, svelte, livewire"] {
+    for t in [
+        "laravel",
+        "wordpress",
+        "symfony",
+        "codeigniter",
+        "static",
+        "--kit react, vue, svelte, livewire",
+        "next",
+        "express",
+    ] {
         assert!(list.contains(t), "{t} in {list}");
     }
     assert!(fails(&home, &["new", "php", "blog"]).contains("no parked folder"));
     ok(&home, &["park", &s(&sites)]);
     assert!(fails(&home, &["new", "php", "1blog"]).contains("not a project name"));
     assert!(fails(&home, &["new", "rails", "blog"]).contains("no template"));
-    assert!(fails(&home, &["new", "next", "blog"]).contains("later version"));
+    assert!(fails(&home, &["new", "next", "blog", "--php", "8.5"]).contains("uses no PHP"));
     assert!(fails(&home, &["new", "laravel", "blog", "--db", "mongodb"]).contains("sqlite, mysql, pgsql"));
     assert!(fails(&home, &["new", "symfony", "blog", "--kit", "skeleton", "--db", "mysql"]).contains("skeleton"));
     assert!(fails(&home, &["new", "laravel", "blog", "--php", "8.4"]).contains("PHP 8.4 is not installed"));
@@ -153,6 +162,82 @@ fn new_projects_from_the_php_templates() {
     let progress = request_json(&home, r#"{"cmd":"new_project_progress"}"#)["progress"].clone();
     assert!(progress["error"].is_string());
     assert!(progress["steps"].as_array().unwrap().iter().any(|s| s["state"] == "failed"), "{progress}");
+
+    daemon.stop();
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// Node, npm and npx in `<DEVID_HOME>/bin`, which comes first on the PATH Devid gives tools: the
+/// create tools make a package.json like the framework's, `npm install` a node_modules folder,
+/// and `npm view` answers with Vite's `engines.node`. `<DEVID_HOME>/node-version` sets the Node.
+const FAKE_NODE: &str = "#!/bin/sh\ncat \"$DEVID_HOME/node-version\" 2>/dev/null || echo v24.22.3\n";
+const FAKE_NPM: &str = r#"#!/bin/sh
+echo "$(basename "$0") $*" >> "$DEVID_HOME/calls"
+case "$1" in
+  view) echo '^20.19.0 || >=22.12.0' ;;
+  install) mkdir -p node_modules ;;
+  create) mkdir -p "$3"; echo '{"scripts": {"dev": "vite"}, "devDependencies": {"vite": "^8"}}' > "$3/package.json" ;;
+  --yes) mkdir -p "$3"; echo '{"scripts": {"dev": "next dev"}, "dependencies": {"next": "16"}}' > "$3/package.json" ;;
+esac
+exit 0
+"#;
+
+#[test]
+fn new_node_projects_are_proxied_and_start_on_demand() {
+    let root = temp_root("devid-new-node-it");
+    let home = root.join("home");
+    let sites = root.join("sites");
+    fs::create_dir_all(home.join("bin")).unwrap();
+    fs::create_dir_all(&sites).unwrap();
+    for (name, body) in [("node", FAKE_NODE), ("npm", FAKE_NPM), ("npx", FAKE_NPM)] {
+        fs::write(home.join("bin").join(name), body).unwrap();
+        fs::set_permissions(home.join("bin").join(name), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let s = |p: &Path| p.to_str().unwrap().to_string();
+    let daemon = start_daemon_env(&home, &[("SHELL", "/bin/sh")]);
+    ok(&home, &["park", &s(&sites)]);
+
+    // Vite's React: created without installing or starting, then npm install; a proxy site whose
+    // first visit starts `dev` on its own port.
+    let out = ok(&home, &["new", "react", "web"]);
+    assert!(out.contains("web is ready") && out.contains("dev      port"), "{out}");
+    let calls = fs::read_to_string(home.join("calls")).unwrap();
+    assert!(calls.contains("npm view vite engines.node"), "{calls}");
+    assert!(
+        calls.contains("npm create vite@latest web -- --template react-ts --no-interactive --no-immediate"),
+        "{calls}"
+    );
+    assert!(calls.contains("npm install"), "{calls}");
+    assert!(sites.join("web/node_modules").is_dir());
+    let full = request_json(&home, r#"{"cmd":"sites"}"#);
+    let web = site(&full["sites"], "web");
+    assert_eq!(web["preset"], "vite");
+    assert_eq!(web["mode"], "proxy");
+    assert!(web["upstream"].as_u64().unwrap() >= 5173, "{web}");
+    assert!(web["commands"].to_string().contains("npm run dev -- --port $PORT --strictPort"), "{web}");
+    assert_eq!(web["app"]["on_demand"], "dev", "{web}");
+
+    // Next.js gets its options and another port than any site's.
+    ok(&home, &["new", "next", "shop"]);
+    let calls = fs::read_to_string(home.join("calls")).unwrap();
+    assert!(calls.contains("npx --yes create-next-app@latest shop --yes"), "{calls}");
+    assert!(calls.contains("--skip-install --disable-git"), "{calls}");
+    let full = request_json(&home, r#"{"cmd":"sites"}"#);
+    let (shop, web) = (site(&full["sites"], "shop"), site(&full["sites"], "web"));
+    assert_eq!(shop["preset"], "next");
+    assert_ne!(shop["upstream"], web["upstream"]);
+
+    // Express: Devid's own server.js and package.json, and `npm install express`.
+    ok(&home, &["new", "express", "api"]);
+    assert!(fs::read_to_string(sites.join("api/server.js")).unwrap().contains("process.env.PORT"));
+    assert!(fs::read_to_string(sites.join("api/package.json")).unwrap().contains("node --watch server.js"));
+    assert!(fs::read_to_string(home.join("calls")).unwrap().contains("npm install express"));
+
+    // A Node.js older than the framework's engines stops the job before anything is created.
+    fs::write(home.join("node-version"), "v20.0.0\n").unwrap();
+    let err = fails(&home, &["new", "vue", "old"]);
+    assert!(err.contains("vite needs Node.js ^20.19.0 || >=22.12.0; this is 20.0.0"), "{err}");
+    assert!(!sites.join("old").exists());
 
     daemon.stop();
     fs::remove_dir_all(&root).unwrap();

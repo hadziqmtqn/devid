@@ -162,7 +162,8 @@ enum Command {
     /// Make a project with its framework's own tool (Laravel, WordPress, Symfony…) and serve it at
     /// <name>.test. With no template, or --list: the templates and what each needs
     New {
-        /// php, laravel, wordpress, symfony, codeigniter or static
+        /// php, laravel, wordpress, symfony, codeigniter, static, react, vue, svelte, vite, next, nuxt,
+        /// sveltekit, astro or express
         template: Option<String>,
         /// The project's name: its folder, and <name>.test
         name: Option<String>,
@@ -1612,7 +1613,7 @@ fn print_templates(list: &serde_json::Value) {
             println!("  {:<12} {:<14} ! {}", "", "", s(limit));
         }
     }
-    println!("Node.js templates (Vite, Next.js, Nuxt, SvelteKit, Astro, Express) come in a later version.");
+    println!("The Node.js templates use your own Node (nvm's default) and npm.");
 }
 
 struct NewArgs {
@@ -1659,43 +1660,17 @@ fn new_project(paths: &Paths, a: NewArgs) -> Result<(), String> {
         }
     }
     let req = Request::NewProject { template: a.template, name: a.name, path, php: a.php, db: a.db, kit: a.kit };
-    let worker = {
-        let paths = paths.clone();
-        std::thread::spawn(move || request(&paths, &req))
-    };
-    // Each step once, as the job reaches it.
-    let mut shown = 0;
-    let mut print_steps = |progress: &serde_json::Value| {
-        let steps = progress["steps"].as_array().map(Vec::as_slice).unwrap_or_default();
-        for step in steps.iter().skip(shown) {
-            if step["state"] == "pending" {
-                break;
-            }
-            println!("  → {}", step["label"].as_str().unwrap_or("?"));
-            shown += 1;
-        }
-    };
-    // Only this run's job: the last one's steps stay in the daemon until a new job starts.
-    let mut started = false;
-    while !worker.is_finished() {
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        if let Ok(v) = request(paths, &Request::NewProjectProgress)
-            && v["progress"].is_object()
-            && (started || v["progress"]["done"] == false)
-        {
-            started = true;
-            print_steps(&v["progress"]);
-        }
-    }
-    let reply = worker.join().map_err(|_| "the request thread panicked".to_string())?;
-    if started && let Ok(v) = request(paths, &Request::NewProjectProgress) {
-        print_steps(&v["progress"]);
-    }
+    let reply = new_with_progress(paths, req, |label| println!("  → {label}"));
     let v = reply?;
     let s = |v: &serde_json::Value| v.as_str().unwrap_or("?").to_string();
     println!("\n{} is ready: {}", s(&v["name"]), s(&v["url"]));
     println!("  folder   {}", s(&v["path"]));
-    println!("  PHP      {}", s(&v["php"]));
+    if v["php"].is_string() {
+        println!("  PHP      {}", s(&v["php"]));
+    }
+    if let Some(port) = v["port"].as_u64() {
+        println!("  dev      port {port}, started by the site's first visit (`devid cmd` in the folder)");
+    }
     if v["account"].is_object() {
         let acc = &v["account"];
         println!(
@@ -1726,6 +1701,46 @@ fn new_project(paths: &Paths, a: NewArgs) -> Result<(), String> {
             .map_err(|e| format!("opening the browser: {e}"))?;
     }
     Ok(())
+}
+
+/// Send `NewProject` from another thread and call `on_step` with each step's label once, as the job
+/// reaches it (`NewProjectProgress`), until the daemon replies. Shared by the CLI and the TUI.
+pub fn new_with_progress(
+    paths: &Paths,
+    req: Request,
+    mut on_step: impl FnMut(&str),
+) -> Result<serde_json::Value, String> {
+    let worker = {
+        let paths = paths.clone();
+        std::thread::spawn(move || request(&paths, &req))
+    };
+    let mut shown = 0;
+    let mut report = |progress: &serde_json::Value| {
+        for step in progress["steps"].as_array().map(Vec::as_slice).unwrap_or_default().iter().skip(shown) {
+            if step["state"] == "pending" {
+                break;
+            }
+            on_step(step["label"].as_str().unwrap_or("?"));
+            shown += 1;
+        }
+    };
+    // Only this run's job: the last one's steps stay in the daemon until a new job starts.
+    let mut started = false;
+    while !worker.is_finished() {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if let Ok(v) = request(paths, &Request::NewProjectProgress)
+            && v["progress"].is_object()
+            && (started || v["progress"]["done"] == false)
+        {
+            started = true;
+            report(&v["progress"]);
+        }
+    }
+    let reply = worker.join().map_err(|_| "the request thread panicked".to_string())?;
+    if started && let Ok(v) = request(paths, &Request::NewProjectProgress) {
+        report(&v["progress"]);
+    }
+    reply
 }
 
 /// One line for a running `PhpExtInstall` (`PhpExtProgress`), e.g. "installing 2/3 imagick… 52%".

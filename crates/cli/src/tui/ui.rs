@@ -1,7 +1,9 @@
 //! Rendering. D-017: the terminal's 16 colors, used only for meaning; every state also has a
 //! symbol and text; NO_COLOR drops colors entirely (selection still shows through REVERSED).
 
-use super::app::{AccountsView, App, ExtView, Focus, InputFor, Mode, Page, PickFor, Secret, human_size};
+use super::app::{
+    AccountsView, App, ExtView, Focus, InputFor, Mode, NewField, NewView, Page, PickFor, Secret, human_size,
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -473,7 +475,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         None => {
             let keys = match (app.page, app.focus) {
                 (Page::Sites, Focus::Page) => {
-                    " enter actions · a link folder · p park folder · U unpark · I unignore · tab sidebar · ? help · q quit"
+                    " enter actions · n new project · a link folder · p park folder · U unpark · I unignore · ? help · q quit"
                 }
                 (Page::Server, _) => {
                     " enter actions (use, install, restart, stop/start, view config) · S stop all · A start all · ? help · q quit"
@@ -492,7 +494,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                     " enter actions (extensions, default, Xdebug, pcov, php.ini, restart, install) · u check updates · U update · ? help · q quit"
                 }
                 (Page::Sites, Focus::Sidebar) => {
-                    " ↑↓ pages · enter open · a link folder · p park folder · U unpark · I unignore · ? help · q quit"
+                    " ↑↓ pages · enter open · n new project · a link · p park · U unpark · I unignore · ? help · q quit"
                 }
             };
             Line::styled(keys, Style::default().add_modifier(Modifier::DIM))
@@ -627,6 +629,15 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
             );
         }
         Mode::Secret(secret) => draw_secret(frame, secret),
+        Mode::NewProject(v) => draw_new(frame, app, v),
+        Mode::NewDone { title, url, lines } => {
+            let mut body = vec![Line::styled(format!(" {url}"), ok(app).add_modifier(Modifier::BOLD)), Line::raw("")];
+            body.extend(lines.iter().map(|l| Line::raw(format!(" {l}"))));
+            body.push(Line::raw(""));
+            body.push(hint(" o open in the browser · c copy · esc close"));
+            let width = lines.iter().map(|l| l.chars().count() as u16 + 4).max().unwrap_or(60).clamp(60, 110);
+            popup(frame, width, body.len() as u16 + 2, title, body);
+        }
         Mode::ConfirmExt { question, .. } => {
             popup(
                 frame,
@@ -719,6 +730,53 @@ fn draw_accounts(frame: &mut Frame, v: &AccountsView) {
 }
 
 /// A password Devid just set, shown with the account's `.env` lines.
+/// The New project wizard (D-063): one row per field, the selected one highlighted.
+fn draw_new(frame: &mut Frame, app: &App, v: &NewView) {
+    let hint = |t: String| Line::styled(t, Style::default().add_modifier(Modifier::DIM));
+    let t = v.template();
+    let row = |field: NewField, label: &str, value: String| {
+        let line = format!(" {label:<10} {value}");
+        if v.field == field { Line::styled(line, selected()) } else { Line::raw(line) }
+    };
+    let name = if v.field == NewField::Name { format!("{}▏", v.name) } else { v.name.clone() };
+    let mut lines = vec![row(NewField::Template, "Template", format!("‹ {} ›  ({})", t.label, t.key))];
+    lines.push(row(NewField::Name, "Name", if name.is_empty() { "type a name".into() } else { name }));
+    if v.fields().contains(&NewField::Kit) {
+        let kit = match (v.kit(), t.key) {
+            ("", "symfony") => "web app",
+            ("", _) => "plain",
+            (k, _) => k,
+        };
+        lines.push(row(NewField::Kit, "Kit", format!("‹ {kit} ›")));
+    }
+    if let Some(db) = v.db() {
+        lines.push(row(NewField::Db, "Database", format!("‹ {db} ›")));
+    }
+    lines.push(Line::raw(""));
+    lines.push(row(NewField::Create, "", "[ Create ]".into()));
+    lines.push(Line::raw(""));
+    let host = if v.name.is_empty() { "<name>".to_string() } else { v.name.clone() };
+    let tld = app.status.as_ref().ok().and_then(|s| s["tld"].as_str()).unwrap_or("test");
+    let place = match app.parked.first() {
+        Some(p) => format!(" Made in {p}/{host}, served at https://{host}.{tld}"),
+        None => " No parked folder yet: park one first (p), or use `devid new … --path`".into(),
+    };
+    lines.push(hint(place));
+    let about = match (t.node.is_some(), t.key) {
+        (true, _) => " Your Node (nvm) and npm; the dev server starts on the site's first visit",
+        (_, "wordpress") => " A MySQL account from Devid; the admin password is shown once",
+        (_, "laravel") if !v.kit().is_empty() => " A starter kit needs Node.js 22.18+, 24.11+ or 26+",
+        (_, "laravel" | "symfony") => " MySQL and PostgreSQL get a Devid account named after the project",
+        _ => " The project opens as soon as it is made",
+    };
+    lines.push(hint(about.into()));
+    if let Some(e) = &v.error {
+        lines.push(Line::styled(format!(" {}", e.lines().next().unwrap_or_default()), bad(app)));
+    }
+    lines.push(hint(" ↑↓ field · ←→ change · type the name · enter on Create · esc cancel".into()));
+    popup(frame, 78, lines.len() as u16 + 2, "New project", lines);
+}
+
 fn draw_secret(frame: &mut Frame, secret: &Secret) {
     let hint = |t: String| Line::styled(t, Style::default().add_modifier(Modifier::DIM));
     let mut lines = vec![
@@ -745,7 +803,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::raw("r                refresh now (also every 2 s)"),
         Line::raw("q  esc  ctrl-c   quit"),
         Line::raw("Sites: enter = actions (open, Terminal, copy, PHP, remove, unlink)"),
-        Line::raw("       a link · p park · U unpark · I unignore"),
+        Line::raw("       n new project · a link · p park · U unpark · I unignore"),
         Line::raw("PHP:   enter = actions · u check updates · U update"),
         Line::raw("       Extensions…: space tick · enter install · r remove"),
         Line::raw("Server: enter = actions · S stop all · A start all"),
