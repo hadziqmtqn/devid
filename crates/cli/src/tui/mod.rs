@@ -174,7 +174,8 @@ fn perform(effect: Effect, paths: &Paths) -> (String, bool) {
         | Effect::LoadExtensions(_)
         | Effect::ExtInstall { .. }
         | Effect::LoadAccounts(_)
-        | Effect::DbAccount(_) => ("internal: handled by the loop".into(), true),
+        | Effect::DbAccount(_)
+        | Effect::NewProject(_) => ("internal: handled by the loop".into(), true),
         Effect::DbCopy { engine, name, password } => match request(paths, &Request::DbEnv { engine, name }) {
             Ok(v) => {
                 let name = v["name"].as_str().unwrap_or("?");
@@ -286,6 +287,28 @@ pub fn run(paths: &Paths) -> Result<Option<Vec<String>>, String> {
                         }
                         last = None;
                     }
+                    Action::Do(Effect::NewProject(view)) => {
+                        // The job runs in the daemon; its steps show on the message line until it ends.
+                        app.message = Some((format!("⏳ making {}…", view.name), false));
+                        terminal.draw(|frame| ui::draw(frame, &app))?;
+                        let reply = crate::new_with_progress(paths, view.request(), |label| {
+                            app.message = Some((format!("⏳ {label}"), false));
+                            let _ = terminal.draw(|frame| ui::draw(frame, &app));
+                        });
+                        match reply {
+                            Ok(v) => {
+                                app.message = None;
+                                app.open_new_done(&v);
+                            }
+                            Err(e) => {
+                                let mut view = *view;
+                                app.message = Some((e.lines().next().unwrap_or("failed").to_string(), true));
+                                view.error = Some(e);
+                                app.mode = app::Mode::NewProject(view);
+                            }
+                        }
+                        last = None;
+                    }
                     Action::Do(Effect::LoadAccounts(engine)) => {
                         app.message = Some(("⏳ loading the accounts…".into(), false));
                         terminal.draw(|frame| ui::draw(frame, &app))?;
@@ -394,6 +417,19 @@ mod tests {
             json!({"name": "erdbpro-saas", "url": "https://erdbpro-saas.test", "path": "/p/erdbpro-saas", "php": "8.5", "php_installed": true, "isolated": false}),
             json!({"name": "legacy", "url": "https://legacy.test", "path": "/p/legacy", "php": "8.3", "php_installed": false, "isolated": true}),
         ]
+    }
+
+    #[test]
+    fn new_project_wizard_draws_its_fields() {
+        let mut app = App::new(true);
+        app.parked = vec!["/Users/me/Sites".into()];
+        app.mode = super::app::Mode::NewProject(super::app::NewView { name: "shop".into(), ..Default::default() });
+        let (text, _) = render(&app);
+        for want in
+            ["New project", "‹ Laravel ›", "shop", "‹ plain ›", "‹ sqlite ›", "[ Create ]", "/Users/me/Sites/shop"]
+        {
+            assert!(text.contains(want), "{want} in\n{text}");
+        }
     }
 
     fn render(app: &App) -> (String, ratatui::buffer::Buffer) {

@@ -1,7 +1,11 @@
 //! TUI state and key handling. Pure: no terminal, no daemon, no side effects. Actions come out
 //! as `Effect`s that mod.rs carries out, so everything here is tested directly.
 
-use devid_daemon::{protocol::Request, sites};
+use devid_daemon::{
+    newproject::{self, TEMPLATES},
+    protocol::Request,
+    sites,
+};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 
@@ -91,6 +95,95 @@ pub enum Effect {
         text: String,
         what: String,
     },
+    /// D-063: make the project the wizard describes, with its steps on the message line; then show
+    /// what was made, or the wizard again with the error.
+    NewProject(Box<NewView>),
+}
+
+/// A field of the New project wizard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewField {
+    Template,
+    Name,
+    Kit,
+    Db,
+    Create,
+}
+
+/// The New project wizard (D-063, `n` on the Sites page): a template from `newproject::TEMPLATES`,
+/// a name, and the template's kit and database; indexes into the template's lists.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewView {
+    pub template: usize,
+    pub name: String,
+    pub kit: usize,
+    pub db: usize,
+    pub field: NewField,
+    pub error: Option<String>,
+}
+
+impl Default for NewView {
+    fn default() -> Self {
+        let laravel = TEMPLATES.iter().position(|t| t.key == "laravel").unwrap_or(0);
+        Self { template: laravel, name: String::new(), kit: 0, db: 0, field: NewField::Template, error: None }
+    }
+}
+
+impl NewView {
+    pub fn template(&self) -> &'static newproject::Template {
+        &TEMPLATES[self.template % TEMPLATES.len()]
+    }
+
+    /// The kit shown, "" for the template's default.
+    pub fn kit(&self) -> &'static str {
+        self.template().kits.get(self.kit).copied().unwrap_or("")
+    }
+
+    /// The database shown, if the template offers a choice.
+    pub fn db(&self) -> Option<&'static str> {
+        let t = self.template();
+        let skeleton = t.key == "symfony" && self.kit() == "skeleton";
+        (t.dbs.len() > 1 && !skeleton).then(|| t.dbs.get(self.db).copied().unwrap_or(t.dbs[0]))
+    }
+
+    /// The fields this template has, in order.
+    pub fn fields(&self) -> Vec<NewField> {
+        let mut fields = vec![NewField::Template, NewField::Name];
+        if !self.template().kits.is_empty() {
+            fields.push(NewField::Kit);
+        }
+        if self.db().is_some() {
+            fields.push(NewField::Db);
+        }
+        fields.push(NewField::Create);
+        fields
+    }
+
+    fn cycle(&mut self, delta: isize) {
+        let step = |i: usize, n: usize| (i as isize + delta).rem_euclid(n.max(1) as isize) as usize;
+        match self.field {
+            NewField::Template => {
+                self.template = step(self.template, TEMPLATES.len());
+                (self.kit, self.db) = (0, 0);
+            }
+            NewField::Kit => self.kit = step(self.kit, self.template().kits.len()),
+            NewField::Db => self.db = step(self.db, self.template().dbs.len()),
+            NewField::Name | NewField::Create => {}
+        }
+    }
+
+    /// The request this wizard sends; the template's defaults are left out, as the CLI does.
+    pub fn request(&self) -> Request {
+        let t = self.template();
+        Request::NewProject {
+            template: t.key.into(),
+            name: self.name.clone(),
+            path: None,
+            php: None,
+            db: self.db().filter(|d| Some(*d) != t.dbs.first().copied()).map(str::to_string),
+            kit: Some(self.kit()).filter(|k| !k.is_empty()).map(str::to_string),
+        }
+    }
 }
 
 /// One account in the Accounts view (D-061).
@@ -284,6 +377,14 @@ pub enum Mode {
     },
     /// A password Devid just set; closing goes back to the Accounts view.
     Secret(Secret),
+    /// The New project wizard.
+    NewProject(NewView),
+    /// What `devid new` made: the site's URL and the lines the CLI prints.
+    NewDone {
+        title: String,
+        url: String,
+        lines: Vec<String>,
+    },
     /// An install or remove from the Extensions view waiting for y/n; no goes back to the view.
     ConfirmExt {
         question: String,
@@ -808,6 +909,23 @@ impl App {
                 }
             },
             Mode::Extensions(view) => self.extensions_key(key, view),
+            Mode::NewProject(view) => self.new_key(key, view),
+            Mode::NewDone { title, url, lines } => match key.code {
+                KeyCode::Char('o') => {
+                    self.mode = Mode::NewDone { title, url: url.clone(), lines };
+                    Action::Do(Effect::OpenUrl(url))
+                }
+                KeyCode::Char('c') => {
+                    let text = format!("{url}\n{}\n", lines.join("\n"));
+                    self.mode = Mode::NewDone { title: title.clone(), url, lines };
+                    Action::Do(Effect::CopyQuiet { text, what: format!("{title}'s details") })
+                }
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => Action::Refresh,
+                _ => {
+                    self.mode = Mode::NewDone { title, url, lines };
+                    Action::None
+                }
+            },
             Mode::Accounts(view) => self.accounts_key(key, view),
             Mode::ConfirmAccount { question, request, done, back } => match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => match *request {
@@ -997,6 +1115,7 @@ impl App {
                     done: "updated".into(),
                 };
             }
+            KeyCode::Char('n') if self.page == Page::Sites => self.mode = Mode::NewProject(NewView::default()),
             KeyCode::Char('a') if self.page == Page::Sites => {
                 self.mode = Mode::Input { purpose: InputFor::Link, text: String::new() };
             }
@@ -1183,6 +1302,85 @@ impl App {
 
     /// Keys in the Extensions view: space ticks a catalog row, enter on the button installs the ticked
     /// ones (after a confirmation), r removes the installed row (after a confirmation).
+    /// Keys in the New project wizard: ↑↓ (tab) move between fields, ←→ change a choice, letters
+    /// type the name, enter on Create makes the project.
+    fn new_key(&mut self, key: KeyEvent, mut v: NewView) -> Action {
+        let fields = v.fields();
+        let pos = fields.iter().position(|f| *f == v.field).unwrap_or(0);
+        let next = fields[(pos + 1).min(fields.len() - 1)];
+        match key.code {
+            KeyCode::Esc => return Action::None,
+            KeyCode::Up | KeyCode::BackTab => v.field = fields[pos.saturating_sub(1)],
+            KeyCode::Down | KeyCode::Tab => v.field = next,
+            KeyCode::Left if v.field != NewField::Name => v.cycle(-1),
+            KeyCode::Right if v.field != NewField::Name => v.cycle(1),
+            KeyCode::Enter if v.field == NewField::Create => match newproject::check_name(&v.name) {
+                Ok(()) => return Action::Do(Effect::NewProject(Box::new(v))),
+                Err(e) => {
+                    v.error = Some(e);
+                    v.field = NewField::Name;
+                }
+            },
+            KeyCode::Enter => v.field = next,
+            KeyCode::Backspace if v.field == NewField::Name => {
+                v.name.pop();
+            }
+            KeyCode::Char(c) if v.field == NewField::Name => {
+                let c = c.to_ascii_lowercase();
+                if (c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') && v.name.len() < 32 {
+                    v.name.push(c);
+                    v.error = None;
+                }
+            }
+            KeyCode::Char('h') if v.field != NewField::Name => v.cycle(-1),
+            KeyCode::Char('l') if v.field != NewField::Name => v.cycle(1),
+            KeyCode::Char('k') if v.field != NewField::Name => v.field = fields[pos.saturating_sub(1)],
+            KeyCode::Char('j') if v.field != NewField::Name => v.field = next,
+            _ => {}
+        }
+        // A kit that hides the database (Symfony's skeleton) moves focus off it.
+        if !v.fields().contains(&v.field) {
+            v.field = NewField::Create;
+        }
+        self.mode = Mode::NewProject(v);
+        Action::None
+    }
+
+    /// Show what `NewProject` made, as the CLI prints it.
+    pub fn open_new_done(&mut self, v: &Value) {
+        let mut lines = vec![format!("folder   {}", s(&v["path"]))];
+        if v["php"].is_string() {
+            lines.push(format!("PHP      {}", s(&v["php"])));
+        }
+        if let Some(port) = v["port"].as_u64() {
+            lines.push(format!("dev      port {port}, started by the site's first visit"));
+        }
+        if v["account"].is_object() {
+            let a = &v["account"];
+            lines.push(format!(
+                "database {} account {}, password {}",
+                s(&a["label"]),
+                s(&a["name"]),
+                s(&a["password"])
+            ));
+        }
+        if v["admin"].is_object() {
+            lines.push(format!(
+                "sign in  {} / {}  (shown once: Devid does not keep it)",
+                s(&v["admin"]["user"]),
+                s(&v["admin"]["password"])
+            ));
+        }
+        for c in v["commands"].as_array().into_iter().flatten() {
+            lines.push(format!("command  {}: {}", s(&c["name"]), s(&c["run"])));
+        }
+        for note in v["notes"].as_array().into_iter().flatten() {
+            lines.push(format!("note     {}", s(note)));
+        }
+        lines.push(format!("log      {}", s(&v["log"])));
+        self.mode = Mode::NewDone { title: format!("{} is ready", s(&v["name"])), url: s(&v["url"]), lines };
+    }
+
     fn extensions_key(&mut self, key: KeyEvent, mut v: ExtView) -> Action {
         self.message = None;
         let n = v.rows.len();
@@ -2212,6 +2410,81 @@ mod tests {
         ));
         assert!(matches!(app.handle_key(ch('y')), Action::Do(Effect::CopyQuiet { text, .. }) if text == generated));
         assert!(matches!(app.handle_key(key(KeyCode::Esc)), Action::Do(Effect::LoadAccounts(_))));
+    }
+
+    #[test]
+    fn new_project_wizard() {
+        let mut app = with_sites();
+        app.handle_key(ch('n'));
+        let Mode::NewProject(v) = &app.mode else { panic!("wizard opens on n") };
+        assert_eq!(v.template().key, "laravel");
+        assert_eq!(v.fields(), [NewField::Template, NewField::Name, NewField::Kit, NewField::Db, NewField::Create]);
+        // An empty name is refused at Create, and focus goes to the name.
+        for _ in 0..4 {
+            app.handle_key(key(KeyCode::Down));
+        }
+        app.handle_key(key(KeyCode::Enter));
+        let Mode::NewProject(v) = &app.mode else { panic!("still open") };
+        assert!(v.error.as_deref().is_some_and(|e| e.contains("not a project name")));
+        assert_eq!(v.field, NewField::Name);
+        for c in "My-Shop!".chars() {
+            app.handle_key(ch(c));
+        }
+        app.handle_key(key(KeyCode::Down)); // kit
+        app.handle_key(key(KeyCode::Right)); // react
+        app.handle_key(key(KeyCode::Down)); // db
+        app.handle_key(key(KeyCode::Right)); // mysql
+        app.handle_key(key(KeyCode::Down));
+        let Action::Do(Effect::NewProject(v)) = app.handle_key(key(KeyCode::Enter)) else { panic!("create") };
+        assert_eq!(
+            v.request(),
+            Request::NewProject {
+                template: "laravel".into(),
+                name: "my-shop".into(),
+                path: None,
+                php: None,
+                db: Some("mysql".into()),
+                kit: Some("react".into()),
+            }
+        );
+        // Symfony's skeleton has no database field; Node.js templates have neither.
+        let mut v =
+            NewView { template: TEMPLATES.iter().position(|t| t.key == "symfony").unwrap(), ..Default::default() };
+        assert!(v.fields().contains(&NewField::Db));
+        v.kit = 1;
+        assert!(!v.fields().contains(&NewField::Db) && v.db().is_none());
+        assert_eq!(
+            v.request(),
+            Request::NewProject {
+                template: "symfony".into(),
+                name: String::new(),
+                path: None,
+                php: None,
+                db: None,
+                kit: Some("skeleton".into()),
+            }
+        );
+        let v = NewView { template: TEMPLATES.iter().position(|t| t.key == "next").unwrap(), ..Default::default() };
+        assert_eq!(v.fields(), [NewField::Template, NewField::Name, NewField::Create]);
+        // ← on the template wraps around the list; esc closes.
+        let mut app = with_sites();
+        app.handle_key(ch('n'));
+        for _ in 0..TEMPLATES.len() {
+            app.handle_key(key(KeyCode::Left));
+        }
+        let Mode::NewProject(v) = &app.mode else { panic!() };
+        assert_eq!(v.template().key, "laravel");
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+        // What was made, and its keys.
+        app.open_new_done(&serde_json::json!({"name": "shop", "url": "https://shop.test", "path": "/x/shop",
+            "php": "8.5", "port": null, "account": null, "admin": {"user": "admin", "password": "pw"},
+            "commands": [], "notes": [], "log": "/x/new-shop.log"}));
+        let Mode::NewDone { title, lines, .. } = &app.mode else { panic!() };
+        assert_eq!(title, "shop is ready");
+        assert!(lines.iter().any(|l| l.contains("admin / pw")));
+        assert!(matches!(app.handle_key(ch('o')), Action::Do(Effect::OpenUrl(u)) if u == "https://shop.test"));
+        assert!(matches!(app.handle_key(key(KeyCode::Esc)), Action::Refresh));
     }
 
     #[test]

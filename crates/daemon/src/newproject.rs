@@ -24,31 +24,145 @@ pub struct Template {
     pub kits: &'static [&'static str],
     /// What `--db` takes; the first is the default. Empty: no database.
     pub dbs: &'static [&'static str],
+    /// A Node.js template (N3): served through the proxy from its dev server.
+    pub node: Option<NodeApp>,
 }
 
-pub const TEMPLATES: [Template; 6] = [
-    Template { key: "php", label: "PHP (blank)", kits: &[], dbs: &[] },
-    Template { key: "laravel", label: "Laravel", kits: &["", "react", "vue", "svelte", "livewire"], dbs: DBS },
-    Template { key: "wordpress", label: "WordPress", kits: &[], dbs: &["mysql"] },
-    Template { key: "symfony", label: "Symfony", kits: &["", "skeleton"], dbs: DBS },
-    Template { key: "codeigniter", label: "CodeIgniter 4", kits: &[], dbs: &[] },
-    Template { key: "static", label: "Static HTML", kits: &[], dbs: &[] },
+/// How a Node.js template is served (D-035, D-054): its framework's package on npm (whose
+/// `engines.node` is the Node it needs), the site's preset, the dev server's usual port, and the
+/// command a visit starts. `$PORT` is the site's dev port, which Devid's commands get.
+#[derive(Debug, Clone, Copy)]
+pub struct NodeApp {
+    pub framework: &'static str,
+    pub preset: &'static str,
+    pub port: u16,
+    pub dev: &'static str,
+}
+
+const VITE: NodeApp =
+    NodeApp { framework: "vite", preset: "vite", port: 5173, dev: "npm run dev -- --port $PORT --strictPort" };
+
+pub const TEMPLATES: [Template; 15] = [
+    Template { key: "php", label: "PHP (blank)", kits: &[], dbs: &[], node: None },
+    Template {
+        key: "laravel",
+        label: "Laravel",
+        kits: &["", "react", "vue", "svelte", "livewire"],
+        dbs: DBS,
+        node: None,
+    },
+    Template { key: "wordpress", label: "WordPress", kits: &[], dbs: &["mysql"], node: None },
+    Template { key: "symfony", label: "Symfony", kits: &["", "skeleton"], dbs: DBS, node: None },
+    Template { key: "codeigniter", label: "CodeIgniter 4", kits: &[], dbs: &[], node: None },
+    Template { key: "static", label: "Static HTML", kits: &[], dbs: &[], node: None },
+    Template { key: "react", label: "React (Vite)", kits: &[], dbs: &[], node: Some(VITE) },
+    Template { key: "vue", label: "Vue (Vite)", kits: &[], dbs: &[], node: Some(VITE) },
+    Template { key: "svelte", label: "Svelte (Vite)", kits: &[], dbs: &[], node: Some(VITE) },
+    Template { key: "vite", label: "Vanilla (Vite)", kits: &[], dbs: &[], node: Some(VITE) },
+    Template {
+        key: "next",
+        label: "Next.js",
+        kits: &[],
+        dbs: &[],
+        node: Some(NodeApp { framework: "next", preset: "next", port: 3000, dev: "npm run dev -- -p $PORT" }),
+    },
+    Template {
+        key: "nuxt",
+        label: "Nuxt",
+        kits: &[],
+        dbs: &[],
+        node: Some(NodeApp { framework: "nuxt", preset: "nuxt", port: 3000, dev: "npm run dev -- --port $PORT" }),
+    },
+    Template {
+        key: "sveltekit",
+        label: "SvelteKit",
+        kits: &[],
+        dbs: &[],
+        node: Some(NodeApp { framework: "@sveltejs/kit", ..VITE }),
+    },
+    Template {
+        key: "astro",
+        label: "Astro",
+        kits: &[],
+        dbs: &[],
+        node: Some(NodeApp {
+            framework: "astro",
+            preset: "node",
+            port: 4321,
+            // Astro 7 moves `astro dev` to the background when it detects an AI agent in its
+            // environment; `--ignore-lock` keeps it in the foreground, where Devid stops it.
+            dev: "npm run dev -- --port $PORT --ignore-lock",
+        }),
+    },
+    Template {
+        key: "express",
+        label: "Express API",
+        kits: &[],
+        dbs: &[],
+        node: Some(NodeApp { framework: "express", preset: "node", port: 3000, dev: "npm run dev" }),
+    },
 ];
 
 const DBS: &[&str] = &["sqlite", "mysql", "pgsql"];
 
-/// The Node.js templates come with N3; until then `devid new` names them instead of "unknown".
-const LATER: [&str; 9] = ["react", "vue", "svelte", "vite", "next", "nuxt", "sveltekit", "astro", "express"];
-
 pub fn find(key: &str) -> Result<&'static Template, String> {
-    if let Some(t) = TEMPLATES.iter().find(|t| t.key == key) {
-        return Ok(t);
-    }
-    let known: Vec<&str> = TEMPLATES.iter().map(|t| t.key).collect();
-    match LATER.contains(&key) {
-        true => Err(format!("the {key} template comes in a later version of Devid; today: {}", known.join(", "))),
-        false => Err(format!("no template {key:?}; the templates: {}", known.join(", "))),
-    }
+    TEMPLATES.iter().find(|t| t.key == key).ok_or_else(|| {
+        let known: Vec<&str> = TEMPLATES.iter().map(|t| t.key).collect();
+        format!("no template {key:?}; the templates: {}", known.join(", "))
+    })
+}
+
+/// Whether `v` meets an npm `engines.node` range such as `^20.19.0 || >=22.12.0` or `>= 18`.
+/// Covers what frameworks write: `||`, `^`, `~`, `>=`, `>`, `<=`, `<`, `=` and partial versions.
+pub fn node_satisfies(v: (u32, u32, u32), range: &str) -> bool {
+    let parse = |text: &str| -> Option<(u32, u32, u32, usize)> {
+        let parts: Vec<&str> = text.trim_start_matches('v').split('.').filter(|p| !p.is_empty()).collect();
+        let num =
+            |i: usize| parts.get(i).map_or(Some(0), |p| if *p == "x" || *p == "*" { Some(0) } else { p.parse().ok() });
+        let given = parts.iter().take_while(|p| **p != "x" && **p != "*").count();
+        Some((num(0)?, num(1)?, num(2)?, given))
+    };
+    let next_up = |(a, b, c, given): (u32, u32, u32, usize)| match given {
+        0 => (u32::MAX, 0, 0),
+        1 => (a + 1, 0, 0),
+        2 => (a, b + 1, 0),
+        _ => (a, b, c + 1),
+    };
+    let comparator = |op: &str, ver: &str| -> bool {
+        let Some(p) = parse(ver) else { return false };
+        let low = (p.0, p.1, p.2);
+        match op {
+            ">=" => v >= low,
+            ">" => v > low,
+            "<=" => v <= low,
+            "<" => v < low,
+            "^" => {
+                let high = match p {
+                    (0, 0, _, 3) => (0, 0, p.2 + 1),
+                    (0, _, _, g) if g >= 2 => (0, p.1 + 1, 0),
+                    _ => (p.0 + 1, 0, 0),
+                };
+                v >= low && v < high
+            }
+            "~" => v >= low && v < if p.3 >= 2 { (p.0, p.1 + 1, 0) } else { (p.0 + 1, 0, 0) },
+            _ => v >= low && v < next_up(p),
+        }
+    };
+    range.split("||").any(|clause| {
+        let mut tokens = clause.split_whitespace().peekable();
+        let mut all = true;
+        let mut any = false;
+        while let Some(token) = tokens.next() {
+            let op_len = token.chars().take_while(|c| "<>=^~".contains(*c)).count();
+            let (op, mut ver) = token.split_at(op_len);
+            if ver.is_empty() {
+                ver = tokens.next().unwrap_or_default();
+            }
+            any = true;
+            all &= comparator(if op == "=" { "" } else { op }, ver);
+        }
+        any && all
+    })
 }
 
 /// Laravel's starter kits build with Vite+, which needs Node 22.18+, 24.11+ or 26+ (N1).
@@ -83,6 +197,8 @@ pub struct Options {
     pub url: String,
     /// Mail's SMTP port while Mail is on.
     pub mail: Option<u16>,
+    /// A Node.js template's dev port: a free one from its framework's usual port.
+    pub port: Option<u16>,
 }
 
 /// A project name: a site name (D-011) that also works as a database and account name once `-`
@@ -183,6 +299,11 @@ pub fn steps(o: &Options) -> Vec<&'static str> {
             steps.push("Creating CodeIgniter 4 (composer create-project)");
             steps.push("Setting .env: environment and base URL");
         }
+        t if find(t).is_ok_and(|t| t.node.is_some()) => {
+            steps.push("Checking Node.js");
+            steps.push(node_create_step(t));
+            steps.push("Installing packages (npm install)");
+        }
         "wordpress" => {
             steps.push("Getting WP-CLI");
             steps.push("Making the database account");
@@ -195,6 +316,17 @@ pub fn steps(o: &Options) -> Vec<&'static str> {
     }
     steps.push("Serving the site");
     steps
+}
+
+fn node_create_step(template: &str) -> &'static str {
+    match template {
+        "next" => "Creating the Next.js app (create-next-app)",
+        "nuxt" => "Creating the Nuxt app (npm create nuxt)",
+        "sveltekit" => "Creating the SvelteKit app (sv create)",
+        "astro" => "Creating the Astro site (npm create astro)",
+        "express" => "Writing the Express app",
+        _ => "Creating the Vite project (npm create vite)",
+    }
 }
 
 /// One step's state, for the progress.
@@ -376,6 +508,14 @@ impl Runner {
         let mut all = vec!["-d".into(), "error_reporting=E_ALL & ~E_DEPRECATED".into(), self.wp.display().to_string()];
         all.extend(args.iter().cloned());
         self.run(dir, &self.php, &all)
+    }
+
+    pub fn npm(&self, cwd: &Path, args: &[&str]) -> Result<String, String> {
+        self.run(cwd, Path::new("npm"), &args.iter().map(|a| a.to_string()).collect::<Vec<_>>())
+    }
+
+    pub fn npx(&self, cwd: &Path, args: &[&str]) -> Result<String, String> {
+        self.run(cwd, Path::new("npx"), &args.iter().map(|a| a.to_string()).collect::<Vec<_>>())
     }
 
     /// A line of Devid's own in the log.
@@ -565,11 +705,150 @@ pub fn run(o: &Options, r: &Runner, host: &dyn Host) -> Result<Made, String> {
             fs::write(o.dir.join(".env"), set_env(&template, &pairs, EnvStyle::Spaced)).map_err(|e| e.to_string())?;
         }
         "wordpress" => wordpress(o, r, host, &mut made)?,
+        t if find(t).is_ok_and(|t| t.node.is_some()) => node_project(o, r, host, &mut made)?,
         other => return Err(format!("no template {other:?}")),
     }
     host.step("Serving the site");
     Ok(made)
 }
+
+/// A Node.js project from its framework's own create tool (N1's options), without the tool's own
+/// install or Git repository; then `npm install`, so a failed install stops the job.
+fn node_project(o: &Options, r: &Runner, host: &dyn Host, made: &mut Made) -> Result<(), String> {
+    let app = find(o.template)?.node.ok_or("not a Node.js template")?;
+    let parent = o.dir.parent().ok_or("the project folder has no parent")?.to_path_buf();
+    let folder = o.dir.file_name().map(|f| f.to_string_lossy().into_owned()).ok_or("the project folder has no name")?;
+    host.step("Checking Node.js");
+    let v = r.node(&parent)?;
+    let range = r.npm(&parent, &["view", app.framework, "engines.node"])?.trim().trim_matches('\'').to_string();
+    if !range.is_empty() && !node_satisfies(v, &range) {
+        return Err(format!(
+            "{} needs Node.js {range}; this is {}.{}.{} (`nvm install --lts` gets a newer one)",
+            app.framework, v.0, v.1, v.2
+        ));
+    }
+    host.step(node_create_step(o.template));
+    let f = folder.as_str();
+    match o.template {
+        "next" => r.npx(
+            &parent,
+            &[
+                "--yes",
+                "create-next-app@latest",
+                f,
+                "--yes",
+                "--ts",
+                "--eslint",
+                "--tailwind",
+                "--app",
+                "--import-alias",
+                "@/*",
+                "--use-npm",
+                "--skip-install",
+                "--disable-git",
+            ],
+        )?,
+        "nuxt" => r.npm(
+            &parent,
+            &[
+                "create",
+                "nuxt@latest",
+                f,
+                "--",
+                "--template",
+                "minimal",
+                "--packageManager",
+                "npm",
+                "--no-gitInit",
+                "--no-install",
+                "--modules=",
+            ],
+        )?,
+        "sveltekit" => r.npx(
+            &parent,
+            &[
+                "--yes",
+                "sv@latest",
+                "create",
+                f,
+                "--template",
+                "minimal",
+                "--types",
+                "ts",
+                "--no-add-ons",
+                "--no-install",
+            ],
+        )?,
+        "astro" => r.npm(
+            &parent,
+            &[
+                "create",
+                "astro@latest",
+                f,
+                "--",
+                "--template",
+                "basics",
+                "--yes",
+                "--no-install",
+                "--no-git",
+                "--skip-houston",
+            ],
+        )?,
+        "express" => {
+            fs::create_dir_all(&o.dir).map_err(|e| format!("{}: {e}", o.dir.display()))?;
+            let package = json!({
+                "name": o.name,
+                "version": "0.1.0",
+                "private": true,
+                "type": "module",
+                "scripts": {"dev": "node --watch server.js", "start": "node server.js"},
+            });
+            let package = serde_json::to_string_pretty(&package).map_err(|e| e.to_string())?;
+            fs::write(o.dir.join("package.json"), package + "\n").map_err(|e| e.to_string())?;
+            fs::write(o.dir.join("server.js"), EXPRESS_SERVER).map_err(|e| e.to_string())?;
+            String::new()
+        }
+        vite => {
+            let template = match vite {
+                "vite" => "vanilla-ts".to_string(),
+                other => format!("{other}-ts"),
+            };
+            r.npm(
+                &parent,
+                &["create", "vite@latest", f, "--", "--template", &template, "--no-interactive", "--no-immediate"],
+            )?
+        }
+    };
+    if !o.dir.join("package.json").is_file() {
+        return Err(format!("the create tool made no package.json in {}; see {}", o.dir.display(), r.log.display()));
+    }
+    host.step("Installing packages (npm install)");
+    match o.template {
+        "express" => r.npm(&o.dir, &["install", "express"])?,
+        _ => r.npm(&o.dir, &["install"])?,
+    };
+    made.commands.push(("dev".into(), app.dev.into()));
+    if let Some(port) = o.port {
+        made.notes.push(format!("the first visit starts `{}` on port {port}; it stops when idle", app.dev));
+    }
+    Ok(())
+}
+
+/// The Express API template's server: Devid writes it, since Express has no create tool.
+const EXPRESS_SERVER: &str = r#"import express from 'express';
+
+const app = express();
+app.use(express.json());
+
+app.get('/', (req, res) => {
+  res.json({ message: 'Hello from Express', time: new Date().toISOString() });
+});
+
+const port = Number(process.env.PORT) || 3000;
+app.listen(port, '127.0.0.1', () => {
+  console.log(`Listening on http://127.0.0.1:${port}`);
+});
+"#;
 
 /// The template's database account, made before any tool runs, so a missing server or a taken
 /// name stops the job before it downloads anything. Returns (engine, port, password).
@@ -693,7 +972,10 @@ pub fn templates_json(php_installed: bool, node: Option<(u32, u32, u32)>) -> Val
         .map(|t| {
             let kits: Vec<&str> = t.kits.iter().copied().filter(|k| !k.is_empty()).collect();
             let mut limits = Vec::new();
-            if t.key != "static" && !php_installed {
+            if t.node.is_some() && node.is_none() {
+                limits.push("needs Node.js; none found (nvm's default, or node on your login shell's PATH)".into());
+            }
+            if t.key != "static" && t.node.is_none() && !php_installed {
                 limits.push("no PHP installed; `devid php install 8.5`".to_string());
             }
             if t.key == "laravel" {
@@ -745,7 +1027,8 @@ mod tests {
         assert!(choose(wordpress, None, Some("pgsql")).is_err());
         assert!(choose(find("php").unwrap(), None, Some("mysql")).is_err());
         assert!(choose(find("static").unwrap(), Some("react"), None).is_err());
-        assert!(find("next").unwrap_err().contains("later version"));
+        assert!(find("next").unwrap().node.is_some());
+        assert!(choose(find("astro").unwrap(), None, Some("mysql")).is_err());
         assert!(find("rails").unwrap_err().contains("no template"));
     }
 
@@ -822,6 +1105,7 @@ mod tests {
             host: "shop.test".into(),
             url: "https://shop.test".into(),
             mail: Some(2525),
+            port: None,
         }
     }
 
@@ -836,6 +1120,38 @@ mod tests {
         assert!(kit.contains(&"Migrating the database"));
         assert!(!steps(&options("symfony", "skeleton", None)).iter().any(|s| s.contains("webapp")));
         assert_eq!(steps(&options("wordpress", "", Some(Engine::Mysql))).len(), 7);
+        assert_eq!(
+            steps(&options("next", "", None)),
+            [
+                "Checking Node.js",
+                "Creating the Next.js app (create-next-app)",
+                "Installing packages (npm install)",
+                "Serving the site"
+            ]
+        );
+        assert_eq!(steps(&options("react", "", None))[1], "Creating the Vite project (npm create vite)");
+    }
+
+    #[test]
+    fn node_ranges_as_frameworks_write_them() {
+        let vite = "^20.19.0 || >=22.12.0";
+        for (v, ok) in
+            [((20, 19, 0), true), ((20, 18, 9), false), ((21, 0, 0), false), ((22, 12, 0), true), ((24, 1, 0), true)]
+        {
+            assert_eq!(node_satisfies(v, vite), ok, "{v:?}");
+        }
+        let nuxt = "^22.22.3 || ^24.15.0 || >=26.0.0";
+        for (v, ok) in
+            [((22, 22, 3), true), ((22, 22, 2), false), ((23, 0, 0), false), ((24, 22, 3), true), ((26, 1, 0), true)]
+        {
+            assert_eq!(node_satisfies(v, nuxt), ok, "{v:?}");
+        }
+        assert!(node_satisfies((22, 17, 0), ">=22.17") && !node_satisfies((22, 16, 9), ">=22.17"));
+        assert!(node_satisfies((18, 0, 0), ">= 18") && !node_satisfies((16, 20, 0), ">= 18"));
+        assert!(node_satisfies((20, 9, 0), ">=20.9.0"));
+        assert!(node_satisfies((18, 3, 0), "18") && !node_satisfies((19, 0, 0), "18"));
+        assert!(node_satisfies((18, 3, 0), "~18.3") && !node_satisfies((18, 4, 0), "~18.3"));
+        assert!(node_satisfies((20, 0, 0), ">=18 <21") && !node_satisfies((21, 0, 0), ">=18 <21"));
     }
 
     #[test]

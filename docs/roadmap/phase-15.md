@@ -2,7 +2,7 @@
 
 > Scope: `devid new` creates a PHP, Laravel, WordPress, Symfony, CodeIgniter 4, static or Node.js project and serves it at `https://<name>.test` right away, through the CLI, the TUI and the app (D-063)
 > Verified against: 2026-11-26 (Devid 0.21.0, main e6d9537; N1's runs on the owner's M1 and the Ubuntu VM: Laravel 13.44, its starter kits' `dev-main`, Symfony 8.1, CodeIgniter 4.7, create-vite 9.3, create-next-app 16.4, create-nuxt 4.1, sv 1.7, create-astro 5.3, WP-CLI 2.12.0, WordPress 7.1.5)
-> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results").
+> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results"). **N3 done 2026-11-26:** the nine Node.js templates, proxied with their dev server on demand, and the TUI's wizard (see "N3 results").
 
 On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitur baru untuk create project PHP, Laravel, Wordpress, NodeJs, dll". They asked for suggestions before any documentation. This plan records the suggestions they accepted.
 
@@ -336,13 +336,82 @@ D-063 stands. N1 settles these details for N2 and N3:
 - **Not run:** `--open`, and the offer to park `~/Sites`. Both need a terminal and a browser.
 - **The kits' Vite over HTTPS** (D-056) with `vp dev` is N3's check.
 
+## N3 results (2026-11-26)
+
+### What shipped
+
+- **Nine Node.js templates:**
+  - `react`, `vue`, `svelte` and `vite` (vanilla), through `npm create vite`;
+  - `next`, `nuxt`, `sveltekit` (`sv create`) and `astro`;
+  - `express`, whose `package.json` and `server.js` Devid writes, since Express has no create tool.
+- **Each Node.js template's steps:**
+  1. **Checking Node.js:** the framework's `engines.node`, read with `npm view` when the job runs, against the user's Node. A Node too old stops the job before anything is made.
+  2. **The create tool,** with N1's options, without its own install step and without a Git repository.
+  3. **`npm install`,** so a failed install stops the job with npm's own error.
+- **The site:**
+  - **Preset:** `vite` (Vite's templates and SvelteKit), `next`, `nuxt`, or `node` (Astro and Express).
+  - **Dev port:** a free one from the framework's usual port, skipping ports a program listens on and ports a site, Mail, a database or Devid itself uses.
+  - **The `dev` command:** `npm run dev` with that port, through `$PORT`, which Devid's commands get. It is marked on demand (D-054), so the site's first visit starts it, and it stops when idle.
+  - **Astro's command** adds `--ignore-lock` (see "Found").
+- **The TUI's wizard:** `n` on the Sites page.
+  - **The form:** a template (←→), a name, and the template's kit and database.
+  - **While it runs:** each step shows on the message line.
+  - **When it ends:** what was made, with `o` to open the site and `c` to copy the details.
+  - **A failure** brings the wizard back with the error.
+- **The CLI:** `devid new --list` lists the Node.js templates. A project's details show its dev port. The CLI and the TUI share the progress loop (`new_with_progress`).
+- **Not done:** `--pm pnpm|yarn|bun`. None of them is installed on the M1 to check it with, so npm is the only package manager for now.
+
+### Checked
+
+- **Unit tests:**
+  - `engines.node` ranges as frameworks write them: `^20.19.0 || >=22.12.0`, Nuxt's three ranges, `>= 18`, `>=22.17`, `~18.3` and `>=18 <21`;
+  - each Node.js template's steps;
+  - the wizard's keys, fields and request, and its drawing.
+- **`tests/new.rs`:** a second test with a fake `node`, `npm` and `npx` in `~/.devid/bin`, first on the tools' PATH:
+  - the Vite and Next.js options;
+  - `npm install` after the tool;
+  - the proxy site's preset, port and on-demand `dev`, and two sites on different ports;
+  - Express's own files;
+  - a Node too old for Vite refused before anything is made.
+- **On the owner's M1:** as for N2, a second daemon with its own home and ports.
+  - **Ports:** before its first visit, each site moved to a 153xx port (`devid app set --upstream`), so no dev server ran on 3xxx, where the owner's sites and tunnel are, or on 4321. That also checked that `dev` follows the site's port through `$PORT`.
+  - **The results:**
+
+    | Template | Made in | First visit through the proxy | Hot reload |
+    |---|---|---|---|
+    | `react` | 16 s | 502 once, then 200 (see "Found") | Vite's HMR socket: 101 |
+    | `vue` | 32 s | 502 once, then 200 | 101 |
+    | `svelte` | 21 s | 200 in 1 s | 101 |
+    | `vite` | 3 s | 200 in 1 s | 101 |
+    | `next` | 22 s | 200 in 5 s | `/_next/hmr`: 101, with the `.test` Origin |
+    | `nuxt` | 38 s | Nuxt's own "Starting Nuxt…" page (503, which reloads itself), then 200 | its Vite client answered; its socket not checked |
+    | `sveltekit` | 7 s | 502 once, then 200 in 1.1 s | 101 |
+    | `astro` | 13 s | 200 in 2 s | 101 |
+    | `express` | 2 s | 200 | `node --watch`: a change to `server.js` was served 2 s later |
+
+  - **The TUI,** driven in a pseudo-terminal, made a Laravel project (9 s) and a React one (4 s); both opened with 200.
+  - **Vite over HTTPS (D-056) with Vite+:** with `APP_URL=https://<name>.test`, as on the owner's ports, a React kit's `vp dev` served HTTPS with the site's certificate. `public/hot` was `https://n3kit.test:5173`, and `@vite/client` answered 200 over HTTPS.
+  - **Clean-up:** the second daemon was stopped, and its home and projects were removed.
+
+### Found
+
+- **Astro 7 moves `astro dev` to the background** when it detects an AI agent (`am-i-vibing`: `AI_AGENT`, `CLAUDECODE` and the like).
+  - **What happened:** the test daemon started from Claude Code's shell, and its commands got that environment, so Astro detached its server. That server kept running after its command and the daemon had stopped.
+  - **The owner's daemon** runs under launchd and has no such variables.
+  - **The fix:** `--ignore-lock`, Astro's flag for a foreground server that `astro dev stop` does not track, keeps it in the foreground in any environment. It was checked in this one.
+- **The first visit after creation** gave 502 once for three of the Vite templates in the run that made all nine one after another.
+  - A fresh React project made alone answered 200 at its first visit (0.9 s), and the three answered 200 when their commands were stopped and woken again.
+  - The cause is not known; a reload shows the page.
+- **Nuxt, SvelteKit and Astro listen on `[::1]` only.** Devid's proxy reaches them, since nginx's retry tries `127.0.0.1` and `[::1]`.
+- **Next.js 16's HMR socket is `/_next/hmr`.** The proxy's rewritten Origin passes Next's cross-origin check.
+
 ## Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
 | N1 | **Spike:** each official tool without prompts, on macOS and Ubuntu | the fixed options, the time, the disk use and the Node versions of every template are in this doc. That includes the starter kits' package names, WP-CLI's release files, and whether `wp core download` checks its archive (done 2026-11-26, see "N1 results") |
 | N2 | **Daemon and CLI:** the templates, the job and its progress, the PHP templates, Laravel with the database and Mail, WordPress with WP-CLI and `wp` | on the M1, `devid new` makes a Laravel project with each database and a WordPress site. Each opens at `https://<name>.test`, next to DBngin (done 2026-11-26, see "N2 results") |
-| N3 | **Node.js templates and the TUI wizard** | every Node template opens through the proxy with hot reload, and the TUI makes a Laravel project and a Vite project |
+| N3 | **Node.js templates and the TUI wizard** | every Node template opens through the proxy with hot reload, and the TUI makes a Laravel project and a Vite project (done 2026-11-26, see "N3 results") |
 | N4 | **The app's New project page** (macOS) | the owner approves a design board, then makes a project from the page on the M1 |
 | N5 | **CI, docs and release** | a weekly CI job makes every template with the real tools on macOS and Ubuntu, so a changed option shows within a week. The guide gets a `/docs/new-project` page. 0.22.0 ships after an rc on the M1 and the Linux VMs |
 
