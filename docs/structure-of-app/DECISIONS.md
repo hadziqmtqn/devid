@@ -1246,6 +1246,7 @@ See ARCHITECTURE, "PHP runtime".
     - **MongoDB's password** goes through a script only the user can read, which deletes itself, never through a command line.
 - **Released so far (2026-11-25):** 0.20.1 was tagged on main for PHP 8.6 (D-062), so it carries D2 and D3: the daemon's databases, `devid db` and the TUI's page. Nothing is installed or started until the user asks for a database. The app's page (D4) and the docs come with 0.21.0.
 - **D5 and 0.21.0 (2026-11-26):** the decision holds. Every pull request checks the three engines on macOS, Ubuntu and Arch (`db-e2e`, and `arch-e2e` running `scripts/db-e2e.sh` in its VM). 0.21.0-rc.1 passed on the owner's M1, next to DBngin, and on the Ubuntu, Arch and CachyOS VMs, where a real `uninstall --purge` kept `~/.devid/data`, a reinstall used it again with its accounts, and `--delete-databases` removed it. 0.21.0 adds the app's page and the docs: the README, CONTRIBUTING, PROJECT_CONTEXT, CLAUDE.md and the guide's `/docs/databases`.
+- **Released (2026-11-26):** 0.21.0, release run 45755040242, is GitHub's Latest, and `devid-latest` carries it.
 
 ## D-062: PHP 8.6 joins 8.3, 8.4 and 8.5 (accepted 2026-11-25, amends D-009)
 

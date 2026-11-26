@@ -1,6 +1,6 @@
 # Phase 14 D5: CI, docs and 0.21.0
 
-> Date: 2026-11-25 · Branch: `db-d5` · Plan: `docs/roadmap/phase-14.md`, "D5 plan" · Decision: D-061
+> Date: 2026-11-25 to 2026-11-26 · Branch: `db-d5` · Plan: `docs/roadmap/phase-14.md`, "D5 plan" · Decision: D-061
 
 The owner started D5 after D4 merged ("Mulai D5"). 0.20.1 already carries D2 and D3, off by default. 0.21.0 adds the app's page and makes databases part of the docs. This record grows with each step.
 
@@ -37,8 +37,14 @@ The owner started D5 after D4 merged ("Mulai D5"). 0.20.1 already carries D2 and
 - D5's results in `phase-14.md` (its status, the M1 and the VM sections, the D5 row), D-061's row and a D5 bullet, the docs index and Phase 14's row in PROJECT_CONTEXT, dated 2026-11-26.
 - The release notes in `release.yml` already name the databases since the rc.
 
-## Next
+## Step 4: released
 
-- The owner merges the release pull request and tags `v0.21.0`.
-- The guide (devid-site#23, roadmap dated 26 November 2026) merges once the release is out.
-- Then Phase 15, N1.
+- The owner merged #154 (main c785148) and tagged `v0.21.0`. Release run 45755040242 passed every job on its first run, `arch-e2e` included.
+- `devid-v0.21.0` is Latest in devid-binaries, with 9 files, and `devid-latest` carries it. The arm64 binary's sha256 matched `checksums.txt`, and it answers `devid 0.21.0`.
+
+## Follow-ups
+
+- **To merge now:** hadziqmtqn/devid-site#23, the guide's `/docs/databases` page and the roadmap's 0.21 entry.
+- **The owner's M1:** still on 0.21.0-rc.1; `devid self-update` takes it to 0.21.0.
+- **Small, not changed:** right after the daemon starts, `devid doctor` reports a database that is still starting as a problem, for up to about 20 s.
+- **Next:** Phase 15, `devid new` (D-063), from N1.
