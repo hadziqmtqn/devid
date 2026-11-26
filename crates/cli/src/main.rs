@@ -159,6 +159,32 @@ enum Command {
         #[arg(long)]
         no_sudo: bool,
     },
+    /// Make a project with its framework's own tool (Laravel, WordPress, Symfony…) and serve it at
+    /// <name>.test. With no template, or --list: the templates and what each needs
+    New {
+        /// php, laravel, wordpress, symfony, codeigniter or static
+        template: Option<String>,
+        /// The project's name: its folder, and <name>.test
+        name: Option<String>,
+        /// The project's folder (default: <first parked folder>/<name>)
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Pin the site to a PHP version (default: the default PHP)
+        #[arg(long)]
+        php: Option<String>,
+        /// Laravel and Symfony: sqlite (default), mysql or pgsql, through a Devid account
+        #[arg(long)]
+        db: Option<String>,
+        /// Laravel: react, vue, svelte or livewire (a starter kit, needs Node.js); Symfony: skeleton
+        #[arg(long)]
+        kit: Option<String>,
+        /// Open the site in the browser when it is ready
+        #[arg(long)]
+        open: bool,
+        /// List the templates and what each needs
+        #[arg(long)]
+        list: bool,
+    },
     /// Update installed PHP, nginx and Caddy to the newest versions in Devid's releases
     Update {
         /// Only show what would be updated
@@ -711,6 +737,13 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             })
         }
         Command::ShellPath { state } => shell_path(paths, state.as_deref()),
+        Command::New { template, name, path, php, db, kit, open, list } => match (template, name) {
+            (Some(template), Some(name)) if !list => {
+                new_project(paths, NewArgs { template, name, path, php, db, kit, open })
+            }
+            (Some(_), None) if !list => Err("name the project: `devid new <template> <name>`".into()),
+            _ => send(Request::NewTemplates).map(|v| print_templates(&v["templates"])),
+        },
         Command::Park { path } => {
             send(Request::Park { path: abs(path)? }).map(|v| println!("parked {}", v["parked"].as_str().unwrap_or("?")))
         }
@@ -1555,6 +1588,144 @@ fn print_sites(list: &serde_json::Value, json: bool) {
             s["path"].as_str().unwrap_or("?")
         );
     }
+}
+
+/// `devid new --list`: each template, its kits and databases, and what this computer lacks for it.
+fn print_templates(list: &serde_json::Value) {
+    let s = |v: &serde_json::Value| v.as_str().unwrap_or("?").to_string();
+    let words = |v: &serde_json::Value| {
+        v.as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default()
+    };
+    println!("devid new <template> <name>, with:");
+    for t in list.as_array().into_iter().flatten() {
+        let mut extra = Vec::new();
+        if !words(&t["kits"]).is_empty() {
+            extra.push(format!("--kit {}", words(&t["kits"])));
+        }
+        if t["dbs"].as_array().is_some_and(|d| d.len() > 1) {
+            extra.push(format!("--db {}", words(&t["dbs"])));
+        } else if !words(&t["dbs"]).is_empty() {
+            extra.push(format!("a {} database", words(&t["dbs"]).replace("mysql", "MySQL")));
+        }
+        println!("  {:<12} {:<14} {}", s(&t["template"]), s(&t["label"]), extra.join(" · "));
+        for limit in t["limits"].as_array().into_iter().flatten() {
+            println!("  {:<12} {:<14} ! {}", "", "", s(limit));
+        }
+    }
+    println!("Node.js templates (Vite, Next.js, Nuxt, SvelteKit, Astro, Express) come in a later version.");
+}
+
+struct NewArgs {
+    template: String,
+    name: String,
+    path: Option<PathBuf>,
+    php: Option<String>,
+    db: Option<String>,
+    kit: Option<String>,
+    open: bool,
+}
+
+/// `devid new <template> <name>`: with no parked folder and no --path, offer to park ~/Sites; then
+/// send `NewProject` and print each step as `NewProjectProgress` reaches it.
+fn new_project(paths: &Paths, a: NewArgs) -> Result<(), String> {
+    use std::io::IsTerminal;
+    let path = match a.path {
+        // The folder does not exist yet: resolve its parent, so /tmp/x matches a parked /private/tmp.
+        Some(p) => {
+            let p = std::path::absolute(&p).map_err(|e| e.to_string())?;
+            let parent = p.parent().map(|d| d.canonicalize().unwrap_or_else(|_| d.to_path_buf()));
+            Some(match (parent, p.file_name()) {
+                (Some(parent), Some(file)) => parent.join(file).display().to_string(),
+                _ => p.display().to_string(),
+            })
+        }
+        None => None,
+    };
+    if path.is_none() {
+        let sites = request(paths, &Request::Sites)?;
+        if sites["parked"].as_array().is_none_or(|p| p.is_empty()) && std::io::stdin().is_terminal() {
+            let folder = devid_daemon::paths::user_home().join("Sites");
+            print!("No parked folder yet. Create {} and park it, so new projects go there? [Y/n] ", folder.display());
+            let _ = std::io::stdout().flush();
+            let mut answer = String::new();
+            std::io::stdin().read_line(&mut answer).map_err(|e| e.to_string())?;
+            if !matches!(answer.trim(), "" | "y" | "Y" | "yes") {
+                return Err("no folder for the project; pass --path, or park one with `devid park <folder>`".into());
+            }
+            std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+            let folder = folder.canonicalize().unwrap_or(folder).display().to_string();
+            request(paths, &Request::Park { path: folder.clone() })?;
+            println!("parked {folder}");
+        }
+    }
+    let req = Request::NewProject { template: a.template, name: a.name, path, php: a.php, db: a.db, kit: a.kit };
+    let worker = {
+        let paths = paths.clone();
+        std::thread::spawn(move || request(&paths, &req))
+    };
+    // Each step once, as the job reaches it.
+    let mut shown = 0;
+    let mut print_steps = |progress: &serde_json::Value| {
+        let steps = progress["steps"].as_array().map(Vec::as_slice).unwrap_or_default();
+        for step in steps.iter().skip(shown) {
+            if step["state"] == "pending" {
+                break;
+            }
+            println!("  → {}", step["label"].as_str().unwrap_or("?"));
+            shown += 1;
+        }
+    };
+    // Only this run's job: the last one's steps stay in the daemon until a new job starts.
+    let mut started = false;
+    while !worker.is_finished() {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if let Ok(v) = request(paths, &Request::NewProjectProgress)
+            && v["progress"].is_object()
+            && (started || v["progress"]["done"] == false)
+        {
+            started = true;
+            print_steps(&v["progress"]);
+        }
+    }
+    let reply = worker.join().map_err(|_| "the request thread panicked".to_string())?;
+    if started && let Ok(v) = request(paths, &Request::NewProjectProgress) {
+        print_steps(&v["progress"]);
+    }
+    let v = reply?;
+    let s = |v: &serde_json::Value| v.as_str().unwrap_or("?").to_string();
+    println!("\n{} is ready: {}", s(&v["name"]), s(&v["url"]));
+    println!("  folder   {}", s(&v["path"]));
+    println!("  PHP      {}", s(&v["php"]));
+    if v["account"].is_object() {
+        let acc = &v["account"];
+        println!(
+            "  database {} account {} with its database; password {} (in the project's settings)",
+            s(&acc["label"]),
+            s(&acc["name"]),
+            s(&acc["password"])
+        );
+    }
+    if v["admin"].is_object() {
+        println!(
+            "  sign in  {} / {}  (shown once: Devid does not keep it)",
+            s(&v["admin"]["user"]),
+            s(&v["admin"]["password"])
+        );
+    }
+    for c in v["commands"].as_array().into_iter().flatten() {
+        println!("  command  {}: {}", s(&c["name"]), s(&c["run"]));
+    }
+    for note in v["notes"].as_array().into_iter().flatten() {
+        println!("  note     {}", s(note));
+    }
+    println!("  log      {}", s(&v["log"]));
+    if a.open {
+        std::process::Command::new(devid_daemon::platform::OPEN_COMMAND)
+            .arg(s(&v["url"]))
+            .status()
+            .map_err(|e| format!("opening the browser: {e}"))?;
+    }
+    Ok(())
 }
 
 /// One line for a running `PhpExtInstall` (`PhpExtProgress`), e.g. "installing 2/3 imagick… 52%".

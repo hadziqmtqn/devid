@@ -11,6 +11,7 @@ pub mod helper;
 pub mod install;
 pub mod logs;
 pub mod mail;
+pub mod newproject;
 pub mod nginx;
 pub mod ondemand;
 pub mod paths;

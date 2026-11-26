@@ -3,6 +3,7 @@
 //!   isolated), otherwise the default.
 //! - `php8.3`, `php8.4`, `php8.5`, `php8.6`: that version, wherever you are (D-053).
 //! - `nginx`, `caddy`, `mailpit`: Devid's own copies, set up to act on Devid's config (D-053).
+//! - `wp`: WP-CLI on the current folder's PHP, once `devid new wordpress` has downloaded it (D-063).
 //! - `mysql`, `mysqldump`, `psql`, `pg_dump`, `pg_restore`, `mongosh`: the clients of the series
 //!   Devid runs, set to reach Devid's server unless told where to go (D-061). Linked only once their
 //!   engine is installed.
@@ -75,7 +76,7 @@ fn command(name: &str, args: Vec<OsString>, paths: &Paths) -> Result<Command, St
         }
         "mailpit" => mailpit_command(paths, args),
         client if db::client_engine(client).is_some() => db_client_command(paths, client, args),
-        "php" | "composer" => {
+        "php" | "composer" | "wp" => {
             let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
             let (version, bin) = resolve(paths, &cwd)?;
             php_command(paths, name, &version, bin, args)
@@ -108,6 +109,14 @@ fn php_command(paths: &Paths, name: &str, version: &str, bin: PathBuf, args: Vec
             return Err(format!("{} is missing; `devid setup` downloads it", phar.display()));
         }
         cmd.arg(phar);
+    } else if name == "wp" {
+        let phar = install::wp_cli_phar(paths);
+        if !phar.is_file() {
+            return Err("WP-CLI is not installed yet; `devid new wordpress <name>` downloads it".into());
+        }
+        // WP-CLI 2.12's own dependencies print PHP 8.5 deprecation notices before every command's
+        // output (Phase 15 N1).
+        cmd.args(["-d", "error_reporting=E_ALL & ~E_DEPRECATED"]).arg(phar);
     } else {
         // PHP_BINARY comes from argv[0] through PATH, so child processes (`artisan serve`, parallel
         // tests) come back through this same shim, and `php8.4`'s children stay on 8.4.

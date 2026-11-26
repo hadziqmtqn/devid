@@ -5,7 +5,7 @@ use crate::{
     commands::{self, Commands},
     config::{App, AppCommand, Config},
     db::{self, Engine},
-    dns, helper, install, logs, mail, nginx,
+    dns, helper, install, logs, mail, newproject, nginx,
     ondemand::{self, OnDemand},
     paths::Paths,
     php, phpext, ports,
@@ -67,6 +67,8 @@ struct State {
     mail_download: Mutex<Option<(PathBuf, u64)>>,
     /// D-061: the database archive being downloaded (engine, archive, size), for progress.
     db_download: Mutex<Option<(String, PathBuf, u64)>>,
+    /// D-063: the running (or the last) `devid new`, for `NewProjectProgress`; one at a time.
+    new_job: Mutex<Option<newproject::Job>>,
 }
 
 /// Progress of a `PhpExtInstall`. Downloads count for 0–90 % by bytes (the archive's size on disk
@@ -505,6 +507,7 @@ pub fn run(paths: Paths) -> io::Result<()> {
         paused: Mutex::new(BTreeSet::new()),
         ext_job: Mutex::new(None),
         update_job: Mutex::new(None),
+        new_job: Mutex::new(None),
         updates: Mutex::new(Value::Null),
         update_lock: Mutex::new(()),
         own_ports: Mutex::new(BTreeSet::new()),
@@ -1112,6 +1115,20 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
             let reply = find_updates(state, check)?;
             remember_updates(state, &reply, None);
             Ok(reply)
+        }
+        Request::NewTemplates => {
+            let paths = &state.paths;
+            let (env, _) = state.commands.env_for(&crate::paths::user_home());
+            let runner = newproject::Runner::new(paths, "", env, paths.log_dir().join("new.log"));
+            let node = runner.node(&crate::paths::user_home()).ok();
+            Ok(json!({"ok": true, "templates": newproject::templates_json(!php::installed(paths).is_empty(), node)}))
+        }
+        Request::NewProject { template, name, path, php, db, kit } => {
+            new_project(state, &template, &name, path, php, db.as_deref(), kit.as_deref())
+        }
+        Request::NewProjectProgress => {
+            let job = state.new_job.lock().unwrap();
+            Ok(json!({"ok": true, "progress": job.as_ref().map(newproject::Job::json)}))
         }
         Request::UpdateProgress => {
             let job = state.update_job.lock().unwrap();
@@ -2204,6 +2221,190 @@ fn db_running(state: &State, engine: Engine) -> Result<(String, u16), String> {
         return Err(format!("{} is not running; `devid start {}` starts it", engine.label(), engine.service()));
     }
     Ok((d.series, d.port))
+}
+
+/// The databases and the progress of a `devid new` job (D-063).
+struct JobHost<'a> {
+    state: &'a State,
+    /// The account the job made, so a failure can say it is there.
+    account: Mutex<Option<(Engine, String)>>,
+}
+
+impl newproject::Host for JobHost<'_> {
+    fn database(&self, engine: Engine) -> Result<(String, u16), String> {
+        if let Ok(running) = db_running(self.state, engine) {
+            return Ok(running);
+        }
+        db_start(self.state, engine, None)?;
+        db_running(self.state, engine)
+    }
+
+    fn add_account(&self, engine: Engine, name: &str) -> Result<String, String> {
+        let (series, port) = db_running(self.state, engine)?;
+        let admin = db::Admin::new(&self.state.paths, engine, &series, port);
+        if admin.users().map_err(|e| e.to_string())?.iter().any(|u| u == name) {
+            return Err(format!(
+                "{} has an account {name} already; pick another project name, or remove it with \
+                 `devid db user remove {} {name}`",
+                engine.label(),
+                engine.name()
+            ));
+        }
+        let password = db::password();
+        admin.add_user(name, Some(name), &password).map_err(|e| e.to_string())?;
+        *self.account.lock().unwrap() = Some((engine, name.to_string()));
+        Ok(password)
+    }
+
+    fn step(&self, label: &str) {
+        if let Some(job) = self.state.new_job.lock().unwrap().as_mut() {
+            job.start(label);
+        }
+    }
+}
+
+/// `devid new` (D-063): check everything that can be checked first, run the template's steps,
+/// then serve the folder (parked folders serve it already; elsewhere it is linked), pin its PHP
+/// and save its commands.
+fn new_project(
+    state: &State,
+    template: &str,
+    name: &str,
+    path: Option<String>,
+    php_version: Option<String>,
+    db: Option<&str>,
+    kit: Option<&str>,
+) -> Result<Value, String> {
+    let t = newproject::find(template)?;
+    newproject::check_name(name)?;
+    let (kit, engine, sqlite) = newproject::choose(t, kit, db)?;
+    let config = state.config.lock().unwrap().clone();
+    if let Some(s) = sites::resolve(&config).into_iter().find(|s| s.name == name) {
+        return Err(format!("a site named {name} exists already ({}); pick another name", s.path.display()));
+    }
+    let dir = match path {
+        Some(p) => PathBuf::from(p),
+        None => match config.parked.first() {
+            Some(parked) => Path::new(parked).join(name),
+            None => {
+                return Err("no parked folder to put the project in; park one (`devid park ~/Sites`) or pass \
+                            --path"
+                    .into());
+            }
+        },
+    };
+    newproject::check_dir(&dir)?;
+    let parent = dir.parent().ok_or("the project folder has no parent")?.to_path_buf();
+    let parked = config.parked.iter().any(|p| Path::new(p) == parent);
+    if parked && dir.file_name().is_some_and(|f| f != name) {
+        return Err(format!(
+            "a folder in the parked folder {} is served under its own name; name the folder {name}",
+            parent.display()
+        ));
+    }
+    let version = php_version.clone().unwrap_or_else(|| config.default_php.clone());
+    if t.key != "static" {
+        php::check_supported(&version).map_err(|e| e.to_string())?;
+        if !php::installed(&state.paths).contains(&version) {
+            return Err(format!("PHP {version} is not installed; run `devid php install {version}`"));
+        }
+        if !install::composer_phar(&state.paths).is_file() {
+            return Err("composer.phar is missing; `devid setup` downloads it".into());
+        }
+    }
+    let host_name = format!("{name}.{}", config.tld);
+    let url = if standard_ports(&config, &state.paths) {
+        format!("https://{host_name}")
+    } else {
+        format!("https://{host_name}:{}", config.https_port)
+    };
+    let options = newproject::Options {
+        template: t.key,
+        name: name.to_string(),
+        dir: dir.clone(),
+        php: version.clone(),
+        kit,
+        db: engine,
+        sqlite,
+        host: host_name,
+        url: url.clone(),
+        mail: config.mail.enabled.then_some(config.mail.port),
+    };
+    let log = state.paths.log_dir().join(format!("new-{name}.log"));
+    {
+        let mut job = state.new_job.lock().unwrap();
+        if let Some(running) = job.as_ref().filter(|j| !j.done) {
+            return Err(format!("Devid is making {} already; one project at a time", running.name));
+        }
+        fs::create_dir_all(state.paths.log_dir()).map_err(|e| e.to_string())?;
+        fs::write(&log, "").map_err(|e| format!("{}: {e}", log.display()))?;
+        *job = Some(newproject::Job::new(&options, log.clone()));
+    }
+    let (env, warning) = state.commands.env_for(&parent);
+    let runner = newproject::Runner::new(&state.paths, &version, env, log.clone());
+    if let Some(warning) = warning {
+        runner.note(&warning);
+    }
+    let host = JobHost { state, account: Mutex::new(None) };
+    let made = newproject::run(&options, &runner, &host).and_then(|made| {
+        state.mutate(|c, _| {
+            if !parked {
+                c.links.insert(name.to_string(), dir.display().to_string());
+            }
+            if php_version.is_some() {
+                c.isolated.insert(name.to_string(), version.clone());
+            }
+            for (cmd, run) in &made.commands {
+                let app = c.apps.entry(name.to_string()).or_default();
+                if !app.commands.iter().any(|x| x.name == *cmd) {
+                    app.commands.push(AppCommand { name: cmd.clone(), run: run.clone() });
+                }
+            }
+            Ok(json!({}))
+        })?;
+        Ok(made)
+    });
+    let reply = made.map(|made| {
+        let account = made.account.as_ref().map(|(engine, user, password)| {
+            json!({"engine": engine.name(), "label": engine.label(), "name": user, "database": user,
+                   "password": password})
+        });
+        json!({
+            "ok": true,
+            "template": t.key,
+            "name": name,
+            "path": dir.display().to_string(),
+            "url": url,
+            "php": version,
+            "linked": !parked,
+            "account": account,
+            "admin": made.admin.as_ref().map(|(user, password)| json!({"user": user, "password": password})),
+            "commands": made.commands.iter().map(|(n, r)| json!({"name": n, "run": r})).collect::<Vec<_>>(),
+            "notes": made.notes,
+            "log": log.display().to_string(),
+        })
+    });
+    let reply = reply.map_err(|e| {
+        let mut left = Vec::new();
+        if dir.exists() {
+            left.push(format!("the folder {} (remove it with `rm -rf {}`)", dir.display(), dir.display()));
+        }
+        if let Some((engine, user)) = host.account.lock().unwrap().as_ref() {
+            left.push(format!(
+                "the {} account {user} and its database (`devid db user remove {} {user}` removes the account)",
+                engine.label(),
+                engine.name()
+            ));
+        }
+        match left.is_empty() {
+            true => e,
+            false => format!("{e}\n\nWhat was made stays: {}.", left.join("; ")),
+        }
+    });
+    if let Some(job) = state.new_job.lock().unwrap().as_mut() {
+        job.finish(&reply);
+    }
+    reply
 }
 
 /// Refuse an account the server does not have, before any SQL fails on it.

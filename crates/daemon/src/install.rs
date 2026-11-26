@@ -12,10 +12,14 @@ use std::{
 };
 
 /// Names that run through `devid` itself (argv[0] dispatch in the CLI): the PHP of the current
-/// folder and composer, then (D-053) one PHP version each, and Devid's own nginx, Caddy and Mailpit.
-pub const SHIMS: [&str; 9] = ["php", "composer", "php8.3", "php8.4", "php8.5", "php8.6", "nginx", "caddy", "mailpit"];
+/// folder and composer, then (D-053) one PHP version each, Devid's own nginx, Caddy and Mailpit, and
+/// WP-CLI (D-063).
+pub const SHIMS: [&str; 10] =
+    ["php", "composer", "php8.3", "php8.4", "php8.5", "php8.6", "nginx", "caddy", "mailpit", "wp"];
 const RC_MARKER: &str = "# added by devid";
 const COMPOSER_URL: &str = "https://getcomposer.org/download/latest-stable/composer.phar";
+/// WP-CLI's newest release; its phar and the phar's `.sha512` are assets of that release.
+const WP_CLI_RELEASE: &str = "https://api.github.com/repos/wp-cli/wp-cli/releases/latest";
 
 fn err(msg: impl Into<String>) -> io::Error {
     io::Error::other(msg.into())
@@ -31,6 +35,12 @@ pub fn installed_bin(paths: &Paths) -> PathBuf {
 
 pub fn composer_phar(paths: &Paths) -> PathBuf {
     paths.home.join("composer/composer.phar")
+}
+
+/// WP-CLI (D-063), kept under `~/.devid` and so outside every parked folder: WordPress takes the
+/// folders between the phar and a site below it as part of the site's URL (Phase 15 N1).
+pub fn wp_cli_phar(paths: &Paths) -> PathBuf {
+    paths.home.join("wp-cli/wp-cli.phar")
 }
 
 /// The desktop app's login item (D-031), separate from the daemon's LaunchAgent.
@@ -317,6 +327,46 @@ pub fn ensure_composer(paths: &Paths) -> io::Result<bool> {
     }
     fs::rename(tmp, target)?;
     Ok(true)
+}
+
+/// Download WP-CLI's phar from its newest GitHub release and check it against the SHA-512 published
+/// beside it (D-063), if missing. Returns the version it downloaded.
+pub fn ensure_wp_cli(paths: &Paths) -> io::Result<Option<String>> {
+    let target = wp_cli_phar(paths);
+    if target.is_file() {
+        return Ok(None);
+    }
+    fs::create_dir_all(target.parent().expect("phar has a parent"))?;
+    let tmp = target.with_extension("download");
+    let release = curl_text(WP_CLI_RELEASE)?;
+    let release: serde_json::Value =
+        serde_json::from_str(&release).map_err(|e| err(format!("WP-CLI's release: {e}")))?;
+    let tag = release["tag_name"].as_str().ok_or_else(|| err("WP-CLI's release has no tag"))?;
+    let version = tag.trim_start_matches('v');
+    let url = format!("https://github.com/wp-cli/wp-cli/releases/download/{tag}/wp-cli-{version}.phar");
+    curl_to(&url, &tmp)?;
+    let expected = curl_text(&format!("{url}.sha512"))?.split_whitespace().next().unwrap_or_default().to_string();
+    let actual = crate::releases::sha512_hex(&tmp)?;
+    if expected.len() != 128 || expected != actual {
+        let _ = fs::remove_file(&tmp);
+        return Err(err("wp-cli.phar checksum mismatch; not installed"));
+    }
+    fs::rename(tmp, target)?;
+    Ok(Some(version.to_string()))
+}
+
+fn curl_to(url: &str, out: &Path) -> io::Result<()> {
+    let status = Command::new("/usr/bin/curl").args(["-fsSL", "--proto", "=https", "-o"]).arg(out).arg(url).status()?;
+    if status.success() { Ok(()) } else { Err(err(format!("download failed: {url}"))) }
+}
+
+/// A small text download (a checksum, a release's JSON).
+pub fn curl_text(url: &str) -> io::Result<String> {
+    let out = Command::new("/usr/bin/curl").args(["-fsSL", "--proto", "=https", url]).output()?;
+    if !out.status.success() {
+        return Err(err(format!("download failed: {url}")));
+    }
+    String::from_utf8(out.stdout).map_err(|_| err(format!("{url} is not text")))
 }
 
 #[cfg(test)]
