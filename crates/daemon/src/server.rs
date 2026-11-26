@@ -2302,8 +2302,11 @@ fn new_project(
             parent.display()
         ));
     }
+    if t.node.is_some() && php_version.is_some() {
+        return Err(format!("{} uses no PHP; leave out --php", t.label));
+    }
     let version = php_version.clone().unwrap_or_else(|| config.default_php.clone());
-    if t.key != "static" {
+    if t.key != "static" && t.node.is_none() {
         php::check_supported(&version).map_err(|e| e.to_string())?;
         if !php::installed(&state.paths).contains(&version) {
             return Err(format!("PHP {version} is not installed; run `devid php install {version}`"));
@@ -2329,6 +2332,10 @@ fn new_project(
         host: host_name,
         url: url.clone(),
         mail: config.mail.enabled.then_some(config.mail.port),
+        port: match t.node {
+            Some(app) => Some(free_dev_port(&config, app.port)?),
+            None => None,
+        },
     };
     let log = state.paths.log_dir().join(format!("new-{name}.log"));
     {
@@ -2360,6 +2367,13 @@ fn new_project(
                     app.commands.push(AppCommand { name: cmd.clone(), run: run.clone() });
                 }
             }
+            // D-054: a Node.js site is served from its dev server, which its first visit starts.
+            if let (Some(node), Some(port)) = (t.node, options.port) {
+                let app = c.apps.entry(name.to_string()).or_default();
+                app.preset = Some(node.preset.to_string());
+                app.upstream = Some(port);
+                app.on_demand = Some("dev".into());
+            }
             Ok(json!({}))
         })?;
         Ok(made)
@@ -2375,7 +2389,8 @@ fn new_project(
             "name": name,
             "path": dir.display().to_string(),
             "url": url,
-            "php": version,
+            "php": if t.node.is_some() { Value::Null } else { json!(version) },
+            "port": options.port,
             "linked": !parked,
             "account": account,
             "admin": made.admin.as_ref().map(|(user, password)| json!({"user": user, "password": password})),
@@ -2405,6 +2420,22 @@ fn new_project(
         job.finish(&reply);
     }
     reply
+}
+
+/// A dev server port for a new Node.js site: its framework's usual port or the next one that no
+/// program listens on and no site or Devid service uses.
+fn free_dev_port(config: &Config, usual: u16) -> Result<u16, String> {
+    let sites = sites::resolve(config);
+    let mut taken: BTreeSet<u16> = [config.http_port, config.https_port, config.dns_port].into();
+    taken.extend(sites.iter().filter_map(|s| s.dev_port()));
+    taken.extend(sites.iter().filter_map(|s| s.port));
+    if config.mail.enabled {
+        taken.extend([config.mail.port, config.mail.port.saturating_add(1)]);
+    }
+    taken.extend(config.databases.values().map(|d| d.port).filter(|p| *p != 0));
+    (usual..usual.saturating_add(100))
+        .find(|p| !taken.contains(p) && !ports::in_use(*p))
+        .ok_or_else(|| format!("no free port from {usual} for the dev server"))
 }
 
 /// Refuse an account the server does not have, before any SQL fails on it.
