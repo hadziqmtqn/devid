@@ -432,3 +432,65 @@ p.dv-note { margin: 10px 4px 0; }
 .db-secret code { flex: 1; min-width: 0; font: 13px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .02em; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
 .db-secret + .ml-env { padding: 0; margin-top: 10px; }
 .db-secret + .ml-env .ml-copy { right: 8px; }
+
+/* New project (D-063, Phase 15 N4): the sheet from the + menu on Sites, or ⌘N */
+.dv-dialog.np { width: min(720px, 100%); height: min(600px, calc(100vh - 68px)); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.np-head { flex: none; padding: 16px 20px 12px; border-bottom: .5px solid var(--border); }
+.np-head p { margin: 3px 0 0; }
+.np-body { flex: 1; min-height: 0; display: flex; }
+.np-list { width: 220px; flex: none; overflow-y: auto; padding: 4px 8px 12px; border-right: .5px solid var(--border); background: var(--surface-2); }
+.np-group { padding: 10px 8px 4px; font-size: 11px; font-weight: 600; color: var(--text-2); }
+.np-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font-size: 13px; text-align: left; }
+.np-item:hover { background: var(--surface-2); }
+.np-item[aria-checked="true"] { background: var(--accent); color: #fff; }
+.np-tile { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 5px; color: #fff; font: 700 9.5px/1 -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: -.02em; }
+.np-tile.lg { width: 36px; height: 36px; border-radius: 9px; font-size: 14px; }
+.np-flag { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--warn); }
+.np-item[aria-checked="true"] .np-flag { background: #fff; }
+.np-loading { padding: 12px 8px; }
+.np-panel { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px 18px; }
+.np-tplhead { display: flex; align-items: center; gap: 12px; }
+.np-tplname { font-size: 14px; }
+.np-tool { margin-top: 2px; font-size: 11px; color: var(--text-2); overflow-wrap: anywhere; }
+.np-label { display: flex; align-items: center; gap: 6px; margin: 16px 0 5px; font-size: 12px; font-weight: 600; }
+.np-input { display: block; width: 100%; height: 28px; padding: 0 10px; font-size: 13px; }
+.np-input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+.np-hint { margin-top: 4px; font-size: 11px; color: var(--text-2); overflow-wrap: anywhere; }
+.np-hint.is-err { color: var(--danger); }
+.np-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.np-two .dv-select { width: 100%; justify-content: space-between; }
+.np-two .dv-select span { overflow: hidden; text-overflow: ellipsis; }
+.np-facts { display: grid; gap: 6px; margin-top: 16px; padding: 10px 12px; border: .5px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12px; }
+.np-fact { display: flex; align-items: center; gap: 8px; }
+.np-fact .dv-ico { width: 14px; height: 14px; color: var(--ok); stroke-width: 2; }
+.np-fact.is-warn .dv-ico { color: var(--warn); stroke-width: 1.5; }
+.np-note { margin-top: 14px; padding: 9px 11px; border-radius: 8px; background: var(--warn-soft); font-size: 12px; }
+.np-note b { color: var(--warn); }
+.np-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: .5px solid var(--border); }
+.np-foot .dv-btn { height: 28px; min-width: 96px; }
+.np-steps { margin: 0; padding: 0; list-style: none; }
+.np-step { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 6px 12px; font-size: 12.5px; }
+.np-step + .np-step { box-shadow: inset 0 .5px 0 var(--border); }
+.np-step.is-pending { color: var(--text-2); }
+.np-step.is-failed .np-steplabel { color: var(--danger); font-weight: 600; }
+.np-stepico { width: 18px; height: 18px; flex: none; display: grid; place-items: center; }
+.np-stepico .dv-ico { width: 16px; height: 16px; stroke-width: 2; }
+.np-stepico.is-ok { color: var(--ok); }
+.np-stepico.is-bad { color: var(--danger); }
+.np-ring { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--border-strong); }
+.np-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--surface-2); border-top-color: var(--switch-on); animation: np-spin .8s linear infinite; }
+@keyframes np-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .np-spin { animation: none; border-color: var(--switch-on); } }
+.np-dl { margin-top: 6px; }
+.np-time { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.np-sectionh { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 16px 2px 6px; font-size: 12px; font-weight: 600; }
+.np-sectionh > span { display: inline-flex; align-items: center; gap: 6px; }
+.np-log { margin: 0; padding: 9px 12px; border: .5px solid var(--border); border-radius: 8px; background: var(--log-bg); font: 11px/1.6 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); -webkit-user-select: text; user-select: text; }
+.np-log.is-err { color: var(--danger); }
+.np-done { display: flex; align-items: center; gap: 12px; }
+.np-badge { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--ok-soft); color: var(--ok); }
+.np-badge.is-bad { background: var(--danger-soft); color: var(--danger); }
+.np-badge .dv-ico { width: 20px; height: 20px; stroke-width: 2.2; }
+.np-url { margin-top: 2px; font-weight: 600; color: var(--accent-ink); }
+.np-k { width: 92px; flex: none; color: var(--text-2); font-size: 12px; }
+.np-secret { font: 12.5px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .02em; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }

@@ -296,7 +296,10 @@ const PAGES = {
     load: () => daemon({ cmd: 'sites' }), render: (d) => (openedSite() ? siteDetail(openedSite()) : sitesPage(d)),
     // A site's detail opens it, which is also what wakes an on-demand site (D-054).
     tools: () => S.site ? [btn('Open in browser', () => openTarget({ what: 'site', name: S.site }), '', { title: 'Open ' + (openedSite()?.url || '') })] : [
-      h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Link a site', title: 'Link a site', onclick: linkSite, disabled: !!S.busy }, icon('plus'))] },
+      // D-063: a new project, or a folder that exists (the prototype's "Link a site").
+      h('button.dv-btn.ghost.icon', { type: 'button', 'aria-label': 'Add a site', title: 'Add a site', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+        disabled: !!S.busy, onclick: (e) => menu(e.currentTarget, [{ label: 'New project…', kbd: '⌘N', run: newProject }, { label: 'Link a folder…', run: linkSite }]) },
+      icon('plus'))] },
   php: { title: 'PHP', sub: () => 'PHP 8.3 to 8.6 side by side; pick one per site.',
     load: () => daemon({ cmd: 'php_list' }), render: phpPage },
   server: { title: 'Web Server', sub: () => 'Status, engine choice and configuration.', load: () => daemon({ cmd: 'server_list' }), render: serverPage },
@@ -369,6 +372,383 @@ async function parkFolder() {
   if (path) act('Parking…', () => daemon({ cmd: 'park', path }), 'Parked ' + path);
 }
 
+// ---------- New project (D-063, Phase 15 N4) ----------
+
+/** How the sheet shows each template that `new_templates` lists: its group, a monogram tile, the
+ *  tool it runs and a Node template's usual dev port. Which templates exist, and what this Mac
+ *  lacks for one, come from the daemon. */
+const NP_TPL = {
+  laravel: { group: 'php', mono: 'L', color: '#C8473A' },
+  wordpress: { group: 'php', mono: 'W', color: '#2F6FA8', tool: 'WP-CLI: core download, config create, core install' },
+  symfony: { group: 'php', mono: 'Sf', color: '#47474C' },
+  codeigniter: { group: 'php', mono: 'CI', color: '#C2571F', tool: 'composer create-project codeigniter4/appstarter' },
+  php: { group: 'php', mono: 'P', color: '#5B5FA8', tool: 'a folder with index.php' },
+  static: { group: 'php', mono: 'H', color: '#77777D', tool: 'a folder with index.html' },
+  react: { group: 'js', mono: 'R', color: '#1B8FB3', tool: 'npm create vite@latest -- --template react-ts', port: 5173 },
+  vue: { group: 'js', mono: 'V', color: '#2F8F63', tool: 'npm create vite@latest -- --template vue-ts', port: 5173 },
+  svelte: { group: 'js', mono: 'S', color: '#D9541E', tool: 'npm create vite@latest -- --template svelte-ts', port: 5173 },
+  vite: { group: 'js', mono: 'Vi', color: '#7357D6', tool: 'npm create vite@latest -- --template vanilla-ts', port: 5173 },
+  next: { group: 'js', mono: 'N', color: '#2C2C2E', tool: 'npx create-next-app@latest', port: 3000 },
+  nuxt: { group: 'js', mono: 'Nx', color: '#22885C', tool: 'npm create nuxt@latest', port: 3000 },
+  sveltekit: { group: 'js', mono: 'SK', color: '#C8461A', tool: 'npx sv create', port: 5173 },
+  astro: { group: 'js', mono: 'A', color: '#B23F18', tool: 'npm create astro@latest', port: 4321 },
+  express: { group: 'js', mono: 'Ex', color: '#4D4D52', tool: 'package.json and server.js from Devid, then npm install express', port: 3000 },
+};
+const NP_ORDER = ['laravel', 'wordpress', 'symfony', 'codeigniter', 'php', 'static', 'react', 'vue', 'svelte', 'vite', 'next', 'nuxt', 'sveltekit', 'astro', 'express'];
+const NP_ACCOUNT_STEP = 'Making the database account'; // newproject::steps
+const npDbName = (name) => name.replace(/-/g, '_');
+const npTemplate = (np) => np.templates?.find((t) => t.template === np.tpl);
+const npWebApp = (np) => np.tpl !== 'symfony' || np.kit !== 'skeleton';
+
+/** The engine a choice makes an account on, as `newproject::choose` does: WordPress always MySQL. */
+function npEngine(np) {
+  const t = npTemplate(np);
+  if (!t || !t.dbs.length || !npWebApp(np)) return null;
+  const db = np.db || t.dbs[0];
+  return db === 'mysql' ? 'mysql' : db === 'pgsql' ? 'postgresql' : null;
+}
+
+/** `newproject::check_name`, plus what the page knows: the sites, and the accounts of a database
+ *  that runs (one that is off is checked when the job starts). */
+function npNameIssue(np) {
+  const n = np.name;
+  if (!n) return 'Type a name.';
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(n) || n.endsWith('-')) return 'Lowercase letters, digits and -, starting with a letter (at most 32).';
+  if (np.sites?.includes(n)) return 'A site named ' + n + ' exists already.';
+  const eng = npEngine(np);
+  if (eng && np.users[eng]?.includes(npDbName(n))) return dbLabel(eng) + ' has an account ' + npDbName(n) + ' already; pick another name.';
+  return '';
+}
+
+/** What this Mac lacks for the choice (the daemon's `limits`): the starter kits' Node only matters
+ *  with a kit. */
+function npLimits(np) {
+  const t = npTemplate(np);
+  const kitLimit = t?.limits.find((l) => l.includes('starter kits')) || '';
+  const other = (t?.limits || []).filter((l) => l !== kitLimit);
+  return { kitLimit, block: other[0] || (np.tpl === 'laravel' && np.kit ? kitLimit : '') };
+}
+
+function npTool(np) {
+  if (np.tpl === 'laravel') return 'composer create-project ' + (np.kit ? 'laravel/' + np.kit + '-starter-kit --stability=dev' : 'laravel/laravel');
+  if (np.tpl === 'symfony') return np.kit ? 'composer create-project symfony/skeleton' : 'composer create-project symfony/skeleton, then composer require webapp';
+  return NP_TPL[np.tpl]?.tool || '';
+}
+
+/** One line each on what Devid sets up, from the daemon's state: [text, needs attention]. */
+function npFacts(np) {
+  const st = S.status, meta = NP_TPL[np.tpl] || {}, eng = npEngine(np), out = [];
+  if (meta.group === 'js') {
+    out.push([np.node ? 'Your Node.js ' + np.node + ' and npm' : 'No Node.js found: nvm’s default, or node on your login shell’s PATH', !np.node]);
+    out.push(['Dev server on a free port from ' + meta.port + ', started by the site’s first visit', false]);
+  } else if (eng) {
+    const d = (st.databases || []).find((x) => x.engine === eng), label = dbLabel(eng);
+    const none = !d?.installed?.length;
+    out.push([d?.state === 'running' ? label + ' ' + (d.series || '') + ' runs on port ' + d.port
+      : none ? label + ' is not installed: Devid downloads it first, then runs it on a free port' : label + ' is off: Devid starts it first', none]);
+    out.push(['A ' + label + ' account and database ', h('span.dv-mono', { 'data-np-db': '' }, npDbName(np.name || 'name')),
+      np.users[eng] ? '' : ', checked when the job starts', false]);
+    if (np.tpl === 'wordpress') out.push(['Admin account admin, with a password shown once', false]);
+  } else if (np.tpl === 'laravel' || (np.tpl === 'symfony' && npWebApp(np))) {
+    out.push(['SQLite in the project, no server to run', false]);
+  }
+  if ((np.tpl === 'laravel' || (np.tpl === 'symfony' && npWebApp(np))) && st.mail?.state === 'running')
+    out.push(['Mail goes to Devid’s inbox (127.0.0.1:' + st.mail.port + ')', false]);
+  if (np.tpl === 'laravel' && np.kit) out.push(['npm install and the build run inside create-project', false]);
+  if (['php', 'static', 'codeigniter'].includes(np.tpl)) out.push(['Opens as soon as it is made', false]);
+  return out;
+}
+
+/** The sheet's entry: the + menu on Sites, or ⌘N. A running job, or one that failed while hidden,
+ *  shows again. */
+async function newProject() {
+  if (S.np && (S.np.stage === 'making' || S.np.unseen)) { Object.assign(S.np, { hidden: false, unseen: false }); return npDraw(); }
+  const np = { stage: 'form', tpl: 'laravel', name: '', kit: '', db: '', php: '', folder: '', other: '', error: '',
+    templates: null, node: null, parked: [], sites: [], users: {}, steps: [], times: {}, log: '', dl: null };
+  S.np = np;
+  npDraw();
+  try {
+    const [t, sites] = await Promise.all([daemon({ cmd: 'new_templates' }), daemon({ cmd: 'sites' })]);
+    Object.assign(np, { templates: t.templates, node: t.node, parked: sites.parked || [], sites: (sites.sites || []).map((s) => s.name) });
+    np.folder = np.parked[0] || 'sites';
+  } catch (e) { np.error = String(e); }
+  if (S.np !== np) return;
+  npDraw();
+  // The accounts of each database that runs, so a taken name shows before Create.
+  for (const eng of ['mysql', 'postgresql']) {
+    if ((S.status?.databases || []).find((d) => d.engine === eng)?.state !== 'running') continue;
+    try { np.users[eng] = ((await daemon({ cmd: 'db_user_list', engine: eng })).users || []).map((u) => u.name); } catch { /* checked by the job */ }
+  }
+  if (S.np === np && np.stage === 'form') npDraw();
+}
+
+function npClose() {
+  if (S.np?.stage === 'making') S.np.hidden = true;
+  else S.np = null;
+  closeDialog();
+}
+
+function npDraw() {
+  const np = S.np;
+  if (!np || np.hidden) return;
+  const body = np.stage === 'form' ? npForm(np) : np.stage === 'ready' ? npReady(np) : npJob(np);
+  showDialog(h('div.dv-dialog.np', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'np-t' }, body), npClose);
+  if (np.stage === 'form') npSync(np);
+}
+
+/** Typing changes only the hint, the account name and the Create button, so the field keeps its caret. */
+function npSync(np) {
+  const issue = npNameIssue(np);
+  const parent = np.folder === 'other' ? np.other : np.folder === 'sites' ? '~/Sites' : np.folder;
+  const hint = $('np-name-h'), input = $('np-name'), create = $('np-create');
+  if (hint) {
+    hint.textContent = np.name && issue ? issue : 'https://' + (np.name || 'name') + '.' + (S.status?.tld || 'test') + ' · ' + parent + '/' + (np.name || 'name');
+    hint.className = 'np-hint' + (np.name && issue ? ' is-err' : '');
+  }
+  if (input) input.setAttribute('aria-invalid', String(!!(np.name && issue)));
+  if (create) create.disabled = !!issue || !!npLimits(np).block || !np.templates;
+  for (const el of document.querySelectorAll('[data-np-db]')) el.textContent = npDbName(np.name || 'name');
+}
+
+function npForm(np) {
+  const st = S.status;
+  const t = npTemplate(np), meta = NP_TPL[np.tpl] || {}, { kitLimit, block } = npLimits(np);
+  const set = (patch) => () => { Object.assign(np, patch); npDraw(); };
+  const tile = (k, cls = '') => h('span.np-tile' + cls, { style: 'background: ' + (NP_TPL[k]?.color || '#77777D'), 'aria-hidden': 'true' }, NP_TPL[k]?.mono || k[0].toUpperCase());
+  const list = np.templates ? [['php', 'PHP'], ['js', 'JavaScript · Node.js']].map(([group, title]) => [
+    h('div.np-group', {}, title),
+    NP_ORDER.map((k) => np.templates.find((x) => x.template === k)).filter((x) => x && (NP_TPL[x.template]?.group || 'php') === group).map((x) => {
+      const why = x.limits.filter((l) => !l.includes('starter kits')).map(capital).join(' ');
+      return h('button.np-item', { type: 'button', role: 'radio', 'aria-checked': String(np.tpl === x.template), title: why || null,
+        onclick: set({ tpl: x.template, kit: '', db: '', php: '' }), onkeydown: npArrow },
+      tile(x.template), h('span.dv-grow.dv-ellipsis', {}, x.label), why ? h('span.np-flag', { 'aria-label': why }) : null);
+    })]) : h('div.dv-sub.np-loading', {}, np.error ? '' : 'Loading the templates…');
+  const phpOptions = [{ value: '', label: 'Default (' + st.default_php + ')' }]
+    .concat(st.php.map((p) => ({ value: p.version, label: p.version })));
+  const folders = np.parked.map((p) => ({ value: p, label: p + ' (parked)' }))
+    .concat(np.parked.length ? [] : [{ value: 'sites', label: '~/Sites, made and parked' }],
+      [{ value: 'other', label: np.other ? np.other : 'Another folder…' }]);
+  const pickFolder = async (v) => {
+    if (v === 'other') {
+      const path = await invoke('choose_folder', { purpose: 'new' }).catch((e) => { toast(String(e), true); return null; });
+      if (!path) return npDraw();
+      np.other = path;
+    }
+    np.folder = v;
+    npDraw();
+  };
+  return [
+    h('div.np-head', {}, h('h2', { id: 'np-t' }, 'New project'),
+      h('p.dv-sub', {}, 'Made with each framework’s own tool, then served at https://name.' + (st.tld || 'test') + '.')),
+    h('div.np-body', {},
+      h('div.np-list', { role: 'radiogroup', 'aria-label': 'Template' }, list),
+      h('div.np-panel', {},
+        t ? [
+          h('div.np-tplhead', {}, tile(np.tpl, '.lg'), h('div', { style: 'min-width: 0' },
+            h('div.dv-strong.np-tplname', {}, t.label), h('div.np-tool.dv-mono', {}, npTool(np)))),
+          h('div.np-label', {}, h('label', { for: 'np-name' }, 'Name'),
+            tip('Lowercase letters, digits and -, starting with a letter, at most 32. It names the folder, the site and, with - as _, its database and account.')),
+          h('input.dv-input.np-input.dv-mono', { id: 'np-name', value: np.name, placeholder: 'shop', autocomplete: 'off', spellcheck: 'false',
+            'aria-describedby': 'np-name-h', 'aria-label': 'Name', 'data-focus': true,
+            oninput: (e) => { np.name = e.target.value.toLowerCase(); npSync(np); },
+            onkeydown: (e) => { if (e.key === 'Enter') npCreate(np); } }),
+          h('div.np-hint', { id: 'np-name-h' }),
+          h('div.np-two', {},
+            h('div', {}, h('div.np-label', {}, 'Folder'), dropdown('Folder', np.folder, folders, pickFolder)),
+            meta.group !== 'js' && np.tpl !== 'static' ? h('div', {}, h('div.np-label', {}, 'PHP',
+              tip('Default follows Devid’s default PHP. A version pins the site to it, as Isolate does.')),
+            dropdown('PHP version', np.php, phpOptions, (v) => { np.php = v; npDraw(); })) : null),
+          t.kits.length ? [h('div.np-label', { id: 'np-kit-l' }, np.tpl === 'symfony' ? 'Kind' : 'Starter kit',
+            tip(np.tpl === 'symfony' ? 'The web app adds Twig, Doctrine, forms and Mailer (composer require webapp), without Docker files. The skeleton is the bare kernel, with no database layer.'
+              : 'Laravel’s starter kits build with Vite+, which needs Node.js 22.18+, 24.11+ or 26+' + (np.node ? '; this Mac has ' + np.node + '.' : '; no Node.js was found.') + ' They come from each kit’s main branch, as Laravel’s installer takes them.')),
+          h('div.dv-seg.np-seg', { role: 'group', 'aria-labelledby': 'np-kit-l' },
+            [['', np.tpl === 'symfony' ? 'Web app' : 'None']].concat(t.kits.map((k) => [k, capital(k)])).map(([k, label]) =>
+              h('button', { type: 'button', 'aria-pressed': String(np.kit === k), disabled: !!(k && kitLimit), title: k && kitLimit ? kitLimit : null,
+                onclick: set({ kit: k, db: k === 'skeleton' ? '' : np.db }) }, label)))] : null,
+          t.dbs.length > 1 && npWebApp(np) ? [h('div.np-label', { id: 'np-db-l' }, 'Database',
+            tip('SQLite needs no server. MySQL or PostgreSQL: Devid makes an account and a database named after the project, writes them to ' + (np.tpl === 'symfony' ? '.env.local' : '.env') + (np.tpl === 'laravel' ? ' and migrates' : '') + '. A database that is off starts first.')),
+          h('div.dv-seg.np-seg', { role: 'group', 'aria-labelledby': 'np-db-l' },
+            t.dbs.map((d) => h('button', { type: 'button', 'aria-pressed': String((np.db || t.dbs[0]) === d), onclick: set({ db: d }) },
+              { sqlite: 'SQLite', mysql: 'MySQL', pgsql: 'PostgreSQL' }[d] || d)))] : null,
+          h('div.np-facts', {}, npFacts(np).map((f) => {
+            const warn = f[f.length - 1];
+            return h('div.np-fact' + (warn ? '.is-warn' : ''), {}, icon(warn ? 'info' : 'check'), h('span.dv-grow', {}, f.slice(0, -1)));
+          })),
+          block ? h('div.np-note', { role: 'status' }, h('b', {}, 'Can’t make it here yet. '), capital(block)) : null,
+        ] : null,
+        np.error ? h('p.dv-error', { role: 'alert' }, np.error) : null)),
+    h('div.np-foot', {},
+      h('span.dv-sub.dv-grow.dv-ellipsis.dv-mono', {}, 'The tools’ output goes to ~/.devid/log/new-<name>.log'),
+      h('button.dv-btn', { type: 'button', onclick: npClose }, 'Cancel'),
+      h('button.dv-btn.primary', { id: 'np-create', type: 'button', onclick: () => npCreate(np) }, 'Create project')),
+  ];
+}
+
+/** ↑ ↓ in the template list pick the template above or below, as in a radio group. */
+function npArrow(e) {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  const items = [...document.querySelectorAll('.np-item')];
+  const at = (items.indexOf(e.currentTarget) + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+  items[at]?.click();
+  document.querySelectorAll('.np-item')[at]?.focus();
+}
+
+/** Create: one job at a time in the daemon. Its steps, its output and a first database download
+ *  show while it runs; Hide leaves it running, and a toast says how it ended. */
+async function npCreate(np) {
+  if (np.stage !== 'form' || !np.templates) return;
+  if (npNameIssue(np) || npLimits(np).block) { npSync(np); $('np-name')?.focus(); return; }
+  const t = npTemplate(np);
+  Object.assign(np, { stage: 'making', started: Date.now(), steps: [], times: {}, log: '', dl: null, error: '', engine: npEngine(np) });
+  npDraw();
+  const timer = setInterval(() => npPoll(np), 500);
+  try {
+    let parent = np.folder === 'other' ? np.other : np.folder;
+    if (np.folder === 'sites') {
+      parent = await invoke('sites_folder');
+      await daemon({ cmd: 'park', path: parent });
+    }
+    np.path = parent + '/' + np.name;
+    np.reply = await daemon({ cmd: 'new_project', template: np.tpl, name: np.name, path: np.path, php: np.php || null,
+      db: np.db && np.db !== t.dbs[0] ? np.db : null, kit: np.kit || null });
+    np.stage = 'ready';
+  } catch (e) {
+    np.stage = 'failed';
+    np.error = String(e);
+  } finally {
+    clearInterval(timer);
+  }
+  await npPoll(np);
+  refresh(true);
+  if (S.np !== np) return;
+  if (!np.hidden) return npDraw();
+  if (np.stage === 'ready') {
+    toast(np.reply.name + ' is ready', false, np.reply.url);
+    S.np = null;
+  } else {
+    toast('Couldn’t make ' + np.name, true, 'New project… in the + menu shows what happened.');
+    np.unseen = true;
+  }
+}
+
+async function npPoll(np) {
+  try {
+    const p = (await daemon({ cmd: 'new_project_progress' })).progress;
+    if (p && p.name === np.name) {
+      const now = Date.now();
+      for (const s of p.steps) {
+        const t = np.times[s.label] || (np.times[s.label] = {});
+        if (s.state !== 'pending' && !t.start) t.start = now;
+        if ((s.state === 'done' || s.state === 'failed') && !t.end) t.end = now;
+      }
+      np.steps = p.steps;
+      np.logName = (p.log || '').split('/').pop();
+    }
+    if (np.logName) {
+      const r = await daemon({ cmd: 'log_read', name: np.logName, offset: null });
+      // eslint-disable-next-line no-control-regex
+      np.log = (r.text || '').split('\n').map((l) => l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').trimEnd()).filter((l) => l.trim()).slice(-4).join('\n');
+    }
+    const running = np.steps.find((s) => s.state === 'running');
+    np.dl = null;
+    if (running?.label === NP_ACCOUNT_STEP && np.engine) {
+      const d = (await daemon({ cmd: 'status' })).databases?.find((x) => x.engine === np.engine);
+      np.dl = d?.download ? { ...d.download, label: d.label, series: d.series } : null;
+    }
+  } catch { /* the next tick asks again */ }
+  if (S.np === np && !np.hidden && np.stage === 'making' && !$('overlay').hidden) npDraw();
+}
+
+const npSecs = (np, label) => {
+  const t = np.times[label];
+  if (!t?.start || !t.end) return '';
+  const s = (t.end - t.start) / 1000;
+  return s < 1 ? '<1 s' : Math.round(s) + ' s';
+};
+
+/** The job's steps as the daemon reports them; failed: what went wrong, which says what stays. */
+function npJob(np) {
+  const failed = np.stage === 'failed';
+  const label = (npTemplate(np)?.label || np.tpl) + (np.engine ? ' · ' + dbLabel(np.engine) : '');
+  const steps = np.steps.length ? np.steps : [{ label: 'Starting', state: 'running' }];
+  const elapsed = Math.round((Date.now() - (np.started || Date.now())) / 1000);
+  const stepIcon = (s) => s.state === 'done' ? h('span.np-stepico.is-ok', {}, icon('check'))
+    : s.state === 'running' ? h('span.np-stepico', {}, h('span.np-spin'))
+      : s.state === 'failed' ? h('span.np-stepico.is-bad', {}, icon('info')) : h('span.np-stepico', {}, h('span.np-ring'));
+  const dl = np.dl, pct = dl?.size ? Math.min(100, Math.round(100 * dl.got / dl.size)) : 0;
+  const showLog = () => { const name = np.logName; S.np = failed ? null : S.np; npClose(); pickLog(name); go('logs'); };
+  return [
+    h('div.np-head', {}, h('div.np-done', {},
+      failed ? h('span.np-badge.is-bad', { 'aria-hidden': 'true' }, icon('info')) : null,
+      h('div.dv-grow', {}, h('h2', { id: 'np-t' }, failed ? 'Couldn’t make ' + np.name : 'Making ' + np.name + '…'),
+        h('div.dv-sub', {}, label + (failed ? ' · stopped at the step marked below' : ''))),
+      failed ? null : h('span.np-time', {}, elapsed + ' s'))),
+    h('div.np-panel.np-jobpanel', {},
+      h('ol.dv-card.np-steps', { 'aria-label': 'Steps' }, steps.map((s) => h('li.np-step.is-' + s.state, {},
+        stepIcon(s),
+        h('div.dv-grow', {}, h('div.np-steplabel', {}, s.label),
+          s.state === 'running' && s.label === NP_ACCOUNT_STEP && dl ? h('div.np-dl', {},
+            h('progress.up-bar', { max: '100', value: pct, 'aria-label': 'Downloading ' + dl.label }),
+            h('div.up-meta', {}, h('span', {}, (dl.size && dl.got >= dl.size ? 'Setting up ' : 'Downloading ') + dl.label + (dl.series ? ' ' + dl.series : '')
+              + (dl.size ? ' · ' + humanSize(dl.got) + ' of ' + humanSize(dl.size) : '')), h('span', {}, dl.size ? pct + '%' : ''))) : null),
+        h('span.np-time', {}, npSecs(np, s.label))))),
+      h('div.np-sectionh', {}, h('span', { id: 'np-log-l' }, failed ? 'What went wrong' : 'Output'),
+        np.logName ? h('button.dv-btn.ghost', { type: 'button', onclick: showLog }, 'Show log') : null),
+      h('pre.np-log' + (failed ? '.is-err' : ''), { 'aria-labelledby': 'np-log-l' }, failed ? np.error : (np.log || 'Waiting for the first lines…')),
+      failed && np.path ? h('div.np-sectionh', {}, h('span', {}, 'The folder'),
+        btn('Show in Finder', () => openTarget({ what: 'finder', path: np.path }))) : null),
+    h('div.np-foot', {},
+      h('span.dv-sub.dv-grow', {}, failed ? 'Devid keeps what the job made; the message above says what, and how to remove it.'
+        : 'Devid keeps going if you hide this; Sites shows the project when it is ready.'),
+      h('button.dv-btn' + (failed ? '.primary' : ''), { type: 'button', onclick: npClose, 'data-focus': true }, failed ? 'Close' : 'Hide')),
+  ];
+}
+
+/** What `new_project` made: the site, its folder, and what Devid set up. */
+function npReady(np) {
+  const r = np.reply, acc = r.account, tld = S.status?.tld || 'test';
+  const vite = (r.commands || []).find((c) => c.name === 'vite');
+  const startVite = () => daemon({ cmd: 'command_start', site: r.name, cwd: '/', name: 'vite' })
+    .then(() => toast('Started vite', false, 'With APP_URL=https://' + r.name + '.' + tld + ', Vite serves HTTPS with the site’s certificate.'),
+      (e) => toast(String(e), true));
+  const done = () => { S.np = null; closeDialog(); refresh(true); };
+  const serves = r.port ? 'Node, through the proxy' : r.template === 'static' ? 'Static files' : 'PHP ' + r.php + (np.php ? ', pinned to this site' : ', Devid’s default');
+  return [
+    h('div.np-head', {}, h('div.np-done', {}, h('span.np-badge', { 'aria-hidden': 'true' }, icon('check')),
+      h('div.dv-grow', {}, h('h2', { id: 'np-t' }, r.name + ' is ready'), h('div.np-url.dv-mono.dv-select-text', {}, r.url)))),
+    h('div.np-panel', {},
+      card(
+        row(h('span.np-k', {}, 'Folder'), h('span.dv-grow.dv-mono.dv-ellipsis.dv-select-text', { title: r.path }, r.path),
+          btn('Show in Finder', () => openTarget({ what: 'finder', path: r.path })), btn('Open in Terminal', () => openTarget({ what: 'terminal', path: r.path }))),
+        row(h('span.np-k', {}, 'Serves'), h('span.dv-grow', {}, serves)),
+        r.port ? row(h('span.np-k', {}, 'Dev server'), h('span.dv-grow', {}, h('span.dv-mono', {}, 'npm run dev'), ' on port ' + r.port,
+          tip('The site’s first visit starts it, and it stops after 10 minutes without use. It runs with your Node from nvm.'))) : null,
+        vite ? row(h('span.np-k', {}, 'Command'), h('span.dv-grow', {}, h('span.dv-mono', {}, 'vite'), ' · ', h('span.dv-mono', {}, vite.run),
+          tip('Saved for the site, for hot reload while you work. Started from Devid, Vite serves HTTPS with the site’s certificate.')),
+        btn('Start', startVite)) : null),
+      acc ? [h('div.np-sectionh', {}, h('span', {}, 'Database')),
+        card(row(h('span.np-k', {}, acc.label), h('span.dv-grow', {}, 'Account ', h('span.dv-mono', {}, acc.name), ' with its database',
+          tip('Its password is in ' + (r.template === 'symfony' ? '.env.local' : r.template === 'wordpress' ? 'wp-config.php' : '.env') + ', and Devid keeps it: Databases lists the account with the others.')),
+        btn('Copy password', () => copyDb(acc.engine, acc.name, true)),
+        r.template === 'laravel' ? btn('Copy .env', () => copyDb(acc.engine, acc.name, false))
+          : btn('Show in Databases', () => { S.np = null; closeDialog(); S.db.eng = acc.engine; go('databases'); })))] : null,
+      r.admin ? [h('div.np-sectionh', {}, h('span', {}, 'Sign in to WordPress',
+        tip('Devid does not keep this password. wp user update ' + r.admin.user + ' --user_pass=… sets a new one, and a lost-password email reaches Mail.')),
+      h('span.dv-chip.warn', {}, 'Shown once')),
+      card(row(h('span.np-k', {}, 'User'), h('span.dv-grow.dv-mono.dv-select-text', {}, r.admin.user)),
+        row(h('span.np-k', {}, 'Password'), h('code.dv-grow.np-secret', {}, r.admin.password),
+          btn('Copy', () => invoke('copy_text', { text: r.admin.password, what: 'the admin password' })
+            .then((m) => toast(m, false, 'Keep it somewhere safe: Devid does not keep it.'), (e) => toast(String(e), true)))),
+        row(h('span.np-k', {}, 'Dashboard'), h('span.dv-grow.dv-mono.dv-ellipsis', {}, r.url + '/wp-admin'),
+          btn('Open', () => openTarget({ what: 'site', name: r.name, path: '/wp-admin/' }))))] : null),
+    h('div.np-foot', {},
+      h('span.dv-sub.dv-grow.dv-ellipsis.dv-mono', {}, 'Log: ' + r.log),
+      h('button.dv-btn', { type: 'button', onclick: done }, 'Done'),
+      h('button.dv-btn.primary', { type: 'button', 'data-focus': true, onclick: () => { openTarget({ what: 'site', name: r.name }); done(); } }, 'Open in browser')),
+  ];
+}
+
 function sitesPage(d) {
   const st = S.status;
   const installed = st.php.map((p) => p.version);
@@ -412,7 +792,7 @@ function sitesPage(d) {
   out.push(h('div.st-grid.st-cols', { 'aria-hidden': 'true' }, h('span'), h('span', {}, 'Site'), h('span', {}, 'Serves'), h('span', {}, 'Processes'), h('span')));
   out.push(h('div.dv-card', { role: 'list' }, rows.length ? rows : h('div.dv-empty', {},
     h('div.dv-strong', {}, removed ? 'No removed sites' : 'No sites yet'),
-    h('div.dv-sub', {}, removed ? 'Sites you remove from a parked folder show up here, so you can serve them again.' : 'Park a folder, or link one with the + button.'))));
+    h('div.dv-sub', {}, removed ? 'Sites you remove from a parked folder show up here, so you can serve them again.' : 'Park a folder, or add a site with the + button: a new project or a folder you have.'))));
   out.push(h('p.dv-sub.dv-note', {}, removed ? 'Removed sites are not served. Their folders are not touched.'
     : 'PHP sites pick their version; a change reloads only that site. Node sites are proxied to the port their dev server listens on.'));
   return out;
@@ -2545,6 +2925,13 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { menuOpen.anchor.focus(); closeMenu(); }
   else if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+});
+// ⌘N: a new project (D-063), from any page, unless a menu or a dialog is open.
+document.addEventListener('keydown', (e) => {
+  if (!e.metaKey || e.shiftKey || e.altKey || e.ctrlKey || e.key.toLowerCase() !== 'n') return;
+  if (menuOpen || !$('overlay').hidden || !S.status) return;
+  e.preventDefault();
+  newProject();
 });
 // The menu bar's "Settings…" opens a new window on that page (main.rs sets this first).
 if (PAGES[window.DEVID_START_PAGE]) S.page = window.DEVID_START_PAGE;

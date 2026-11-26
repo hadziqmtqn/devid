@@ -71,6 +71,8 @@ fn is_read(req: &Request) -> bool {
             | Request::DbList { .. }
             | Request::DbUserList { .. }
             | Request::DbEnv { .. }
+            | Request::NewTemplates
+            | Request::NewProjectProgress
     )
 }
 
@@ -97,8 +99,13 @@ fn too_old(err: String, running: impl FnOnce() -> String) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "what", rename_all = "snake_case")]
 pub enum Open {
-    /// A site's URL, in the default browser.
-    Site { name: String },
+    /// A site's URL, in the default browser; `path` adds a page of it, such as WordPress's
+    /// `/wp-admin/` after `devid new` (D-063).
+    Site {
+        name: String,
+        #[serde(default)]
+        path: Option<String>,
+    },
     /// A site, a parked folder or a removed site's folder, in Terminal.
     Terminal { path: String },
     /// A site or parked folder, the data folder, a server config or a log file, selected in Finder.
@@ -123,6 +130,16 @@ pub fn inbox_url(paths: &Paths) -> Result<String, String> {
         .ok_or_else(|| "the daemon gave no inbox address".into())
 }
 
+/// A page on a site, such as `/wp-admin/`: a path only, with no scheme, host, query or anything a
+/// URL parser could read as another place.
+fn site_page(path: &str) -> Result<(), String> {
+    let ok = path.starts_with('/')
+        && !path.starts_with("//")
+        && !path.split('/').any(|part| part == "..")
+        && path.bytes().all(|b| b.is_ascii_alphanumeric() || b"/-_.".contains(&b));
+    if ok { Ok(()) } else { Err(format!("{path:?} is not a path on the site")) }
+}
+
 /// Opens something with macOS's `open`; returns the message to show, in the TUI's wording.
 #[tauri::command]
 pub async fn open(target: Open) -> Result<String, String> {
@@ -131,8 +148,12 @@ pub async fn open(target: Open) -> Result<String, String> {
     // (cmux puts one first) can send URLs to its in-app browser instead of the default browser.
     let mut cmd = Command::new("/usr/bin/open");
     let done = match target {
-        Open::Site { name } => {
-            let url = site_url(&paths, &name)?;
+        Open::Site { name, path } => {
+            let mut url = site_url(&paths, &name)?;
+            if let Some(path) = path {
+                site_page(&path)?;
+                url = format!("{}{path}", url.trim_end_matches('/'));
+            }
             cmd.arg(&url);
             format!("Opened {url}")
         }
@@ -226,6 +247,22 @@ pub async fn copy_db(engine: String, name: Option<String>, password: bool) -> Re
     pbcopy(&format!("{}\n", lines.join("\n"))).map(|_| format!("Copied {who}'s .env lines"))
 }
 
+/// Copies text that is on screen already and that Devid does not keep: WordPress's admin password
+/// after `devid new` (D-063). `what` names it in the reply, never the text itself.
+#[tauri::command]
+pub async fn copy_text(text: String, what: String) -> Result<String, String> {
+    pbcopy(&text).map(|_| format!("Copied {what}"))
+}
+
+/// `~/Sites`, made if missing, for a first project when no folder is parked yet (D-063): the page
+/// parks it next, as `devid new` offers in a terminal.
+#[tauri::command]
+pub async fn sites_folder() -> Result<String, String> {
+    let dir = devid_daemon::paths::user_home().join("Sites");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(dir.canonicalize().unwrap_or(dir).display().to_string())
+}
+
 fn pbcopy(text: &str) -> Result<(), String> {
     let mut child = Command::new("/usr/bin/pbcopy").stdin(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
     child.stdin.take().expect("piped stdin").write_all(text.as_bytes()).map_err(|e| e.to_string())?;
@@ -254,6 +291,7 @@ pub async fn choose_folder(window: tauri::WebviewWindow, purpose: String) -> Res
     let prompt = match purpose.as_str() {
         "link" => "Choose a folder to serve as a site",
         "park" => "Choose a folder whose folders become sites",
+        "new" => "Choose the folder to make the project in",
         _ => return Err(format!("unknown folder purpose {purpose}")),
     };
     let script = format!("POSIX path of (choose folder with prompt \"{prompt}\")");
@@ -624,6 +662,16 @@ fn first_line(text: &str, otherwise: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_paths_on_the_site_open() {
+        for ok in ["/wp-admin/", "/", "/docs/getting-started", "/a.b_c-d"] {
+            assert!(site_page(ok).is_ok(), "{ok}");
+        }
+        for bad in ["wp-admin", "//evil.test/", "/../x", "/a?b=1", "/a#b", "/a b", "/%2e%2e", "https://x.test", ""] {
+            assert!(site_page(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn self_update_output_becomes_the_pages_reply() {
