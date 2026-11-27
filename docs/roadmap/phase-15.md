@@ -578,6 +578,9 @@ D-063 stands. N1 settles these details for N2 and N3:
   - **Why N3 and the M1 run passed:** both moved each site's port with `devid app set` before the first visit, which turned the listener on. The owner's daemon already listens, for its on-demand sites.
   - **The fix:** `new_project` checks the on-demand sites once the project is made. `crates/cli/tests/new.rs` now checks that `run/wake.sock` appears with the first Node.js project. The test fails without the fix.
   - **Also seen:** a few PHP sites answered nothing (`000`) for a second right after `devid new`, then their page, as nginx reloaded. The check waits that out.
+- **The second run:** Ubuntu passed all 24 projects in 5 min 38 s, and every Node.js project woke at its first visit. On macOS, WordPress failed: `WP-CLI: download failed: https://api.github.com/repos/wp-cli/wp-cli/releases/latest`, which had passed in the first run.
+  - **The cause:** GitHub's REST API allows 60 requests an hour per address without a token. CI runners share addresses, and so can users, behind an office's network or a carrier's NAT.
+  - **The fix:** Devid reads WP-CLI's newest tag from where `github.com/wp-cli/wp-cli/releases/latest` redirects, without following it, and no longer calls the API. The phar and its SHA-512 come from that release as before. It was checked on the M1 with a fresh download, and a unit test covers reading the tag.
 
 ### The rc
 

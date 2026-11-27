@@ -17,6 +17,7 @@
   - **The report:** the table in the run's summary, and the logs as an artifact.
 - **Version 0.22.0-rc.1** in `Cargo.toml` and `Cargo.lock`. `release.yml`'s notes name `devid new`.
 - **A fix the check found** (`crates/daemon/src/server.rs`): after `devid new`, the daemon starts listening for on-demand visits, as after `app set`. Before, a new Node.js project did not wake at its first visit on a computer with no on-demand site yet. `crates/cli/tests/new.rs` checks for `run/wake.sock`.
+- **WP-CLI without GitHub's API** (`crates/daemon/src/install.rs`): the newest tag comes from the redirect of `github.com/wp-cli/wp-cli/releases/latest`. The API's limit without a token, 60 requests an hour per address, failed the second run on macOS.
 - **`README.md`:** the weekly check, under "Developing Devid".
 - **The docs:** `phase-15.md`'s "N5 results", the N3 note on the first visit's 502, D-063, the docs index and PROJECT_CONTEXT.
 
@@ -25,6 +26,7 @@
 - **On the owner's M1** (`SPARE_PORTS=1`): all 24 projects were made and answered, next to the owner's Devid 0.21.0 and DBngin. Nothing was left running.
 - **The first visit's 502** seen in N3 came back for React, Vue and SvelteKit in the first run. nginx's error log showed the cause: the test moved the port right before the visit, and the old worker used the old one. After a second's pause in the script, all three answered 200 at once.
 - **The first run on GitHub's runners:** the PHP projects passed on macOS 15 and Ubuntu 24.04, and every Node.js project failed to wake. That was the bug above, which the M1 run had hidden by moving the ports with `app set`. The new test fails without the fix.
+- **The second run:** Ubuntu passed all 24 projects. On macOS, WordPress failed at WP-CLI's lookup through GitHub's API. After the change, a WordPress site with a fresh WP-CLI download passed on the M1.
 - `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass.
 
 ## Next
