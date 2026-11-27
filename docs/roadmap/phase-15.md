@@ -2,7 +2,7 @@
 
 > Scope: `devid new` creates a PHP, Laravel, WordPress, Symfony, CodeIgniter 4, static or Node.js project and serves it at `https://<name>.test` right away, through the CLI, the TUI and the app (D-063)
 > Verified against: 2026-11-26 (Devid 0.21.0, main e6d9537; N1's runs on the owner's M1 and the Ubuntu VM: Laravel 13.44, its starter kits' `dev-main`, Symfony 8.1, CodeIgniter 4.7, create-vite 9.3, create-next-app 16.4, create-nuxt 4.1, sv 1.7, create-astro 5.3, WP-CLI 2.12.0, WordPress 7.1.5)
-> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results"). **N3 done 2026-11-26:** the nine Node.js templates, proxied with their dev server on demand, and the TUI's wizard (see "N3 results"). **N4 built 2026-11-26:** the app's New project sheet, from the board the owner approved; the owner's own try comes with the rc (see "N4 results"). **N5 in progress 2026-11-26:** a weekly workflow makes every template with the real tools on macOS and Ubuntu, and the guide's page is written. 0.22.0-rc.1 passed on the M1 and the Linux VMs on 2026-11-27, and the owner's changes to the app's sheet go out in 0.22.0-rc.2 (see "N5 results" and "rc.1").
+> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results"). **N3 done 2026-11-26:** the nine Node.js templates, proxied with their dev server on demand, and the TUI's wizard (see "N3 results"). **N4 done 2026-11-27:** the app's New project sheet, built on 2026-11-26 from the board the owner approved (see "N4 results"); the owner's try of rc.1 asked for changes, and rc.2 passed the owner's try (see "rc.1" and "rc.2"). **N5 done 2026-11-27:** a weekly workflow makes every template with the real tools on macOS and Ubuntu, and the guide's page is written. 0.22.0-rc.1 passed on the M1 and the Linux VMs, 0.22.0-rc.2 carried the owner's changes to the app's sheet and passed the owner's try on the M1, and 0.22.0 is the release (see "N5 results", "rc.1" and "rc.2").
 
 On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitur baru untuk create project PHP, Laravel, Wordpress, NodeJs, dll". They asked for suggestions before any documentation. This plan records the suggestions they accepted.
 
@@ -652,6 +652,22 @@ D-063 stands. N1 settles these details for N2 and N3:
   - `choose_folder`'s AppleScript compiles (`osacompile`), and the app's crate passes its checks.
 - **rc.2:** version 0.22.0-rc.2 carries these changes (devid#162), for the owner's try of the sheet in the real app. Whether macOS's suggestions stay closed in the Name field shows only there. 0.22.0 follows.
 
+### rc.2 (2026-11-27)
+
+- **The release:** the owner tagged v0.22.0-rc.2 (6ef6e6f). Release run 45958843072 passed. devid-binaries has the pre-release devid-v0.22.0-rc.2 with 8 files, and Latest stays 0.21.0.
+- **On the owner's M1,** with the owner's OK: rc.2's `install.sh`, the same as rc.1's, with `DEVID_VERSION=0.22.0-rc.2` and `--gui --no-sudo`, over rc.1.
+  - `devid` and the app are 0.22.0-rc.2, and the daemon restarted on it.
+  - doctor is all good, and the four sites are as before.
+  - DBngin's MySQL kept running on 3306, untouched.
+- **The owner's try of the sheet,** in the app reopened on rc.2. The owner was asked to check four things:
+  - no suggestions in the Name field after a pick elsewhere;
+  - the fields' one size and the frameworks' logos;
+  - Express, picked at the list's end, staying in view;
+  - the Folder field opening Finder's folder chooser, with no parked folder.
+
+  The answer: "Sudah saya coba, semua berjalan normal".
+- **0.22.0** is rc.2's code with the version changed. The release notes in `release.yml` name `devid new` since rc.1.
+
 ## Milestones
 
 | # | Milestone | Done when |
@@ -659,8 +675,8 @@ D-063 stands. N1 settles these details for N2 and N3:
 | N1 | **Spike:** each official tool without prompts, on macOS and Ubuntu | the fixed options, the time, the disk use and the Node versions of every template are in this doc. That includes the starter kits' package names, WP-CLI's release files, and whether `wp core download` checks its archive (done 2026-11-26, see "N1 results") |
 | N2 | **Daemon and CLI:** the templates, the job and its progress, the PHP templates, Laravel with the database and Mail, WordPress with WP-CLI and `wp` | on the M1, `devid new` makes a Laravel project with each database and a WordPress site. Each opens at `https://<name>.test`, next to DBngin (done 2026-11-26, see "N2 results") |
 | N3 | **Node.js templates and the TUI wizard** | every Node template opens through the proxy with hot reload, and the TUI makes a Laravel project and a Vite project (done 2026-11-26, see "N3 results") |
-| N4 | **The app's New project page** (macOS) | the owner approves a design board, then makes a project from the page on the M1 (board approved and page built 2026-11-26, see "N4 results"; the owner's own try comes with the rc) |
-| N5 | **CI, docs and release** | a weekly CI job makes every template with the real tools on macOS and Ubuntu, so a changed option shows within a week. The guide gets a `/docs/new-project` page. 0.22.0 ships after an rc on the M1 and the Linux VMs (the weekly job and the guide's page done 2026-11-26, see "N5 results"; the rc next) |
+| N4 | **The app's New project page** (macOS) | the owner approves a design board, then makes a project from the page on the M1 (done 2026-11-27: board approved and page built 2026-11-26, see "N4 results"; the owner's try of rc.1 asked for changes, and rc.2 passed it, see "rc.1" and "rc.2") |
+| N5 | **CI, docs and release** | a weekly CI job makes every template with the real tools on macOS and Ubuntu, so a changed option shows within a week. The guide gets a `/docs/new-project` page. 0.22.0 ships after an rc on the M1 and the Linux VMs (done 2026-11-27: the weekly job and the guide's page on 2026-11-26, see "N5 results"; rc.1 passed on the M1 and the three VMs, and rc.2 on the M1, see "rc.1" and "rc.2") |
 
 ## Where it is tested
 
