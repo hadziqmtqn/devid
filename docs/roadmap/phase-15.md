@@ -572,6 +572,12 @@ D-063 stands. N1 settles these details for N2 and N3:
   - With a second's pause after the move, all three answered 200 at their first visit.
   - `devid new` itself moves no port, and the weekly job on GitHub's runners moves none.
 - **Clean-up:** the script stops the daemon, which stops the databases and the dev servers, and removes its folder. Nothing of it was left running.
+- **The first run on GitHub's runners found a bug.**
+  - **What failed:** the 15 PHP projects passed on macOS 15 and Ubuntu 24.04, but none of the 9 Node.js projects woke at its first visit. Each answered "Nothing answers on localhost:<port>" for 240 s, and no dev server was started.
+  - **The cause:** the daemon listens for on-demand visits (`run/wake.sock`) only once some site is on demand. It checks that when it starts and after `app set`, `cmd on-demand` and `cmd start`, but not after `devid new`. On a computer with no on-demand site yet, the first Node.js project from `devid new` could not wake until something else turned the listener on, or the daemon restarted.
+  - **Why N3 and the M1 run passed:** both moved each site's port with `devid app set` before the first visit, which turned the listener on. The owner's daemon already listens, for its on-demand sites.
+  - **The fix:** `new_project` checks the on-demand sites once the project is made. `crates/cli/tests/new.rs` now checks that `run/wake.sock` appears with the first Node.js project. The test fails without the fix.
+  - **Also seen:** a few PHP sites answered nothing (`000`) for a second right after `devid new`, then their page, as nginx reloaded. The check waits that out.
 
 ### The rc
 

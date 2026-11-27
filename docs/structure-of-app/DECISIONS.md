@@ -1344,5 +1344,6 @@ See ARCHITECTURE, "PHP runtime".
 - **N5 (2026-11-26), in progress:**
   - **A weekly check:** `new-templates.yml` runs `scripts/new-e2e.sh` every Monday on macOS and Ubuntu. It makes 24 projects with the real tools (every template, Laravel's databases and kits, Symfony's databases and skeleton), and each must answer over HTTPS. It also runs on a pull request that changes the templates. All 24 passed on the owner's M1.
   - **N3's first-visit 502** came from the test moving each site's port right before its visit, during nginx's reload, not from `devid new`.
+  - **The check's first run on GitHub's runners found a bug.** `devid new` did not start the daemon's on-demand listener, so on a computer with no on-demand site yet, a new Node.js project did not wake at its first visit. N3's checks had turned the listener on with `devid app set` first. Fixed in N5, with a test.
   - **The guide's `/docs/new-project` page,** in English and Indonesian, waits in devid-site#25 for the release. 0.22.0-rc.1 comes next (`phase-15.md`, "N5 results").
 - **Status:** accepted on 2026-11-25. N1, N2 and N3 done on 2026-11-26; N4 built on 2026-11-26; N5's weekly check and the guide's page on 2026-11-26, with the rc next.

@@ -200,8 +200,12 @@ fn new_node_projects_are_proxied_and_start_on_demand() {
     assert_eq!(request_json(&home, r#"{"cmd":"new_templates"}"#)["node"], "24.22.3");
 
     // Vite's React: created without installing or starting, then npm install; a proxy site whose
-    // first visit starts `dev` on its own port.
+    // first visit starts `dev` on its own port. It is the first site on demand, so the daemon
+    // starts listening for visits then (N5's weekly check found it did not).
+    let wake = home.join("run/wake.sock");
+    assert!(!wake.exists(), "no site is on demand yet");
     let out = ok(&home, &["new", "react", "web"]);
+    assert!(wake.exists(), "the first visit could not wake the dev server");
     assert!(out.contains("web is ready") && out.contains("dev      port"), "{out}");
     let calls = fs::read_to_string(home.join("calls")).unwrap();
     assert!(calls.contains("npm view vite engines.node"), "{calls}");
