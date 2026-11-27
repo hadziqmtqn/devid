@@ -1,0 +1,63 @@
+name: New project templates
+
+# Phase 15 N5 (D-063): `devid new` with the real create tools (Composer, npm create, create-next-app,
+# sv, WP-CLI…), for every template, on macOS and Ubuntu: scripts/new-e2e.sh. The tools and the
+# starter kits change without Devid, so this runs every week, and a template whose tool changed its
+# options fails within a week. GitHub emails a failed scheduled run to the workflow's last editor.
+# It also runs on a pull request that changes the templates or this check.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1' # Mondays 03:00 UTC (10:00 WIB), after devid-binaries' weekly check
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - crates/daemon/src/newproject.rs
+      - scripts/new-e2e.sh
+      - .github/workflows/new-templates.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: new-templates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  templates:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: new-e2e
+      - run: cargo build --bin devid
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      # Devid's commands put nvm's Node first (D-036), as on the owner's computers; a runner's login
+      # files may put an older Node first on PATH.
+      - name: The newest LTS Node as nvm's default
+        run: |
+          nvm_dir="$("${SHELL:-/bin/zsh}" -lc 'echo "${NVM_DIR:-$HOME/.nvm}"')"
+          version="$(node --version)"
+          mkdir -p "$nvm_dir/versions/node" "$nvm_dir/alias"
+          [ -e "$nvm_dir/versions/node/$version" ] ||
+            ln -s "$(dirname "$(dirname "$(command -v node)")")" "$nvm_dir/versions/node/$version"
+          echo "$version" >"$nvm_dir/alias/default"
+      - name: Every template
+        run: scripts/new-e2e.sh target/debug/devid
+        env:
+          NEW_E2E_LOGS: ${{ runner.temp }}/new-logs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: new-e2e-${{ matrix.os }}
+          path: ${{ runner.temp }}/new-logs
+          if-no-files-found: ignore
