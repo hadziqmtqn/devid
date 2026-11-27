@@ -378,21 +378,41 @@ async function parkFolder() {
  *  tool it runs and a Node template's usual dev port. Which templates exist, and what this Mac
  *  lacks for one, come from the daemon. */
 const NP_TPL = {
-  laravel: { group: 'php', mono: 'L', color: '#C8473A' },
-  wordpress: { group: 'php', mono: 'W', color: '#2F6FA8', tool: 'WP-CLI: core download, config create, core install' },
-  symfony: { group: 'php', mono: 'Sf', color: '#47474C' },
-  codeigniter: { group: 'php', mono: 'CI', color: '#C2571F', tool: 'composer create-project codeigniter4/appstarter' },
-  php: { group: 'php', mono: 'P', color: '#5B5FA8', tool: 'a folder with index.php' },
-  static: { group: 'php', mono: 'H', color: '#77777D', tool: 'a folder with index.html' },
-  react: { group: 'js', mono: 'R', color: '#1B8FB3', tool: 'npm create vite@latest -- --template react-ts', port: 5173 },
-  vue: { group: 'js', mono: 'V', color: '#2F8F63', tool: 'npm create vite@latest -- --template vue-ts', port: 5173 },
-  svelte: { group: 'js', mono: 'S', color: '#D9541E', tool: 'npm create vite@latest -- --template svelte-ts', port: 5173 },
-  vite: { group: 'js', mono: 'Vi', color: '#7357D6', tool: 'npm create vite@latest -- --template vanilla-ts', port: 5173 },
-  next: { group: 'js', mono: 'N', color: '#2C2C2E', tool: 'npx create-next-app@latest', port: 3000 },
-  nuxt: { group: 'js', mono: 'Nx', color: '#22885C', tool: 'npm create nuxt@latest', port: 3000 },
-  sveltekit: { group: 'js', mono: 'SK', color: '#C8461A', tool: 'npx sv create', port: 5173 },
-  astro: { group: 'js', mono: 'A', color: '#B23F18', tool: 'npm create astro@latest', port: 4321 },
-  express: { group: 'js', mono: 'Ex', color: '#4D4D52', tool: 'package.json and server.js from Devid, then npm install express', port: 3000 },
+  laravel: { group: 'php' },
+  wordpress: { group: 'php', tool: 'WP-CLI: core download, config create, core install' },
+  symfony: { group: 'php' },
+  codeigniter: { group: 'php', tool: 'composer create-project codeigniter4/appstarter' },
+  php: { group: 'php', tool: 'a folder with index.php' },
+  static: { group: 'php', tool: 'a folder with index.html' },
+  react: { group: 'js', tool: 'npm create vite@latest -- --template react-ts', port: 5173 },
+  vue: { group: 'js', tool: 'npm create vite@latest -- --template vue-ts', port: 5173 },
+  svelte: { group: 'js', tool: 'npm create vite@latest -- --template svelte-ts', port: 5173 },
+  vite: { group: 'js', tool: 'npm create vite@latest -- --template vanilla-ts', port: 5173 },
+  next: { group: 'js', tool: 'npx create-next-app@latest', port: 3000 },
+  nuxt: { group: 'js', tool: 'npm create nuxt@latest', port: 3000 },
+  sveltekit: { group: 'js', tool: 'npx sv create', port: 5173 },
+  astro: { group: 'js', tool: 'npm create astro@latest', port: 4321 },
+  express: { group: 'js', tool: 'package.json and server.js from Devid, then npm install express', port: 3000 },
+};
+/** Each template's logo: its brand's mark from Simple Icons 16.37.0 (CC0-1.0), in the brand's color. The marks
+ *  are their owners' trademarks, shown only to name each framework. A black mark (null) takes the
+ *  text color, so it shows in both themes; SvelteKit uses Svelte's mark and static sites HTML5's. */
+const NP_LOGO = {
+  laravel: ['#FF2D20', 'M23.642 5.43a.364.364 0 01.014.1v5.149c0 .135-.073.26-.189.326l-4.323 2.49v4.934a.378.378 0 01-.188.326L9.93 23.949a.316.316 0 01-.066.027c-.008.002-.016.008-.024.01a.348.348 0 01-.192 0c-.011-.002-.02-.008-.03-.012-.02-.008-.042-.014-.062-.025L.533 18.755a.376.376 0 01-.189-.326V2.974c0-.033.005-.066.014-.098.003-.012.01-.02.014-.032a.369.369 0 01.023-.058c.004-.013.015-.022.023-.033l.033-.045c.012-.01.025-.018.037-.027.014-.012.027-.024.041-.034H.53L5.043.05a.375.375 0 01.375 0L9.93 2.647h.002c.015.01.027.021.04.033l.038.027c.013.014.02.03.033.045.008.011.02.021.025.033.01.02.017.038.024.058.003.011.01.021.013.032.01.031.014.064.014.098v9.652l3.76-2.164V5.527c0-.033.004-.066.013-.098.003-.01.01-.02.013-.032a.487.487 0 01.024-.059c.007-.012.018-.02.025-.033.012-.015.021-.03.033-.043.012-.012.025-.02.037-.028.014-.01.026-.023.041-.032h.001l4.513-2.598a.375.375 0 01.375 0l4.513 2.598c.016.01.027.021.042.031.012.01.025.018.036.028.013.014.022.03.034.044.008.012.019.021.024.033.011.02.018.04.024.06.006.01.012.021.015.032zm-.74 5.032V6.179l-1.578.908-2.182 1.256v4.283zm-4.51 7.75v-4.287l-2.147 1.225-6.126 3.498v4.325zM1.093 3.624v14.588l8.273 4.761v-4.325l-4.322-2.445-.002-.003H5.04c-.014-.01-.025-.021-.04-.031-.011-.01-.024-.018-.035-.027l-.001-.002c-.013-.012-.021-.025-.031-.04-.01-.011-.021-.022-.028-.036h-.002c-.008-.014-.013-.031-.02-.047-.006-.016-.014-.027-.018-.043a.49.49 0 01-.008-.057c-.002-.014-.006-.027-.006-.041V5.789l-2.18-1.257zM5.23.81L1.47 2.974l3.76 2.164 3.758-2.164zm1.956 13.505l2.182-1.256V3.624l-1.58.91-2.182 1.255v9.435zm11.581-10.95l-3.76 2.163 3.76 2.163 3.759-2.164zm-.376 4.978L16.21 7.087 14.63 6.18v4.283l2.182 1.256 1.58.908zm-8.65 9.654l5.514-3.148 2.756-1.572-3.757-2.163-4.323 2.489-3.941 2.27z'],
+  wordpress: ['#21759B', 'M21.469 6.825c.84 1.537 1.318 3.3 1.318 5.175 0 3.979-2.156 7.456-5.363 9.325l3.295-9.527c.615-1.54.82-2.771.82-3.864 0-.405-.026-.78-.07-1.11m-7.981.105c.647-.03 1.232-.105 1.232-.105.582-.075.514-.93-.067-.899 0 0-1.755.135-2.88.135-1.064 0-2.85-.15-2.85-.15-.585-.03-.661.855-.075.885 0 0 .54.061 1.125.09l1.68 4.605-2.37 7.08L5.354 6.9c.649-.03 1.234-.1 1.234-.1.585-.075.516-.93-.065-.896 0 0-1.746.138-2.874.138-.2 0-.438-.008-.69-.015C4.911 3.15 8.235 1.215 12 1.215c2.809 0 5.365 1.072 7.286 2.833-.046-.003-.091-.009-.141-.009-1.06 0-1.812.923-1.812 1.914 0 .89.513 1.643 1.06 2.531.411.72.89 1.643.89 2.977 0 .915-.354 1.994-.821 3.479l-1.075 3.585-3.9-11.61.001.014zM12 22.784c-1.059 0-2.081-.153-3.048-.437l3.237-9.406 3.315 9.087c.024.053.05.101.078.149-1.12.393-2.325.609-3.582.609M1.211 12c0-1.564.336-3.05.935-4.39L7.29 21.709C3.694 19.96 1.212 16.271 1.211 12M12 0C5.385 0 0 5.385 0 12s5.385 12 12 12 12-5.385 12-12S18.615 0 12 0'],
+  symfony: [null, 'M24 12c0 6.628-5.372 12-12 12S0 18.628 0 12 5.372 0 12 0s12 5.372 12 12zm-6.753-7.561c-1.22.042-2.283.715-3.075 1.644-.878 1.02-1.461 2.229-1.881 3.461-.753-.614-1.332-1.414-2.539-1.761-.966-.297-2.015-.105-2.813.514-.41.319-.71.757-.861 1.254-.36 1.176.381 2.225.719 2.6l.737.79c.15.154.519.56.339 1.138-.193.631-.951 1.037-1.732.799-.348-.106-.848-.366-.734-.73.045-.15.152-.263.21-.391.052-.11.077-.194.095-.242.141-.465-.053-1.07-.551-1.223-.465-.143-.939-.03-1.125.566-.209.68.117 1.913 1.86 2.449 2.04.628 3.765-.484 4.009-1.932.153-.907-.255-1.582-1.006-2.447l-.612-.677c-.371-.37-.497-1.002-.114-1.485.324-.409.785-.584 1.539-.379 1.103.3 1.594 1.063 2.412 1.68-.338 1.11-.56 2.223-.759 3.222l-.123.746c-.585 3.07-1.033 4.757-2.194 5.726-.234.166-.57.416-1.073.434-.266.005-.352-.176-.355-.257-.006-.184.15-.271.255-.353.154-.083.39-.224.372-.674-.016-.532-.456-.994-1.094-.973-.477.017-1.203.465-1.176 1.286.028.85.819 1.485 2.012 1.444.638-.021 2.062-.281 3.464-1.949 1.633-1.911 2.09-4.101 2.434-5.706l.383-2.116c.213.024.441.042.69.048 2.032.044 3.049-1.01 3.064-1.776.01-.464-.304-.921-.744-.91-.386.009-.718.278-.806.654-.094.428.646.813.068 1.189-.41.266-1.146.452-2.184.3l.188-1.042c.386-1.976.859-4.407 2.661-4.467.132-.007.612.006.623.323.003.105-.022.134-.147.375-.115.155-.174.345-.168.537.017.504.4.836.957.816.743-.023.955-.748.945-1.119-.032-.874-.952-1.424-2.17-1.386z'],
+  codeigniter: ['#EF4223', 'M11.466 0c.88 1.423-.28 3.306-1.207 4.358-.899 1.02-1.992 1.873-2.985 2.8-1.066.996-2.091 2.044-2.967 3.213-1.753 2.339-2.827 5.28-2.038 8.199.788 2.916 3.314 4.772 6.167 5.429-1.44-.622-2.786-2.203-2.79-3.82-.003-1.765 1.115-3.262 2.505-4.246-.167.632-.258 1.21.155 1.774a1.68 1.68 0 0 0 1.696.642c1.487-.326 1.556-1.96.674-2.914-.872-.943-1.715-2.009-1.384-3.377.167-.685.588-1.328 1.121-1.787-.41 1.078.755 2.14 1.523 2.67 1.332.918 2.793 1.612 4.017 2.688 1.288 1.132 2.24 2.661 2.047 4.435-.208 1.923-1.736 3.26-3.45 3.936 3.622-.8 7.365-3.61 7.44-7.627.093-3.032-1.903-5.717-5.158-7.384.19.48.074.697-.058.924-.55.944-2.082 1.152-2.835.184-1.205-1.548.025-3.216.197-4.855.215-2.055-1.073-4.049-2.67-5.242z'],
+  php: ['#777BB4', 'M7.01 10.207h-.944l-.515 2.648h.838c.556 0 .97-.105 1.242-.314.272-.21.455-.559.55-1.049.092-.47.05-.802-.124-.995-.175-.193-.523-.29-1.047-.29zM12 5.688C5.373 5.688 0 8.514 0 12s5.373 6.313 12 6.313S24 15.486 24 12c0-3.486-5.373-6.312-12-6.312zm-3.26 7.451c-.261.25-.575.438-.917.551-.336.108-.765.164-1.285.164H5.357l-.327 1.681H3.652l1.23-6.326h2.65c.797 0 1.378.209 1.744.628.366.418.476 1.002.33 1.752a2.836 2.836 0 0 1-.305.847c-.143.255-.33.49-.561.703zm4.024.715l.543-2.799c.063-.318.039-.536-.068-.651-.107-.116-.336-.174-.687-.174H11.46l-.704 3.625H9.388l1.23-6.327h1.367l-.327 1.682h1.218c.767 0 1.295.134 1.586.401s.378.7.263 1.299l-.572 2.944h-1.389zm7.597-2.265a2.782 2.782 0 0 1-.305.847c-.143.255-.33.49-.561.703a2.44 2.44 0 0 1-.917.551c-.336.108-.765.164-1.286.164h-1.18l-.327 1.682h-1.378l1.23-6.326h2.649c.797 0 1.378.209 1.744.628.366.417.477 1.001.331 1.751zM17.766 10.207h-.943l-.516 2.648h.838c.557 0 .971-.105 1.242-.314.272-.21.455-.559.551-1.049.092-.47.049-.802-.125-.995s-.524-.29-1.047-.29z'],
+  static: ['#E34F26', 'M1.5 0h21l-1.91 21.563L11.977 24l-8.564-2.438L1.5 0zm7.031 9.75l-.232-2.718 10.059.003.23-2.622L5.412 4.41l.698 8.01h9.126l-.326 3.426-2.91.804-2.955-.81-.188-2.11H6.248l.33 4.171L12 19.351l5.379-1.443.744-8.157H8.531z'],
+  react: ['#61DAFB', 'M14.23 12.004a2.236 2.236 0 0 1-2.235 2.236 2.236 2.236 0 0 1-2.236-2.236 2.236 2.236 0 0 1 2.235-2.236 2.236 2.236 0 0 1 2.236 2.236zm2.648-10.69c-1.346 0-3.107.96-4.888 2.622-1.78-1.653-3.542-2.602-4.887-2.602-.41 0-.783.093-1.106.278-1.375.793-1.683 3.264-.973 6.365C1.98 8.917 0 10.42 0 12.004c0 1.59 1.99 3.097 5.043 4.03-.704 3.113-.39 5.588.988 6.38.32.187.69.275 1.102.275 1.345 0 3.107-.96 4.888-2.624 1.78 1.654 3.542 2.603 4.887 2.603.41 0 .783-.09 1.106-.275 1.374-.792 1.683-3.263.973-6.365C22.02 15.096 24 13.59 24 12.004c0-1.59-1.99-3.097-5.043-4.032.704-3.11.39-5.587-.988-6.38-.318-.184-.688-.277-1.092-.278zm-.005 1.09v.006c.225 0 .406.044.558.127.666.382.955 1.835.73 3.704-.054.46-.142.945-.25 1.44-.96-.236-2.006-.417-3.107-.534-.66-.905-1.345-1.727-2.035-2.447 1.592-1.48 3.087-2.292 4.105-2.295zm-9.77.02c1.012 0 2.514.808 4.11 2.28-.686.72-1.37 1.537-2.02 2.442-1.107.117-2.154.298-3.113.538-.112-.49-.195-.964-.254-1.42-.23-1.868.054-3.32.714-3.707.19-.09.4-.127.563-.132zm4.882 3.05c.455.468.91.992 1.36 1.564-.44-.02-.89-.034-1.345-.034-.46 0-.915.01-1.36.034.44-.572.895-1.096 1.345-1.565zM12 8.1c.74 0 1.477.034 2.202.093.406.582.802 1.203 1.183 1.86.372.64.71 1.29 1.018 1.946-.308.655-.646 1.31-1.013 1.95-.38.66-.773 1.288-1.18 1.87-.728.063-1.466.098-2.21.098-.74 0-1.477-.035-2.202-.093-.406-.582-.802-1.204-1.183-1.86-.372-.64-.71-1.29-1.018-1.946.303-.657.646-1.313 1.013-1.954.38-.66.773-1.286 1.18-1.868.728-.064 1.466-.098 2.21-.098zm-3.635.254c-.24.377-.48.763-.704 1.16-.225.39-.435.782-.635 1.174-.265-.656-.49-1.31-.676-1.947.64-.15 1.315-.283 2.015-.386zm7.26 0c.695.103 1.365.23 2.006.387-.18.632-.405 1.282-.66 1.933-.2-.39-.41-.783-.64-1.174-.225-.392-.465-.774-.705-1.146zm3.063.675c.484.15.944.317 1.375.498 1.732.74 2.852 1.708 2.852 2.476-.005.768-1.125 1.74-2.857 2.475-.42.18-.88.342-1.355.493-.28-.958-.646-1.956-1.1-2.98.45-1.017.81-2.01 1.085-2.964zm-13.395.004c.278.96.645 1.957 1.1 2.98-.45 1.017-.812 2.01-1.086 2.964-.484-.15-.944-.318-1.37-.5-1.732-.737-2.852-1.706-2.852-2.474 0-.768 1.12-1.742 2.852-2.476.42-.18.88-.342 1.356-.494zm11.678 4.28c.265.657.49 1.312.676 1.948-.64.157-1.316.29-2.016.39.24-.375.48-.762.705-1.158.225-.39.435-.788.636-1.18zm-9.945.02c.2.392.41.783.64 1.175.23.39.465.772.705 1.143-.695-.102-1.365-.23-2.006-.386.18-.63.406-1.282.66-1.933zM17.92 16.32c.112.493.2.968.254 1.423.23 1.868-.054 3.32-.714 3.708-.147.09-.338.128-.563.128-1.012 0-2.514-.807-4.11-2.28.686-.72 1.37-1.536 2.02-2.44 1.107-.118 2.154-.3 3.113-.54zm-11.83.01c.96.234 2.006.415 3.107.532.66.905 1.345 1.727 2.035 2.446-1.595 1.483-3.092 2.295-4.11 2.295-.22-.005-.406-.05-.553-.132-.666-.38-.955-1.834-.73-3.703.054-.46.142-.944.25-1.438zm4.56.64c.44.02.89.034 1.345.034.46 0 .915-.01 1.36-.034-.44.572-.895 1.095-1.345 1.565-.455-.47-.91-.993-1.36-1.565z'],
+  vue: ['#4FC08D', 'M24,1.61H14.06L12,5.16,9.94,1.61H0L12,22.39ZM12,14.08,5.16,2.23H9.59L12,6.41l2.41-4.18h4.43Z'],
+  svelte: ['#FF3E00', 'M10.354 21.125a4.44 4.44 0 0 1-4.765-1.767 4.109 4.109 0 0 1-.703-3.107 3.898 3.898 0 0 1 .134-.522l.105-.321.287.21a7.21 7.21 0 0 0 2.186 1.092l.208.063-.02.208a1.253 1.253 0 0 0 .226.83 1.337 1.337 0 0 0 1.435.533 1.231 1.231 0 0 0 .343-.15l5.59-3.562a1.164 1.164 0 0 0 .524-.778 1.242 1.242 0 0 0-.211-.937 1.338 1.338 0 0 0-1.435-.533 1.23 1.23 0 0 0-.343.15l-2.133 1.36a4.078 4.078 0 0 1-1.135.499 4.44 4.44 0 0 1-4.765-1.766 4.108 4.108 0 0 1-.702-3.108 3.855 3.855 0 0 1 1.742-2.582l5.589-3.563a4.072 4.072 0 0 1 1.135-.499 4.44 4.44 0 0 1 4.765 1.767 4.109 4.109 0 0 1 .703 3.107 3.943 3.943 0 0 1-.134.522l-.105.321-.286-.21a7.204 7.204 0 0 0-2.187-1.093l-.208-.063.02-.207a1.255 1.255 0 0 0-.226-.831 1.337 1.337 0 0 0-1.435-.532 1.231 1.231 0 0 0-.343.15L8.62 9.368a1.162 1.162 0 0 0-.524.778 1.24 1.24 0 0 0 .211.937 1.338 1.338 0 0 0 1.435.533 1.235 1.235 0 0 0 .344-.151l2.132-1.36a4.067 4.067 0 0 1 1.135-.498 4.44 4.44 0 0 1 4.765 1.766 4.108 4.108 0 0 1 .702 3.108 3.857 3.857 0 0 1-1.742 2.583l-5.589 3.562a4.072 4.072 0 0 1-1.135.499m10.358-17.95C18.484-.015 14.082-.96 10.9 1.068L5.31 4.63a6.412 6.412 0 0 0-2.896 4.295 6.753 6.753 0 0 0 .666 4.336 6.43 6.43 0 0 0-.96 2.396 6.833 6.833 0 0 0 1.168 5.167c2.229 3.19 6.63 4.135 9.812 2.108l5.59-3.562a6.41 6.41 0 0 0 2.896-4.295 6.756 6.756 0 0 0-.665-4.336 6.429 6.429 0 0 0 .958-2.396 6.831 6.831 0 0 0-1.167-5.168Z'],
+  vite: ['#9135FF', 'M13.056 23.238a.57.57 0 0 1-1.02-.355v-5.202c0-.63-.512-1.143-1.144-1.143H5.148a.57.57 0 0 1-.464-.903l3.777-5.29c.54-.753 0-1.804-.93-1.804H.57a.574.574 0 0 1-.543-.746.6.6 0 0 1 .08-.157L5.008.78a.57.57 0 0 1 .467-.24h14.589a.57.57 0 0 1 .466.903l-3.778 5.29c-.54.755 0 1.806.93 1.806h5.745c.238 0 .424.138.513.322a.56.56 0 0 1-.063.603z'],
+  next: [null, 'M18.665 21.978C16.758 23.255 14.465 24 12 24 5.377 24 0 18.623 0 12S5.377 0 12 0s12 5.377 12 12c0 3.583-1.574 6.801-4.067 9.001L9.219 7.2H7.2v9.596h1.615V9.251l9.85 12.727Zm-3.332-8.533 1.6 2.061V7.2h-1.6v6.245Z'],
+  nuxt: ['#00DC82', 'M13.4642 19.8295h8.9218c.2834 0 .5618-.0723.8072-.2098a1.5899 1.5899 0 0 0 .5908-.5732 1.5293 1.5293 0 0 0 .216-.783 1.529 1.529 0 0 0-.2167-.7828L17.7916 7.4142a1.5904 1.5904 0 0 0-.5907-.573 1.6524 1.6524 0 0 0-.807-.2099c-.2833 0-.5616.0724-.807.2098a1.5904 1.5904 0 0 0-.5907.5731L13.4642 9.99l-2.9954-5.0366a1.5913 1.5913 0 0 0-.591-.573 1.6533 1.6533 0 0 0-.8071-.2098c-.2834 0-.5617.0723-.8072.2097a1.5913 1.5913 0 0 0-.591.573L.2168 17.4808A1.5292 1.5292 0 0 0 0 18.2635c-.0001.2749.0744.545.216.783a1.59 1.59 0 0 0 .5908.5732c.2454.1375.5238.2098.8072.2098h5.6003c2.219 0 3.8554-.9454 4.9813-2.7899l2.7337-4.5922L16.3935 9.99l4.3944 7.382h-5.8586ZM7.123 17.3694l-3.9083-.0009 5.8586-9.8421 2.9232 4.921-1.9572 3.2892c-.7478 1.1967-1.5972 1.6328-2.9163 1.6328z'],
+  sveltekit: ['#FF3E00', 'M10.354 21.125a4.44 4.44 0 0 1-4.765-1.767 4.109 4.109 0 0 1-.703-3.107 3.898 3.898 0 0 1 .134-.522l.105-.321.287.21a7.21 7.21 0 0 0 2.186 1.092l.208.063-.02.208a1.253 1.253 0 0 0 .226.83 1.337 1.337 0 0 0 1.435.533 1.231 1.231 0 0 0 .343-.15l5.59-3.562a1.164 1.164 0 0 0 .524-.778 1.242 1.242 0 0 0-.211-.937 1.338 1.338 0 0 0-1.435-.533 1.23 1.23 0 0 0-.343.15l-2.133 1.36a4.078 4.078 0 0 1-1.135.499 4.44 4.44 0 0 1-4.765-1.766 4.108 4.108 0 0 1-.702-3.108 3.855 3.855 0 0 1 1.742-2.582l5.589-3.563a4.072 4.072 0 0 1 1.135-.499 4.44 4.44 0 0 1 4.765 1.767 4.109 4.109 0 0 1 .703 3.107 3.943 3.943 0 0 1-.134.522l-.105.321-.286-.21a7.204 7.204 0 0 0-2.187-1.093l-.208-.063.02-.207a1.255 1.255 0 0 0-.226-.831 1.337 1.337 0 0 0-1.435-.532 1.231 1.231 0 0 0-.343.15L8.62 9.368a1.162 1.162 0 0 0-.524.778 1.24 1.24 0 0 0 .211.937 1.338 1.338 0 0 0 1.435.533 1.235 1.235 0 0 0 .344-.151l2.132-1.36a4.067 4.067 0 0 1 1.135-.498 4.44 4.44 0 0 1 4.765 1.766 4.108 4.108 0 0 1 .702 3.108 3.857 3.857 0 0 1-1.742 2.583l-5.589 3.562a4.072 4.072 0 0 1-1.135.499m10.358-17.95C18.484-.015 14.082-.96 10.9 1.068L5.31 4.63a6.412 6.412 0 0 0-2.896 4.295 6.753 6.753 0 0 0 .666 4.336 6.43 6.43 0 0 0-.96 2.396 6.833 6.833 0 0 0 1.168 5.167c2.229 3.19 6.63 4.135 9.812 2.108l5.59-3.562a6.41 6.41 0 0 0 2.896-4.295 6.756 6.756 0 0 0-.665-4.336 6.429 6.429 0 0 0 .958-2.396 6.831 6.831 0 0 0-1.167-5.168Z'],
+  astro: ['#BC52EE', 'M8.358 20.162c-1.186-1.07-1.532-3.316-1.038-4.944.856 1.026 2.043 1.352 3.272 1.535 1.897.283 3.76.177 5.522-.678.202-.098.388-.229.608-.36.166.473.209.95.151 1.437-.14 1.185-.738 2.1-1.688 2.794-.38.277-.782.525-1.175.787-1.205.804-1.531 1.747-1.078 3.119l.044.148a3.158 3.158 0 0 1-1.407-1.188 3.31 3.31 0 0 1-.544-1.815c-.004-.32-.004-.642-.048-.958-.106-.769-.472-1.113-1.161-1.133-.707-.02-1.267.411-1.415 1.09-.012.053-.028.104-.045.165h.002zm-5.961-4.445s3.24-1.575 6.49-1.575l2.451-7.565c.092-.366.36-.614.662-.614.302 0 .57.248.662.614l2.45 7.565c3.85 0 6.491 1.575 6.491 1.575L16.088.727C15.93.285 15.663 0 15.303 0H8.697c-.36 0-.615.285-.784.727l-5.516 14.99z'],
+  express: [null, 'M12.262 16.666h1.146l6.975-9.325H19.22zm9.778 1.441v.004l-4.334-5.706-.557.74 4.873 6.682H.945V4.173h9.505l5.026 6.7.574-.772-4.374-5.928h.003l-.719-.945H0v17.544h24zM10.917 8.705a3.8 3.8 0 0 0-1.292-1.183q-.796-.45-1.916-.45c-.746 0-1.37.14-1.906.424a3.76 3.76 0 0 0-1.31 1.12 4.9 4.9 0 0 0-.75 1.581 7.17 7.17 0 0 0 0 3.696c.148.567.402 1.101.75 1.573a3.5 3.5 0 0 0 1.31 1.066q.803.39 1.906.389 1.77 0 2.739-.868.966-.867 1.328-2.457h-1.139q-.271 1.084-.977 1.734-.704.651-1.952.65-.812 0-1.392-.342a3.1 3.1 0 0 1-.957-.869 3.5 3.5 0 0 1-.551-1.182 5 5 0 0 1-.17-1.133 9 9 0 0 0-.015-.286 4.5 4.5 0 0 1 .015-.829c.047-.418.147-.83.296-1.223A3.7 3.7 0 0 1 5.54 9.05a2.9 2.9 0 0 1 .922-.742q.541-.28 1.246-.28c.47 0 .869.093 1.23.28q.541.281.922.742.379.461.587 1.057t.225 1.246H5.625l.004.957h6.182a7.3 7.3 0 0 0-.18-1.924 4.9 4.9 0 0 0-.715-1.68z'],
 };
 const NP_ORDER = ['laravel', 'wordpress', 'symfony', 'codeigniter', 'php', 'static', 'react', 'vue', 'svelte', 'vite', 'next', 'nuxt', 'sveltekit', 'astro', 'express'];
 const NP_ACCOUNT_STEP = 'Making the database account'; // newproject::steps
@@ -491,8 +511,26 @@ function npClose() {
 function npDraw() {
   const np = S.np;
   if (!np || np.hidden) return;
+  // A redraw replaces the sheet. The template list keeps its scroll, and so does the form while its
+  // template stays, so a pick never jumps; the chosen template stays in view, as when ↓ passes the
+  // list's end.
+  const q = (sel) => document.querySelector('.dv-dialog.np ' + sel);
+  const list = q('.np-list')?.scrollTop || 0, panel = np.drawn === np.tpl ? q('.np-panel')?.scrollTop || 0 : 0;
+  // A pick elsewhere (np.focus: 'item' or a select's label) gets the focus back, never the Name
+  // field: WebKit leaves the field focused through a click on a button, and handing it the focus
+  // again opened its suggestions after every pick.
+  const want = np.focus;
+  np.focus = null;
+  if (want) document.activeElement?.blur();
   const body = np.stage === 'form' ? npForm(np) : np.stage === 'ready' ? npReady(np) : npJob(np);
   showDialog(h('div.dv-dialog.np', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'np-t' }, body), npClose);
+  np.drawn = np.stage === 'form' && np.templates ? np.tpl : null;
+  if (q('.np-list')) q('.np-list').scrollTop = list;
+  if (q('.np-panel')) q('.np-panel').scrollTop = panel;
+  q('.np-item[aria-checked="true"]')?.scrollIntoView({ block: 'nearest' });
+  if (want && np.stage === 'form') {
+    (want === 'item' ? q('.np-item[aria-checked="true"]') : q('[aria-label="' + CSS.escape(want) + '"]'))?.focus({ preventScroll: true });
+  }
   if (np.stage === 'form') npSync(np);
 }
 
@@ -510,17 +548,49 @@ function npSync(np) {
   for (const el of document.querySelectorAll('[data-np-db]')) el.textContent = npDbName(np.name || 'name');
 }
 
+/** A template's logo (NP_LOGO), or its initial for a template Devid has no mark for. */
+function npLogo(k) {
+  if (!Object.hasOwn(NP_LOGO, k)) return k.charAt(0).toUpperCase();
+  const t = document.createElement('template');
+  t.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + NP_LOGO[k][1] + '"/></svg>'; // constant markup, never data
+  const svg = t.content.firstElementChild;
+  svg.style.fill = NP_LOGO[k][0] || 'currentColor';
+  return svg;
+}
+
+/** The sheet's select field: the app's dropdown in the shape of the Name field (np-field), with its
+ *  list opening under it, as wide as the field. An option may be disabled, with a title saying why. */
+function npSelect(label, value, options, pick) {
+  const cur = options.find((o) => o.value === value) || { label: value };
+  return h('button.dv-select.np-field', { type: 'button', 'aria-label': label, 'aria-haspopup': 'menu', 'aria-expanded': 'false', disabled: !!S.busy,
+    onclick: (e) => {
+      const field = e.currentTarget;
+      menu(field, options.map((o) => ({ label: o.label, checked: o.value === value, disabled: o.disabled, title: o.title,
+        run: () => {
+          if (o.value === value) return field.focus();
+          if (S.np) S.np.focus = label;
+          pick(o.value);
+        } })), true);
+      const r = field.getBoundingClientRect(), m = menuOpen?.m;
+      if (m) {
+        m.style.minWidth = r.width + 'px';
+        m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + 'px';
+      }
+    } },
+  h('span.dv-ellipsis', {}, cur.label), icon('chevron'));
+}
+
 function npForm(np) {
   const st = S.status;
   const t = npTemplate(np), meta = NP_TPL[np.tpl] || {}, { kitLimit, block } = npLimits(np);
   const set = (patch) => () => { Object.assign(np, patch); npDraw(); };
-  const tile = (k, cls = '') => h('span.np-tile' + cls, { style: 'background: ' + (NP_TPL[k]?.color || '#77777D'), 'aria-hidden': 'true' }, NP_TPL[k]?.mono || k[0].toUpperCase());
+  const tile = (k, cls = '') => h('span.np-logo' + cls, { 'aria-hidden': 'true' }, npLogo(k));
   const list = np.templates ? [['php', 'PHP'], ['js', 'JavaScript · Node.js']].map(([group, title]) => [
     h('div.np-group', {}, title),
     NP_ORDER.map((k) => np.templates.find((x) => x.template === k)).filter((x) => x && (NP_TPL[x.template]?.group || 'php') === group).map((x) => {
       const why = x.limits.filter((l) => !l.includes('starter kits')).map(capital).join(' ');
       return h('button.np-item', { type: 'button', role: 'radio', 'aria-checked': String(np.tpl === x.template), title: why || null,
-        onclick: set({ tpl: x.template, kit: '', db: '', php: '' }), onkeydown: npArrow },
+        onclick: () => { np.focus = 'item'; set({ tpl: x.template, kit: '', db: '', php: '' })(); }, onkeydown: npArrow },
       tile(x.template), h('span.dv-grow.dv-ellipsis', {}, x.label), why ? h('span.np-flag', { 'aria-label': why }) : null);
     })]) : h('div.dv-sub.np-loading', {}, np.error ? '' : 'Loading the templates…');
   const phpOptions = [{ value: '', label: 'Default (' + st.default_php + ')' }]
@@ -537,6 +607,21 @@ function npForm(np) {
     np.folder = v;
     npDraw();
   };
+  // The template's options, each a labelled select in one row of equal columns.
+  const opt = (label, about, field) => h('div', {}, h('div.np-label', {}, label, tip(about)), field);
+  const kind = np.tpl === 'symfony' ? 'Kind' : 'Starter kit';
+  const opts = t ? [
+    meta.group !== 'js' && np.tpl !== 'static' ? opt('PHP', 'Default follows Devid’s default PHP. A version pins the site to it, as Isolate does.',
+      npSelect('PHP version', np.php, phpOptions, (v) => { np.php = v; npDraw(); })) : null,
+    t.kits.length ? opt(kind, np.tpl === 'symfony' ? 'The web app adds Twig, Doctrine, forms and Mailer (composer require webapp), without Docker files. The skeleton is the bare kernel, with no database layer.'
+      : 'Laravel’s starter kits build with Vite+, which needs Node.js 22.18+, 24.11+ or 26+' + (np.node ? '; this Mac has ' + np.node + '.' : '; no Node.js was found.') + ' They come from each kit’s main branch, as Laravel’s installer takes them.',
+    npSelect(kind, np.kit, [{ value: '', label: np.tpl === 'symfony' ? 'Web app' : 'None' }].concat(t.kits.map((k) =>
+      ({ value: k, label: capital(k), disabled: !!kitLimit, title: kitLimit || null }))),
+    (v) => { np.kit = v; if (v === 'skeleton') np.db = ''; npDraw(); })) : null,
+    t.dbs.length > 1 && npWebApp(np) ? opt('Database', 'SQLite needs no server. MySQL or PostgreSQL: Devid makes an account and a database named after the project, writes them to ' + (np.tpl === 'symfony' ? '.env.local' : '.env') + (np.tpl === 'laravel' ? ' and migrates' : '') + '. A database that is off starts first.',
+      npSelect('Database', np.db || t.dbs[0], t.dbs.map((d) => ({ value: d, label: { sqlite: 'SQLite', mysql: 'MySQL', pgsql: 'PostgreSQL' }[d] || d })),
+        (v) => { np.db = v; npDraw(); })) : null,
+  ].filter(Boolean) : [];
   return [
     h('div.np-head', {}, h('h2', { id: 'np-t' }, 'New project'),
       h('p.dv-sub', {}, 'Made with each framework’s own tool, then served at https://name.' + (st.tld || 'test') + '.')),
@@ -548,28 +633,21 @@ function npForm(np) {
             h('div.dv-strong.np-tplname', {}, t.label), h('div.np-tool.dv-mono', {}, npTool(np)))),
           h('div.np-label', {}, h('label', { for: 'np-name' }, 'Name'),
             tip('Lowercase letters, digits and -, starting with a letter, at most 32. It names the folder, the site and, with - as _, its database and account.')),
-          h('input.dv-input.np-input.dv-mono', { id: 'np-name', value: np.name, placeholder: 'shop', autocomplete: 'off', spellcheck: 'false',
-            'aria-describedby': 'np-name-h', 'aria-label': 'Name', 'data-focus': true,
+          h('input.dv-input.np-field.dv-mono', { id: 'np-name', value: np.name, placeholder: 'shop', autocomplete: 'off', spellcheck: 'false',
+            autocorrect: 'off', autocapitalize: 'off', writingsuggestions: 'false',
+            'aria-describedby': 'np-name-h', 'aria-label': 'Name', 'data-focus': !np.drawn,
             oninput: (e) => { np.name = e.target.value.toLowerCase(); npSync(np); },
             onkeydown: (e) => { if (e.key === 'Enter') npCreate(np); } }),
           h('div.np-hint', { id: 'np-name-h' }),
-          h('div.np-two', {},
-            h('div', {}, h('div.np-label', {}, 'Folder'), dropdown('Folder', np.folder, folders, pickFolder)),
-            meta.group !== 'js' && np.tpl !== 'static' ? h('div', {}, h('div.np-label', {}, 'PHP',
-              tip('Default follows Devid’s default PHP. A version pins the site to it, as Isolate does.')),
-            dropdown('PHP version', np.php, phpOptions, (v) => { np.php = v; npDraw(); })) : null),
-          t.kits.length ? [h('div.np-label', { id: 'np-kit-l' }, np.tpl === 'symfony' ? 'Kind' : 'Starter kit',
-            tip(np.tpl === 'symfony' ? 'The web app adds Twig, Doctrine, forms and Mailer (composer require webapp), without Docker files. The skeleton is the bare kernel, with no database layer.'
-              : 'Laravel’s starter kits build with Vite+, which needs Node.js 22.18+, 24.11+ or 26+' + (np.node ? '; this Mac has ' + np.node + '.' : '; no Node.js was found.') + ' They come from each kit’s main branch, as Laravel’s installer takes them.')),
-          h('div.dv-seg.np-seg', { role: 'group', 'aria-labelledby': 'np-kit-l' },
-            [['', np.tpl === 'symfony' ? 'Web app' : 'None']].concat(t.kits.map((k) => [k, capital(k)])).map(([k, label]) =>
-              h('button', { type: 'button', 'aria-pressed': String(np.kit === k), disabled: !!(k && kitLimit), title: k && kitLimit ? kitLimit : null,
-                onclick: set({ kit: k, db: k === 'skeleton' ? '' : np.db }) }, label)))] : null,
-          t.dbs.length > 1 && npWebApp(np) ? [h('div.np-label', { id: 'np-db-l' }, 'Database',
-            tip('SQLite needs no server. MySQL or PostgreSQL: Devid makes an account and a database named after the project, writes them to ' + (np.tpl === 'symfony' ? '.env.local' : '.env') + (np.tpl === 'laravel' ? ' and migrates' : '') + '. A database that is off starts first.')),
-          h('div.dv-seg.np-seg', { role: 'group', 'aria-labelledby': 'np-db-l' },
-            t.dbs.map((d) => h('button', { type: 'button', 'aria-pressed': String((np.db || t.dbs[0]) === d), onclick: set({ db: d }) },
-              { sqlite: 'SQLite', mysql: 'MySQL', pgsql: 'PostgreSQL' }[d] || d)))] : null,
+          h('div.np-label', {}, 'Folder', tip(np.parked.length
+            ? 'A parked folder, where the project is served by its folder’s name, or another folder you choose in Finder, which Devid links.'
+            : 'No folder is parked yet. Devid makes ~/Sites and parks it, unless you choose another folder in Finder, which Devid links.')),
+          np.parked.length ? npSelect('Folder', np.folder, folders, pickFolder)
+            : h('button.dv-select.np-field', { type: 'button', 'aria-label': 'Folder', disabled: !!S.busy,
+              onclick: () => { np.focus = 'Folder'; pickFolder('other'); } },
+            h('span.dv-ellipsis', {}, np.folder === 'other' ? np.other : '~/Sites, made and parked'), icon('folder')),
+          opts.length ? h('div.np-opts', {}, opts) : null,
+          kitLimit && t.kits.length && np.tpl === 'laravel' ? h('div.np-hint', {}, capital(kitLimit)) : null,
           h('div.np-facts', {}, npFacts(np).map((f) => {
             const warn = f[f.length - 1];
             return h('div.np-fact' + (warn ? '.is-warn' : ''), {}, icon(warn ? 'info' : 'check'), h('span.dv-grow', {}, f.slice(0, -1)));

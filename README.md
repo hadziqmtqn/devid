@@ -143,3 +143,5 @@ To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md): where issues go, running
 ## License
 
 Devid is free software under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). It comes without any warranty. If you distribute Devid, changed or not, you must offer its source under the same license, and a changed version offered to users over a network must offer its source too.
+
+The desktop app's New project page shows each framework's logo, from [Simple Icons](https://simpleicons.org) (CC0-1.0). The logos are trademarks of their owners, shown only to name each framework.
