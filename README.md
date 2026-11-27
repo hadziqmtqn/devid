@@ -4,7 +4,7 @@ Devid is a local development environment for Laravel, PHP and Node.js on Macs wi
 
 **Website and guide:** [devid.bekenweb.com](https://devid.bekenweb.com), with the user guide at [devid.bekenweb.com/docs](https://devid.bekenweb.com/docs).
 
-> **Status:** v0.21, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). Linux builds (Ubuntu since v0.19, D-057; Arch since v0.20, D-059) go through setup, a site over HTTPS and uninstall on Ubuntu and on Arch on GitHub's runners before each release, and were tested by hand on Ubuntu 24.04 Desktop, Arch Linux with KDE Plasma and CachyOS. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
+> **Status:** v0.22, used daily on an M1 Mac (an Intel Mac before November 2026, D-052). Apple silicon builds (since v0.14) are tested by hand on the M1 and smoke-tested on GitHub's runners before each release (D-046). Linux builds (Ubuntu since v0.19, D-057; Arch since v0.20, D-059) go through setup, a site over HTTPS and uninstall on Ubuntu and on Arch on GitHub's runners before each release, and were tested by hand on Ubuntu 24.04 Desktop, Arch Linux with KDE Plasma and CachyOS. This repository holds the source, under the [GNU AGPL v3](LICENSE) (D-043). Issues are [here](https://github.com/hadziqmtqn/devid/issues/new/choose) (D-045). The builds and the releases are in [`devid-binaries`](https://github.com/hadziqmtqn/devid-binaries); the website and the guide are in [`devid-site`](https://github.com/hadziqmtqn/devid-site).
 
 ```sh
 devid park ~/Projects                  # every subfolder becomes <folder>.test
@@ -39,7 +39,8 @@ Homebrew moved Intel Macs to Tier 3: there are no more prebuilt packages, so Val
 - **Share:** `devid share` gives a site a temporary public link through a Cloudflare quick tunnel (it uses your own `cloudflared`, from Homebrew or `~/.local/bin`). `devid app port` serves a site on a local port for a tunnel of your own.
 - **Mail:** `devid mail on` catches the mail your apps send, in an inbox on your computer that the desktop app shows. Laravel's SMTP mailer and PHP's `mail()` both work, and nothing reaches a real mailbox. Devid runs Mailpit for it.
 - **Databases:** `devid db start mysql` runs MySQL, PostgreSQL or MongoDB on 127.0.0.1, at the usual port or the next free one, so it can sit next to DBngin or Homebrew. `devid db user add mysql shop` makes an account with its own database and a generated password, `devid db env mysql shop` prints its `.env` lines, and a new password is one more command. The TUI and the app's Databases page do the same, and the app opens each client in the terminal app you pick. Each database is off until you start it, and its data stays when you stop or uninstall Devid.
-- **Terminal commands:** `php`, `composer`, `php8.3` to `php8.6`, `nginx -t`, `caddy` and `mailpit` run Devid's own copies from any terminal, editor or script, and so do `mysql`, `psql`, `mongosh` and their dump tools once a database is installed. Add to PATH in the app's Settings (or `devid path on`) sets this up.
+- **New projects:** `devid new laravel shop` makes a project with the framework's own tool and serves it at `https://shop.test` right away. The templates are blank PHP, Laravel with its starter kits, WordPress, Symfony, CodeIgniter, static HTML, and Node.js: React, Vue, Svelte or vanilla on Vite, Next.js, Nuxt, SvelteKit, Astro and an Express API. Laravel and Symfony use SQLite, or MySQL or PostgreSQL through an account of their own, and WordPress gets its own MySQL account. A Node.js project's dev server starts at its first visit. The TUI (`n` on Sites) and the app's New project sheet (⌘N) do the same.
+- **Terminal commands:** `php`, `composer`, `php8.3` to `php8.6`, `nginx -t`, `caddy` and `mailpit` run Devid's own copies from any terminal, editor or script, and so do `mysql`, `psql`, `mongosh` and their dump tools once a database is installed, and `wp` (WP-CLI) once `devid new` has made a WordPress site. Add to PATH in the app's Settings (or `devid path on`) sets this up.
 - **Interfaces:** the CLI, the TUI and, on macOS, the menu-bar app. Every action works the same in all three. `devid doctor` checks the whole setup and tells you how to fix what's wrong.
 
 ## Install
@@ -70,7 +71,7 @@ sudo pacman -S --needed curl nss nftables
 curl -fsSL https://github.com/hadziqmtqn/devid-binaries/releases/download/devid-latest/install.sh | sh
 ```
 
-Devid is an open-source personal project, provided as is. The macOS builds are ad-hoc signed and not notarized; the command installs them without a Gatekeeper prompt. Setup asks for your password once for `.test` DNS, Devid's CA and ports 80/443, and `devid uninstall` undoes it. The [guide](https://devid.bekenweb.com/docs) covers the install options, sites, dev servers on demand, Laravel and Vite, PHP and extensions, web servers, Mail, databases, the desktop app, the TUI, terminal commands, HTTPS, updates, troubleshooting and uninstall.
+Devid is an open-source personal project, provided as is. The macOS builds are ad-hoc signed and not notarized; the command installs them without a Gatekeeper prompt. Setup asks for your password once for `.test` DNS, Devid's CA and ports 80/443, and `devid uninstall` undoes it. The [guide](https://devid.bekenweb.com/docs) covers the install options, sites, new projects, dev servers on demand, Laravel and Vite, PHP and extensions, web servers, Mail, databases, the desktop app, the TUI, terminal commands, HTTPS, updates, troubleshooting and uninstall.
 
 ## Requirements
 
@@ -105,6 +106,7 @@ No dates yet. New macOS versions are added as GitHub's macOS runners make testin
 - Linux: Ubuntu 24.04 and 26.04 on x86_64, with the CLI and the TUI. `.test` goes through systemd-resolved and ports 80/443 through nftables, and Devid's CA is trusted by the system, Chrome and Firefox (D-057).
 - Arch Linux: Arch and the distributions built on it, such as CachyOS, on x86_64. Setup turns systemd-resolved on where it is off and trusts Devid's CA through p11-kit, and fish gets its own PATH file, as bash and zsh do (D-059).
 - Databases: MySQL, PostgreSQL and MongoDB, each off until started, with an account and its `.env` lines in one step, in the CLI, the TUI and the app (D-061).
+- New projects: `devid new` makes PHP, Laravel, WordPress, Symfony, CodeIgniter, static and Node.js projects with each framework's own tool, served at once with their database and dev server, in the CLI, the TUI and the app. A weekly check makes every template with the real tools on macOS and Ubuntu (D-063).
 
 **Next**
 

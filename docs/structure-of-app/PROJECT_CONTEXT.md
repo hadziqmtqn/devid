@@ -34,7 +34,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 - Phase 12 (accepted 2026-11-23, done in 0.19.0): Linux, Ubuntu 24.04 and 26.04 on x86_64, with the CLI and the TUI (D-057).
 - Phase 13 (accepted 2026-11-24, done in 0.20.0): Arch-based Linux, Arch Linux and the distributions built on it, such as CachyOS, on x86_64 (D-059).
 - Phase 14 (accepted 2026-11-25, done in 0.21.0): databases. Devid runs MySQL, PostgreSQL and MongoDB, with accounts and passwords in one step, in the CLI, the TUI and the app (D-061). D2 and D3 shipped in 0.20.1, off by default.
-- Phase 15 (accepted 2026-11-25; N1 to N3 done 2026-11-26: `devid new` in the CLI and the TUI, for the PHP, WordPress and Node.js templates; N4, the app's New project sheet, built 2026-11-26; N5's weekly check of every template on macOS and Ubuntu 2026-11-26, with 0.22.0-rc.1 next): `devid new` creates projects with each framework's own tool (D-063).
+- Phase 15 (accepted 2026-11-25, done in 0.22.0): new projects. `devid new` creates projects with each framework's own tool, in the CLI, the TUI and the app (D-063). A weekly check makes every template with the real tools on macOS and Ubuntu.
 
 **Non-goals:**
 - Databases beyond MySQL, PostgreSQL and MongoDB (Redis or Valkey, MariaDB, Elasticsearch), databases started on demand, and upgrades or imports across series other than dump and restore (D-061). The owner still uses DBngin, next to Devid's servers.
@@ -60,7 +60,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 | 12 | Linux: Ubuntu 24.04 and 26.04 on x86_64, the CLI and the TUI (D-057); plan in `docs/roadmap/phase-12.md` | done 2026-11-24: L1 to L4 on 2026-11-23, and 0.19.0 released on 2026-11-24 after rc.1 and rc.2 on the owner's Ubuntu 24.04 machine (install, browsers, reboot, uninstall, self-update) |
 | 13 | Arch-based Linux: Arch Linux and the distributions built on it, x86_64, the CLI and the TUI (D-059); plan in `docs/roadmap/phase-13.md` | done 2026-11-25: A1 to A3 on 2026-11-24, and 0.20.0 released on 2026-11-24 after rc.1 on the owner's Arch Linux, Ubuntu 24.04 and CachyOS machines (install, browsers, reboot, fish, self-update, uninstall) |
 | 14 | Databases: Devid runs MySQL, PostgreSQL and MongoDB, with accounts and passwords in one step (D-061); plan in `docs/roadmap/phase-14.md` | done 2026-11-26: D1 to D4 on 2026-11-25 (D2 and D3 shipped in 0.20.1, off by default), and 0.21.0 released after its rc on the owner's M1 and the Ubuntu, Arch and CachyOS VMs (D5) |
-| 15 | `devid new`: creating projects with each framework's own tool (D-063); plan in `docs/roadmap/phase-15.md` | accepted 2026-11-25; after Phase 14 |
+| 15 | `devid new`: creating projects with each framework's own tool (D-063); plan in `docs/roadmap/phase-15.md` | done 2026-11-27: N1 to N3 on 2026-11-26, N4's app sheet built the same day, and 0.22.0 released after rc.1 on the owner's M1 and the Ubuntu, Arch and CachyOS VMs and rc.2, with the owner's changes to the app's sheet, on the M1 (N5) |
 
 ## Open risks (Phase 1 must prove)
 
