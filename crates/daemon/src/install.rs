@@ -18,8 +18,10 @@ pub const SHIMS: [&str; 10] =
     ["php", "composer", "php8.3", "php8.4", "php8.5", "php8.6", "nginx", "caddy", "mailpit", "wp"];
 const RC_MARKER: &str = "# added by devid";
 const COMPOSER_URL: &str = "https://getcomposer.org/download/latest-stable/composer.phar";
-/// WP-CLI's newest release; its phar and the phar's `.sha512` are assets of that release.
-const WP_CLI_RELEASE: &str = "https://api.github.com/repos/wp-cli/wp-cli/releases/latest";
+/// WP-CLI's newest release, a page that redirects to its tag; the phar and the phar's `.sha512` are
+/// assets of that release. Not GitHub's REST API: without a token it allows 60 requests an hour per
+/// address, which a shared address (an office, a carrier's NAT, CI runners) runs out of (Phase 15 N5).
+const WP_CLI_LATEST: &str = "https://github.com/wp-cli/wp-cli/releases/latest";
 
 fn err(msg: impl Into<String>) -> io::Error {
     io::Error::other(msg.into())
@@ -338,10 +340,7 @@ pub fn ensure_wp_cli(paths: &Paths) -> io::Result<Option<String>> {
     }
     fs::create_dir_all(target.parent().expect("phar has a parent"))?;
     let tmp = target.with_extension("download");
-    let release = curl_text(WP_CLI_RELEASE)?;
-    let release: serde_json::Value =
-        serde_json::from_str(&release).map_err(|e| err(format!("WP-CLI's release: {e}")))?;
-    let tag = release["tag_name"].as_str().ok_or_else(|| err("WP-CLI's release has no tag"))?;
+    let tag = latest_tag(WP_CLI_LATEST)?;
     let version = tag.trim_start_matches('v');
     let url = format!("https://github.com/wp-cli/wp-cli/releases/download/{tag}/wp-cli-{version}.phar");
     curl_to(&url, &tmp)?;
@@ -353,6 +352,26 @@ pub fn ensure_wp_cli(paths: &Paths) -> io::Result<Option<String>> {
     }
     fs::rename(tmp, target)?;
     Ok(Some(version.to_string()))
+}
+
+/// The tag that a GitHub `releases/latest` page redirects to, read without following it.
+fn latest_tag(page: &str) -> io::Result<String> {
+    let out = Command::new("/usr/bin/curl")
+        .args(["-fsS", "--proto", "=https", "-o", "/dev/null", "-w", "%{redirect_url}", page])
+        .output()?;
+    match release_tag(&String::from_utf8_lossy(&out.stdout)) {
+        Some(tag) if out.status.success() => Ok(tag),
+        _ => Err(err(format!("could not read the newest release from {page}"))),
+    }
+}
+
+/// `v2.12.0` from `https://github.com/<owner>/<repo>/releases/tag/v2.12.0`: a `v`, then only
+/// digits and dots, since the tag goes into download URLs.
+fn release_tag(url: &str) -> Option<String> {
+    let tag = url.trim().rsplit_once("/releases/tag/")?.1;
+    let number = tag.strip_prefix('v')?;
+    let ok = number.starts_with(|c: char| c.is_ascii_digit()) && number.chars().all(|c| c.is_ascii_digit() || c == '.');
+    ok.then(|| tag.to_string())
 }
 
 fn curl_to(url: &str, out: &Path) -> io::Result<()> {
@@ -372,6 +391,17 @@ pub fn curl_text(url: &str) -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_newest_release_is_the_tag_its_page_redirects_to() {
+        let tag = |url: &str| release_tag(url);
+        assert_eq!(tag("https://github.com/wp-cli/wp-cli/releases/tag/v2.12.0\n").as_deref(), Some("v2.12.0"));
+        assert_eq!(tag(""), None, "no redirect");
+        assert_eq!(tag("https://github.com/wp-cli/wp-cli/releases"), None, "no tag");
+        assert_eq!(tag("https://github.com/wp-cli/wp-cli/releases/tag/2.12.0"), None, "WP-CLI's tags start with v");
+        assert_eq!(tag("https://github.com/wp-cli/wp-cli/releases/tag/v"), None);
+        assert_eq!(tag("https://github.com/wp-cli/wp-cli/releases/tag/v2.12.0/../../x"), None, "only a version");
+    }
 
     #[test]
     fn shims_are_hard_links_to_the_installed_binary() {
