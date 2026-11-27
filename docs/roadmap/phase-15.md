@@ -592,6 +592,65 @@ D-063 stands. N1 settles these details for N2 and N3:
   4. A last pull request, "Version 0.22.0": the README, PROJECT_CONTEXT, and D-063's status. Then the owner tags v0.22.0.
 - **The guide:** devid-site#25 (a draft) adds `/docs/new-project` in English and Indonesian, and mentions `devid new` and `wp` on the related pages and in the roadmap. It merges when 0.22.0 ships.
 
+### rc.1 (2026-11-27)
+
+- **The release:** the owner tagged v0.22.0-rc.1 (104ee7f). Release run 45928945174 passed: both Mac builds with the smoke test, the Linux build and arch-e2e. devid-binaries has the pre-release devid-v0.22.0-rc.1 with 8 files, and Latest stays 0.21.0.
+- **The weekly check's third run on this code** (c82e244): all 24 projects on macOS 15 in 9 min 9 s and on Ubuntu 24.04 in 5 min 51 s.
+- **On the owner's M1,** with the owner's OK: `install.sh` with `DEVID_VERSION=0.22.0-rc.1` and `--gui --no-sudo`, over 0.21.0.
+  - `devid` and the app are 0.22.0-rc.1, and no sudo was needed.
+  - doctor is all good, the four sites are as before, and `wp` is a terminal command.
+  - DBngin's MySQL kept running on 3306, untouched.
+- **On the Linux VMs:** rc.1 with setup's real sudo step, a parked `~/Sites`, then `devid new` and each page at `https://<name>.test` on port 443, through the system's resolver and CA store.
+
+  | | Ubuntu 24.04 (2 GB) | Arch (KDE) | CachyOS (fish) |
+  |---|---|---|---|
+  | Install, setup, doctor | all good | all good | all good |
+  | `php`, `static`, `codeigniter` | 200 | 200 | 200 |
+  | `laravel --db mysql` (MySQL's download included) | 39 s, 200 | 43 s, 200 | 41 s, 200 |
+  | `wordpress` (`siteurl` is `https://blog.test`) | 22 s, 200 | 19 s, 200 | 19 s, 200 |
+  | `symfony --db pgsql` (PostgreSQL's download included) | 46 s, 404 (the welcome page) | 43 s, 404 | 49 s, 404 |
+
+  - **The Node.js templates** were not run there, since no VM has Node.js. `devid new` refused them with "no Node.js found (nvm's default, or node on your login shell's PATH)". The weekly check covers them on Ubuntu 24.04.
+  - **Clean-up:** `devid uninstall --purge --delete-databases` on each VM, then the test projects and the caches the tools made that day were removed. On Arch, `/etc/resolv.conf` went back to NetworkManager's file, and DNS answered. The three VMs are off.
+- **The owner's try of the app's sheet** (2026-11-27) asked for two changes:
+  - "untuk component field kurang konsisten, mulai tinggi, lebar, dll, kamu cek ulang semua field dan pastikan menggunakan komponen yang sama";
+  - "untuk logo project per item sebaiknya menggunakan logo resmi bukan inisial logo".
+- **What was inconsistent:**
+  - the Name input was 28 px;
+  - Folder and PHP were 24 px selects, with another fill in the dark theme, and their lists opened narrower than the field, at its right edge;
+  - Starter kit and Database were 26 px segmented controls, as wide as their labels.
+- **The change:**
+  - **One field component** (`np-field`): the Name input and every select share its height (28 px), border, radius, fill and type in both themes.
+  - **The layout:** Name and Folder are full width. The template's options (PHP, Starter kit or Kind, and Database) are selects in one row of equal thirds.
+  - **The lists:** each opens under its field, as wide as it. A starter kit that Node.js is too old for is disabled in the list with the reason, which also shows under the row.
+  - **Logos:** each template shows its brand's mark, from Simple Icons 16.37.0 (CC0-1.0), in its brand color on a neutral tile. The black marks (Symfony, Next.js, Express) take the text color, so they show in both themes. SvelteKit uses Svelte's mark, and static HTML uses HTML5's. The marks are their owners' trademarks, shown only to name each framework, as the README says.
+- **Checked in the browser harness** (the real `app.js` and `app.css` with a fake daemon):
+  - all five fields are 28 px with the same border and fill, in both themes;
+  - the Folder list opens at the field's left edge and width;
+  - the fields per template: Laravel shows three options, Symfony three, or two for the skeleton, WordPress one, and static HTML and the Node.js templates none;
+  - Node 20 disables the kits, with the reason;
+  - a Laravel project with MySQL and the React kit was made through the new selects.
+- **A bug the owner found next** (2026-11-27): "ketika memilih ExpresJS sidebar kiri tiba-tiba bergulir ke paling atas sehingga menyebabkan sidebar menu ExpressJS tidak terlihat".
+  - **The cause:** each pick redraws the sheet, and the redraw kept only the dialog's own scroll, not the template list's or the form's. A template near the list's end, such as Express, was picked, and the list jumped back to the top. It was there since N4.
+  - **The fix:** the redraw keeps the list's scroll, and the form's while its template stays; the chosen template is scrolled into view, as when ↓ wraps from Express to Laravel.
+  - **Checked in the harness** at a window height where both parts scroll. With N4's code, picking Express after scrolling the list down reset it to the top, and Express was out of view. With the fix, the list stayed and Express showed. ↑ and ↓ kept each chosen template in view, including both wraps. A database pick kept the form's place, and another template started the form at the top.
+- **Two more requests** (2026-11-27):
+  - "field `name` jangan dijadikan selalu auto-complete meskipun sudah diisi, ini sedikit mengganggu ketika baru memilih field lain";
+  - "untuk folder tujuan yang belum terdaftar, jika bisa langsung arahkan upload folder lewat finder atau file manager".
+- **The Name field's suggestions:**
+  - **The cause:** after every pick, the redraw gave the focus back to the Name field. WebKit leaves a text field focused through a click on a button, and the redraw then restored the focus to the field, as its first draw did (`data-focus`). Each pick elsewhere therefore opened the field's suggestions again.
+  - **The fix:** a template pick keeps the focus on the template list, and a select's pick on that select. The Name field takes the focus only when the sheet opens. It also turns off macOS's writing suggestions, autocorrection and capitals (`writingsuggestions`, `autocorrect`, `autocapitalize`).
+- **The folder:**
+  - **With no parked folder,** the Folder field opens macOS's folder chooser at the home folder on a click, without a menu first. It shows ~/Sites, which Devid makes and parks, until a folder is chosen, which Devid then links.
+  - **With parked folders,** the field stays a select of them and "Another folder…".
+  - **Its (i)** says which applies.
+- **Checked in the harness:**
+  - the Name field focused at the opening only;
+  - the focus on the picked template, and on the Database select after a pick, the same value included, while the typed name stays;
+  - with no parked folder, one click asked for a folder (`choose_folder`), and the field and the hint showed it;
+  - with a parked folder, the select listed it and "Another folder…".
+  - `choose_folder`'s AppleScript compiles (`osacompile`), and the app's crate passes its checks.
+
 ## Milestones
 
 | # | Milestone | Done when |

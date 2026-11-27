@@ -443,8 +443,11 @@ p.dv-note { margin: 10px 4px 0; }
 .np-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font-size: 13px; text-align: left; }
 .np-item:hover { background: var(--surface-2); }
 .np-item[aria-checked="true"] { background: var(--accent); color: #fff; }
-.np-tile { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 5px; color: #fff; font: 700 9.5px/1 -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: -.02em; }
-.np-tile.lg { width: 36px; height: 36px; border-radius: 9px; font-size: 14px; }
+/* The template's logo on a neutral tile, so every mark shows on the list, the selected row and both themes. */
+.np-logo { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 5px; background: var(--surface); box-shadow: 0 0 0 .5px var(--border-strong); color: var(--text); font: 700 10px/1 -apple-system, BlinkMacSystemFont, sans-serif; }
+.np-logo svg { width: 13px; height: 13px; }
+.np-logo.lg { width: 36px; height: 36px; border-radius: 9px; font-size: 15px; }
+.np-logo.lg svg { width: 22px; height: 22px; }
 .np-flag { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--warn); }
 .np-item[aria-checked="true"] .np-flag { background: #fff; }
 .np-loading { padding: 12px 8px; }
@@ -453,13 +456,15 @@ p.dv-note { margin: 10px 4px 0; }
 .np-tplname { font-size: 14px; }
 .np-tool { margin-top: 2px; font-size: 11px; color: var(--text-2); overflow-wrap: anywhere; }
 .np-label { display: flex; align-items: center; gap: 6px; margin: 16px 0 5px; font-size: 12px; font-weight: 600; }
-.np-input { display: block; width: 100%; height: 28px; padding: 0 10px; font-size: 13px; }
-.np-input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+/* Every field of the sheet is one component: the Name input and each select share its height, width, border, fill and type. */
+.np-panel .np-field { width: 100%; height: 28px; padding: 0 10px; border: .5px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; box-shadow: 0 .5px 1px rgba(0,0,0,.06); }
+.np-panel input.np-field { display: block; }
+.np-panel button.np-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; }
+.np-panel button.np-field .dv-ico { width: 11px; height: 11px; flex: none; color: var(--text-2); stroke-width: 1.8; }
+.np-field[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
 .np-hint { margin-top: 4px; font-size: 11px; color: var(--text-2); overflow-wrap: anywhere; }
 .np-hint.is-err { color: var(--danger); }
-.np-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.np-two .dv-select { width: 100%; justify-content: space-between; }
-.np-two .dv-select span { overflow: hidden; text-overflow: ellipsis; }
+.np-opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .np-facts { display: grid; gap: 6px; margin-top: 16px; padding: 10px 12px; border: .5px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12px; }
 .np-fact { display: flex; align-items: center; gap: 8px; }
 .np-fact .dv-ico { width: 14px; height: 14px; color: var(--ok); stroke-width: 2; }

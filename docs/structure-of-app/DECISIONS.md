@@ -1347,4 +1347,8 @@ See ARCHITECTURE, "PHP runtime".
   - **The check's first run on GitHub's runners found a bug.** `devid new` did not start the daemon's on-demand listener, so on a computer with no on-demand site yet, a new Node.js project did not wake at its first visit. N3's checks had turned the listener on with `devid app set` first. Fixed in N5, with a test.
   - **WP-CLI's newest release** is read from the redirect of its `releases/latest` page, not from GitHub's REST API, whose limit without a token (60 requests an hour per address) a CI runner ran out of. The phar and its SHA-512 still come from that release.
   - **The guide's `/docs/new-project` page,** in English and Indonesian, waits in devid-site#25 for the release. 0.22.0-rc.1 comes next (`phase-15.md`, "N5 results").
+  - **rc.1 (2026-11-27)** passed on the owner's M1 and on the Ubuntu, Arch and CachyOS VMs. The owner's try of the app's sheet asked for one field component and the frameworks' own logos, which the sheet now has: one 28 px field for the Name input and every select, and each brand's mark from Simple Icons (CC0-1.0). Its next requests followed:
+    - the template list keeps its scroll;
+    - a pick no longer hands the focus, and its suggestions, back to the Name field;
+    - with no parked folder, the Folder field opens Finder's folder chooser directly (`phase-15.md`, "rc.1").
 - **Status:** accepted on 2026-11-25. N1, N2 and N3 done on 2026-11-26; N4 built on 2026-11-26; N5's weekly check and the guide's page on 2026-11-26, with the rc next.

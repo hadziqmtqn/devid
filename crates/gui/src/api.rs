@@ -287,14 +287,15 @@ pub async fn server_config(server: String) -> Result<Value, String> {
 /// macOS's folder picker. `None` when the user cancels.
 #[tauri::command]
 pub async fn choose_folder(window: tauri::WebviewWindow, purpose: String) -> Result<Option<String>, String> {
-    // Fixed prompts: nothing from the page reaches the AppleScript source.
-    let prompt = match purpose.as_str() {
-        "link" => "Choose a folder to serve as a site",
-        "park" => "Choose a folder whose folders become sites",
-        "new" => "Choose the folder to make the project in",
+    // Fixed prompts: nothing from the page reaches the AppleScript source. A new project's folder
+    // starts at the home folder, where project folders live (Phase 15 N5).
+    let (prompt, from) = match purpose.as_str() {
+        "link" => ("Choose a folder to serve as a site", ""),
+        "park" => ("Choose a folder whose folders become sites", ""),
+        "new" => ("Choose the folder to make the project in", " default location (path to home folder)"),
         _ => return Err(format!("unknown folder purpose {purpose}")),
     };
-    let script = format!("POSIX path of (choose folder with prompt \"{prompt}\")");
+    let script = format!("POSIX path of (choose folder with prompt \"{prompt}\"{from})");
     let out = Command::new("/usr/bin/osascript").args(["-e", &script]).output().map_err(|e| e.to_string());
     // The picker belongs to osascript. When it closes, macOS activates the app that was active
     // before, never this Accessory app, so bring the window back.
