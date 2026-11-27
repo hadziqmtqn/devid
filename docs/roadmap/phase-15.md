@@ -2,7 +2,7 @@
 
 > Scope: `devid new` creates a PHP, Laravel, WordPress, Symfony, CodeIgniter 4, static or Node.js project and serves it at `https://<name>.test` right away, through the CLI, the TUI and the app (D-063)
 > Verified against: 2026-11-26 (Devid 0.21.0, main e6d9537; N1's runs on the owner's M1 and the Ubuntu VM: Laravel 13.44, its starter kits' `dev-main`, Symfony 8.1, CodeIgniter 4.7, create-vite 9.3, create-next-app 16.4, create-nuxt 4.1, sv 1.7, create-astro 5.3, WP-CLI 2.12.0, WordPress 7.1.5)
-> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results"). **N3 done 2026-11-26:** the nine Node.js templates, proxied with their dev server on demand, and the TUI's wizard (see "N3 results"). **N4 built 2026-11-26:** the app's New project sheet, from the board the owner approved; the owner's own try comes with the rc (see "N4 results").
+> Status: accepted 2026-11-25 (D-063): the owner took every recommendation ("saya ikut rekomendasi kamu") and the official create tools for Node.js ("Ya, tulis rencananya"). It starts after Phase 14 (0.21.0). Its answers are in "Owner's answers". **N1 done 2026-11-26:** every official tool ran without prompts on the M1 and the Ubuntu VM (see "N1 results"). **N2 done 2026-11-26:** `devid new` makes the PHP templates, Laravel with each database and its kits, Symfony, CodeIgniter 4 and WordPress, checked on the M1 (see "N2 results"). **N3 done 2026-11-26:** the nine Node.js templates, proxied with their dev server on demand, and the TUI's wizard (see "N3 results"). **N4 built 2026-11-26:** the app's New project sheet, from the board the owner approved; the owner's own try comes with the rc (see "N4 results"). **N5 in progress 2026-11-26:** a weekly workflow makes every template with the real tools on macOS and Ubuntu, and the guide's page is written; 0.22.0-rc.1 is next (see "N5 results").
 
 On 2026-11-25 the owner asked for a feature that creates projects: "buatkan fitur baru untuk create project PHP, Laravel, Wordpress, NodeJs, dll". They asked for suggestions before any documentation. This plan records the suggestions they accepted.
 
@@ -402,6 +402,7 @@ D-063 stands. N1 settles these details for N2 and N3:
 - **The first visit after creation** gave 502 once for three of the Vite templates in the run that made all nine one after another.
   - A fresh React project made alone answered 200 at its first visit (0.9 s), and the three answered 200 when their commands were stopped and woken again.
   - The cause is not known; a reload shows the page.
+  - **Found in N5:** the test caused it. It moved each site to a 153xx port right before the first visit, and nginx's old worker still sent that visit to the old port, since nginx reloads by SIGHUP (see "N5 results"). `devid new` moves no port.
 - **Nuxt, SvelteKit and Astro listen on `[::1]` only.** Devid's proxy reaches them, since nginx's retry tries `127.0.0.1` and `[::1]`.
 - **Next.js 16's HMR socket is `/_next/hmr`.** The proxy's rewritten Origin passes Next's cross-origin check.
 
@@ -507,6 +508,81 @@ D-063 stands. N1 settles these details for N2 and N3:
 - **The real app against a real daemon:** the owner's own try on the M1 comes with the rc in N5, as Phase 14's D4 did.
 - **N5:** the weekly CI job, the guide's `/docs/new-project` page, and 0.22.0.
 
+## N5 results (2026-11-26)
+
+### The weekly check
+
+- **`scripts/new-e2e.sh`** makes 24 projects with the real tools, one after another:
+  - every template;
+  - Laravel with each database and each starter kit;
+  - Symfony's web app with each database, and its skeleton.
+- **How it runs:**
+  - a daemon in a throwaway `DEVID_HOME` under `/tmp`, on spare ports (18088, 18443 and 15353);
+  - the binary, the `php`, `composer` and `wp` shims, and `composer.phar` (sha256-checked), as `devid setup` installs them, so the projects' own scripts run Devid's PHP;
+  - a parked folder for the projects;
+  - the daemon without `CI` and `GITHUB_ACTIONS`, since some tools skip their prompts in CI, which could hide a new prompt.
+- **Each project must:**
+  - finish `devid new`;
+  - answer over HTTPS with its own page:
+    - Laravel's, CodeIgniter's and WordPress's home page, and the blank and static pages;
+    - Symfony's welcome page, with the 404 it has in development;
+    - each Node.js project's page from its dev server, through the proxy, which the first visit starts;
+  - pass its own checks:
+    - the starter kits' built assets;
+    - `DB_CONNECTION` in Laravel's `.env`;
+    - Symfony's database, through `bin/console dbal:run-sql`;
+    - WordPress's `siteurl`, and its login page.
+- **The dev servers** stop after their check, so one runs at a time.
+- **The report:** the script runs every project even after a failure. It prints a table of each project's time, first visit and result, then the logs of the failed ones, and exits 1 if any failed.
+- **`SPARE_PORTS=1`,** for the owner's M1, keeps the test away from DBngin's ports and the owner's on-demand sites:
+  - MySQL on 13306 and PostgreSQL on 15432;
+  - each dev server on its own port from 15300, set a second before its first visit.
+- **`.github/workflows/new-templates.yml`:**
+  - **When:** Mondays at 03:00 UTC (10:00 WIB), two hours after devid-binaries' weekly check; by hand; and on a pull request that changes `newproject.rs`, the script or the workflow.
+  - **Where:** macOS 15 on Apple silicon and Ubuntu 24.04, each with a debug build.
+  - **Node:** the newest LTS from `actions/setup-node`, made nvm's default, since Devid's commands put nvm's Node first (D-036). A runner's login files may put an older Node first on `PATH`.
+  - **A failed scheduled run:** GitHub emails the workflow file's last editor. The run's summary has the table, and the logs are an artifact.
+
+### Checked
+
+- **On the owner's M1,** with `SPARE_PORTS=1`, next to the owner's Devid 0.21.0 and DBngin, and with Composer's and npm's caches warm from N1 to N3: all 24 projects were made and answered.
+
+  | Project | Made in | First visit |
+  |---|---|---|
+  | `php`, `static` | 0 s | 200 |
+  | `laravel` | 9 s | 200 |
+  | `codeigniter` | 2 s | 200 |
+  | `symfony` | 14 s | 404, Symfony's welcome page |
+  | `symfony --kit skeleton` | 3 s | 404, the same page |
+  | `wordpress` (MySQL's download and first start included) | 28 s | 200; `siteurl` and the login page checked |
+  | `laravel --db mysql` | 8 s | 200 |
+  | `symfony --db mysql` | 11 s | 404; `dbal:run-sql` reached MySQL |
+  | `laravel --db pgsql` (PostgreSQL's download included) | 12 s | 200 |
+  | `symfony --db pgsql` | 12 s | 404; `dbal:run-sql` reached PostgreSQL |
+  | `laravel --kit react`, `vue`, `svelte`, `livewire` | 32, 22, 24 and 15 s | 200, with the built assets |
+  | `react`, `vue`, `svelte`, `vite`, `sveltekit` | 2 to 5 s | 200 within 2 s |
+  | `next` | 13 s | 200 in 3 s |
+  | `nuxt` | 22 s | Nuxt's own Starting page (503), then 200 in 3 s |
+  | `astro` | 11 s | 200 in 1 s |
+  | `express` | 1 s | 200 |
+
+- **N3's first-visit 502, explained.** The first run gave React, Vue and SvelteKit a 502 once, as in N3.
+  - **The cause:** the test moved each Node site's port right before its first visit. nginx reloads by SIGHUP, and its old worker still sent that visit to the old port: the error log shows `[::1]:5173` after the move to 15300. `smoke.sh` notes the same race.
+  - N3's test moved the ports the same way.
+  - With a second's pause after the move, all three answered 200 at their first visit.
+  - `devid new` itself moves no port, and the weekly job on GitHub's runners moves none.
+- **Clean-up:** the script stops the daemon, which stops the databases and the dev servers, and removes its folder. Nothing of it was left running.
+
+### The rc
+
+- **Version 0.22.0-rc.1.** The release notes name `devid new`.
+- **What is left:**
+  1. The owner merges this and creates the pre-release v0.22.0-rc.1.
+  2. The rc on the M1, once the owner agrees to update Devid there, with the owner's own try of the app's New project sheet (N4's done-when).
+  3. The rc on the Ubuntu, Arch and CachyOS VMs: the PHP templates, WordPress, a starter kit and the Node.js templates.
+  4. A last pull request, "Version 0.22.0": the README, PROJECT_CONTEXT, and D-063's status. Then the owner tags v0.22.0.
+- **The guide:** devid-site#25 (a draft) adds `/docs/new-project` in English and Indonesian, and mentions `devid new` and `wp` on the related pages and in the roadmap. It merges when 0.22.0 ships.
+
 ## Milestones
 
 | # | Milestone | Done when |
@@ -515,7 +591,7 @@ D-063 stands. N1 settles these details for N2 and N3:
 | N2 | **Daemon and CLI:** the templates, the job and its progress, the PHP templates, Laravel with the database and Mail, WordPress with WP-CLI and `wp` | on the M1, `devid new` makes a Laravel project with each database and a WordPress site. Each opens at `https://<name>.test`, next to DBngin (done 2026-11-26, see "N2 results") |
 | N3 | **Node.js templates and the TUI wizard** | every Node template opens through the proxy with hot reload, and the TUI makes a Laravel project and a Vite project (done 2026-11-26, see "N3 results") |
 | N4 | **The app's New project page** (macOS) | the owner approves a design board, then makes a project from the page on the M1 (board approved and page built 2026-11-26, see "N4 results"; the owner's own try comes with the rc) |
-| N5 | **CI, docs and release** | a weekly CI job makes every template with the real tools on macOS and Ubuntu, so a changed option shows within a week. The guide gets a `/docs/new-project` page. 0.22.0 ships after an rc on the M1 and the Linux VMs |
+| N5 | **CI, docs and release** | a weekly CI job makes every template with the real tools on macOS and Ubuntu, so a changed option shows within a week. The guide gets a `/docs/new-project` page. 0.22.0 ships after an rc on the M1 and the Linux VMs (the weekly job and the guide's page done 2026-11-26, see "N5 results"; the rc next) |
 
 ## Where it is tested
 

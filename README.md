@@ -134,7 +134,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-CI runs the same checks on every pull request. To publish a release, push a `v*` tag. The release workflow then publishes `devid` to `devid-binaries`. A change users can see also updates the guide, in a `devid-site` pull request that is merged when the release ships (D-034).
+CI runs the same checks on every pull request. Every Monday, a workflow also makes each `devid new` template with the real create tools on macOS and Ubuntu (`scripts/new-e2e.sh`). To publish a release, push a `v*` tag. The release workflow then publishes `devid` to `devid-binaries`. A change users can see also updates the guide, in a `devid-site` pull request that is merged when the release ships (D-034).
 
 The plans and decisions are in [`docs/`](docs/README.md). Start with the project context, then read the architecture and the decisions.
 
