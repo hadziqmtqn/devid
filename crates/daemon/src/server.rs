@@ -1128,7 +1128,13 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
             }))
         }
         Request::NewProject { template, name, path, php, db, kit } => {
-            new_project(state, &template, &name, path, php, db.as_deref(), kit.as_deref())
+            let reply = new_project(state, &template, &name, path, php, db.as_deref(), kit.as_deref());
+            // D-054: a Node.js project is on demand, and may be the first site that is, so the
+            // daemon must listen for its first visit now.
+            if reply.is_ok() {
+                sync_on_demand(state);
+            }
+            reply
         }
         Request::NewProjectProgress => {
             let job = state.new_job.lock().unwrap();

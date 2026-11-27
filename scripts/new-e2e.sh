@@ -8,7 +8,9 @@
 #   scripts/new-e2e.sh <path to devid> [project ...]
 # The projects are the names in CASES; given names, only those run.
 # SPARE_PORTS=1 keeps MySQL, PostgreSQL and the dev servers off their usual ports (3306, 5432, 3000,
-# 4321, 5173), for a computer whose own servers use them. NEW_E2E_LOGS=<dir> keeps the logs there.
+# 4321, 5173), for a computer whose own servers use them. It moves each dev server with `devid app
+# set`, which also makes the daemon listen for on-demand visits, so only a run without it shows
+# that `devid new` alone does. NEW_E2E_LOGS=<dir> keeps the logs there.
 set -euo pipefail
 SRC="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 shift
