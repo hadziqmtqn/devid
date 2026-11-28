@@ -2,7 +2,7 @@
 
 > Scope: every site also answers on its subdomains, `https://<sub>.<name>.test`, with a certificate for them; accounts that may create databases; WordPress Multisite in `devid new` (D-065)
 > Verified against: 2026-11-28 (Devid 0.22.0, main c11bebd; `dns.rs`, `ca.rs`, `nginx.rs`, `caddy.rs`, `apache.rs`, `db.rs`)
-> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers".
+> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results").
 
 On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owner said "ya nanti kamu catat") and a multi-tenant option for Laravel ("Ya, catat"). Both need the same serving, which Devid lacks: subdomains of a site and their certificates. Multi-tenant apps with one database per tenant also need an account that may create databases (`phase-15.md`, "Not in this phase"). On 2026-11-28 the owner chose this work as Phase 16. They asked for suggestions before any documentation, and this plan records the ones they accepted.
 
@@ -76,6 +76,120 @@ On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owne
   - Laravel: `Route::domain()`, `SESSION_DOMAIN=.<name>.test` to share the login across subdomains, and a tenancy package's database prefix with a `--create-databases` account;
   - WordPress Multisite, both kinds.
 
+## S1 results (2026-11-28)
+
+Run on the owner's M1 (macOS 26.6.1, Devid 0.22.0) beside the owner's own Devid, which was not touched:
+- **Web servers:** Devid's nginx 1.30.8, Caddy 2.11.9 (from the runtime release, checked against its SHA-256) and the system's Apache 2.4.67, each on spare ports: 18088/18443, 18089/18444 and 18090/18445.
+- **php-fpm:** Devid's PHP 8.5 on a socket of its own.
+- **Dev servers:** Vite 8.4.0 (React) and Next.js 16.4.6 on ports 15300 and 15301.
+- **Certificates:** `spike/subdomains/cert.sh` signed leaves for `<name>.test` and `*.<name>.test`, shaped like `ca.rs`'s, with the owner's Devid CA. The CA key was read in place and never copied, and the leaves and every spike file were removed afterwards.
+- **Names:** the owner's Devid DNS already resolved every name used.
+
+### Certificates in the browsers
+
+| Browser (macOS) | `acme.shop.test` (one level) | `a.b.shopw.test` (two levels, wildcard leaf) |
+|---|---|---|
+| Safari's stack (`nscurl`, NSURLSession) | loads | refused: "The certificate for this server is invalid" |
+| Chromium 156 (the app's built-in browser) | loads | refused: `ERR_CERT_COMMON_NAME_INVALID` |
+| Firefox 160.0.1, a fresh profile | loads | the error page; the headless screenshot never finishes |
+| curl with the CA (LibreSSL) | loads | refused (exit 60) |
+
+- **The name constraint holds:** the CA permits `test`, and every client accepted `*.shop.test` under it.
+- **No browser treats a wildcard under a two-label name differently.**
+- **Brave headless** hung on macOS and was dropped; Chromium stands in for it, as Brave did for Chrome in Phase 12.
+- **Linux:** see "On Ubuntu" below.
+
+### On Ubuntu
+
+The owner turned the Ubuntu 24.04.5 VM on, and allowed Devid 0.22.0 to be installed there for the check and removed afterwards. It answered at 192.168.1.7. 192.168.1.5, its address before, now offered an unknown host key, so nothing was sent there.
+
+- **Setup:** `devid setup` put the CA in the system store, `~/.pki/nssdb` and the one Firefox profile, and `devid doctor` said "all good".
+- **The leaves:** signed with openssl from that Devid's CA and served by its nginx on 18443, as on the M1.
+
+| Client | `acme.shop.test` | `a.b.shop.test` (regex site) | `a.b.shopw.test` (wildcard site) |
+|---|---|---|---|
+| curl, the system store | loads | handshake refused (exit 35) | refused (exit 60) |
+| Firefox 160.0.1 (`/usr/bin/firefox`), a fresh profile with the CA added the way setup adds it | loads (screenshot) | | the error page; the screenshot never finishes |
+| Brave 158 headless | no certificate error logged | | `net_error -200` (`ERR_CERT_COMMON_NAME_INVALID`) |
+
+- **Brave headless** never finished a page on the VM, not even `https://example.com/` or the exact `shop.test`, in either headless mode, so it shows only which certificate errors it logged. It logged none for `acme.shop.test`, and `-200` for the two-level name.
+- **So S2 adds a subdomain** to `scripts/linux-e2e.sh`, which already opens a site in headless Chrome on GitHub's Ubuntu runners. That checks Chrome on Linux on every pull request.
+- **Cleanup:** `devid uninstall --purge` removed the CA from the system store and from NSS, the PATH lines, the resolver drop-in and `~/.devid`. `shop.test` no longer resolves, and the spike's files are gone.
+
+### One level on each web server
+
+| Host | nginx `~^[a-z0-9-]+\.shop\.test$` | nginx `*.shopw.test` | Caddy `*.shop.test` | Apache `ServerAlias *.shop.test` |
+|---|---|---|---|---|
+| `shop.test` | the site | the site | the site | the site |
+| `acme.shop.test` | the site | the site | the site | the site |
+| `Acme.Shop.Test` | the site (`$host` is lowercased) | the site | the site (`{host}` keeps the case) | the site |
+| `a.b.shop.test`, HTTP | "no site" (404) | **the site** | "no site" (404) | **the site** |
+| `a.b.shop.test`, HTTPS | handshake refused | **the wrong certificate** | handshake refused | **the wrong certificate** |
+
+- **nginx:** a wildcard `server_name` matches every depth, so a site gets its exact name plus a regular expression for one level: `server_name shop.test ~^[a-z0-9-]+\.shop\.test$;`. nginx checks exact names first, then wildcards, then expressions in order, so a site's own name never reaches the expressions, and SNI picks the server the same way. Deeper names fall to the default servers, so the handshake is refused as for unknown hosts.
+- **Caddy:** `https://shop.test:<port>, https://*.shop.test:<port>` in one block. Caddy's `*` is one label, so deeper names find no site and no certificate.
+- **Apache:** `ServerAlias *.shop.test` matches every depth. On HTTP a guard in the vhost answers deeper names with 421 (`RewriteCond %{HTTP_HOST} ^[^.]+\.[^.]+\.shop\.test(:[0-9]+)?$ [NC]`, then `RewriteRule ^ - [R=421,L]`). On HTTPS the handshake still serves the site's certificate, which does not cover the name, so the browser warns. This is Apache's existing shortcut for unknown hosts (`apache.rs`) and stays as it is.
+
+### Proxy sites: Vite and Next.js from a subdomain
+
+Each site sat behind a copy of Devid's proxy block (`Host` rewritten, `Origin` mapped, `X-Forwarded-Host $host`), with `pass_host` off.
+
+| Dev server | Today's `Origin` map (exact host) | Widened to subdomains |
+|---|---|---|
+| Vite 8.4.0 | page loads, `[vite] connected`, an edit hot-updated without a reload | the same |
+| Next.js 16.4.6 | page loads, but `/_next/hmr` is refused: "Blocked cross-origin request to Next.js dev resource /_next/hmr from "acme.next.test"" | `[HMR] connected`, and an edit to `page.tsx` refreshed through Fast Refresh |
+
+- **Vite** does not check the WebSocket's `Origin`, so it needs nothing.
+- **Next.js** does, so the map needs the subdomains. One regular-expression entry per site does it, after the exact ones: `"~^https?://[a-z0-9-]+\.next\.test(:[0-9]+)?$" "http://localhost:15301";`.
+- **Laravel's Vite:** laravel-vite-plugin 3.2.1 (in the owner's `test-laravel`) allows CORS from `/^https?:\/\/.*\.test(:\d+)?$/`, which takes subdomains. Vite's host stays `<name>.test`, which the certificate still names. A full Laravel page from a subdomain is checked in S2.
+
+### WordPress Multisite, subdirectory network
+
+A tree shaped like WordPress's (`index.php`, `wp-login.php`, `wp-admin/`, `wp-includes/`, `wp-content/uploads/sites/2/`) answered the same on all three servers:
+
+| Path | Served by |
+|---|---|
+| `/`, `/hello-world/`, `/shop2/`, `/shop2/hello/` | `index.php`, with the original `REQUEST_URI` |
+| `/shop2/wp-admin` | 301 to `/shop2/wp-admin/` |
+| `/shop2/wp-admin/`, `/shop2/wp-admin/admin-ajax.php` | the files in `wp-admin/` |
+| `/shop2/wp-login.php` | `wp-login.php` |
+| `/shop2/wp-includes/js/x.js` | the file |
+| `/wp-content/uploads/sites/2/a.txt` | the file |
+
+- **Apache** used WordPress's own `.htaccess` for subdirectory networks, unchanged.
+- **nginx** used WordPress's rules at the server level, with a relative redirect so the port stays:
+
+  ```nginx
+  if (!-e $request_filename) {
+      rewrite /wp-admin$ $uri/ permanent;
+      rewrite ^(/[^/]+)?(/wp-.*) $2 last;
+      rewrite ^(/[^/]+)?(/.*\.php) $2 last;
+  }
+  ```
+
+- **Caddy** needs the same rules written for it, before `php_fastcgi`:
+
+  ```caddy
+  @wpms_admin path_regexp ^/[^/]+/wp-admin$
+  redir @wpms_admin {path}/ 301
+  @wpms {
+      not file
+      path_regexp wpms ^/[^/]+(/wp-.*|/.*\.php)$
+  }
+  rewrite @wpms {re.wpms.1}
+  ```
+
+- **Hidden files:** `/shop2/.htaccess` gets 403 on nginx. On Caddy it reaches `index.php`, because Devid's Caddy rule for hidden paths matches only the top level. No file is served either way, as before this phase.
+- **A real network** (`wp core multisite-install`, a second site, its admin) comes in S4, in the weekly template check.
+
+### What S2 builds from this
+
+- nginx: `server_name <host> ~^[a-z0-9-]+\.<name>\.<tld>$` per site, the site's name escaped; the `Origin` map gets one expression for the subdomains.
+- Caddy: both addresses in each block.
+- Apache: `ServerAlias *.<host>` and the 421 guard on every vhost of the site.
+- `ca.rs`: the leaf names `<host>` and `*.<host>`, with a marker that the daemon's check reads to reissue older leaves once.
+- `scripts/linux-e2e.sh`: a subdomain of its site, in curl and headless Chrome.
+
 ## Milestones
 
 | # | Milestone | Done when |
@@ -93,6 +207,8 @@ On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owne
 - **The Ubuntu, Arch and CachyOS VMs** for the rc: a site's subdomain over 443 with the system CA, in a browser where the VM has one.
 
 ## Open points for S1
+
+All answered in "S1 results" on 2026-11-28.
 
 - How nginx limits a site to one level without slowing down the match for other sites, and whether Apache needs a check of its own for deeper names.
 - Whether any browser treats a wildcard directly under a two-label name (`*.shop.test`) differently.
