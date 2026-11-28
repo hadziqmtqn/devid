@@ -94,6 +94,9 @@ fn new_projects_from_the_php_templates() {
     assert!(fails(&home, &["new", "laravel", "blog", "--db", "mongodb"]).contains("sqlite, mysql, pgsql"));
     assert!(fails(&home, &["new", "symfony", "blog", "--kit", "skeleton", "--db", "mysql"]).contains("skeleton"));
     assert!(fails(&home, &["new", "laravel", "blog", "--php", "8.4"]).contains("PHP 8.4 is not installed"));
+    // D-065: networks are WordPress's; clap refuses other kinds before the daemon sees them.
+    assert!(fails(&home, &["new", "laravel", "blog", "--multisite", "subdir"]).contains("is for WordPress"));
+    assert!(fails(&home, &["new", "wordpress", "blog", "--multisite", "both"]).contains("subdomain"));
     fs::create_dir_all(sites.join("full")).unwrap();
     fs::write(sites.join("full/index.php"), "").unwrap();
     assert!(fails(&home, &["new", "php", "full"]).contains("a site named full exists"));

@@ -373,6 +373,9 @@ pub enum Request {
         db: Option<String>,
         #[serde(default)]
         kit: Option<String>,
+        /// D-065: WordPress Multisite, "subdomain" or "subdir".
+        #[serde(default)]
+        multisite: Option<String>,
     },
     /// The running (or the last) `NewProject`: its steps, and how it ended.
     NewProjectProgress,

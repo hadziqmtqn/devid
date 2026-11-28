@@ -182,6 +182,7 @@ impl NewView {
             php: None,
             db: self.db().filter(|d| Some(*d) != t.dbs.first().copied()).map(str::to_string),
             kit: Some(self.kit()).filter(|k| !k.is_empty()).map(str::to_string),
+            multisite: None,
         }
     }
 }
@@ -2446,6 +2447,7 @@ mod tests {
                 php: None,
                 db: Some("mysql".into()),
                 kit: Some("react".into()),
+                multisite: None,
             }
         );
         // Symfony's skeleton has no database field; Node.js templates have neither.
@@ -2463,6 +2465,7 @@ mod tests {
                 php: None,
                 db: None,
                 kit: Some("skeleton".into()),
+                multisite: None,
             }
         );
         let v = NewView { template: TEMPLATES.iter().position(|t| t.key == "next").unwrap(), ..Default::default() };

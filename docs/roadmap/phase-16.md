@@ -2,7 +2,7 @@
 
 > Scope: every site also answers on its subdomains, `https://<sub>.<name>.test`, with a certificate for them; accounts that may create databases; WordPress Multisite in `devid new` (D-065)
 > Verified against: 2026-11-28 (Devid 0.22.0, main c11bebd; `dns.rs`, `ca.rs`, `nginx.rs`, `caddy.rs`, `apache.rs`, `db.rs`)
-> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results"). **S2 built 2026-11-28:** subdomains and their certificates on nginx, Caddy and Apache, checked on the M1 and in CI (see "S2 results"). **S3 built 2026-11-28:** accounts that may make databases, on MySQL and PostgreSQL in the CLI (see "S3 results").
+> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results"). **S2 built 2026-11-28:** subdomains and their certificates on nginx, Caddy and Apache, checked on the M1 and in CI (see "S2 results"). **S3 built 2026-11-28:** accounts that may make databases, on MySQL and PostgreSQL in the CLI (see "S3 results"). **S4 built 2026-11-28:** `devid new wordpress --multisite subdomain|subdir`, served on nginx, Caddy and Apache (see "S4 results").
 
 On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owner said "ya nanti kamu catat") and a multi-tenant option for Laravel ("Ya, catat"). Both need the same serving, which Devid lacks: subdomains of a site and their certificates. Multi-tenant apps with one database per tenant also need an account that may create databases (`phase-15.md`, "Not in this phase"). On 2026-11-28 the owner chose this work as Phase 16. They asked for suggestions before any documentation, and this plan records the ones they accepted.
 
@@ -63,7 +63,7 @@ On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owne
 - **WP-CLI** runs `wp core multisite-install`, with `--subdomains` for a subdomain network, instead of `wp core install`.
 - **Subdomain networks** (`shop2.blog.test`) work through the subdomains above.
 - **Subdirectory networks** (`blog.test/shop2`) need WordPress's multisite rewrite rules:
-  - Apache reads WordPress's own `.htaccess` (`AllowOverride All`) and needs nothing;
+  - Apache reads WordPress's own `.htaccess` (`AllowOverride All`), which `devid new` writes (S4);
   - nginx and Caddy get the rules from WordPress's documentation, only for a WordPress site whose `wp-config.php` turns `MULTISITE` on without `SUBDOMAIN_INSTALL`. Devid only reads that file, as detection does now.
 - **A site turned into a network by hand** (`wp core multisite-convert`) is served the same way.
 
@@ -260,6 +260,42 @@ What changed is in the timeline record `docs/implementation-timeline/subdomains/
   - **The deprecated wildcard works on both MySQL series.** A database grant with a wildcard is deprecated since MySQL 8.2, and works while `partial_revokes` is off, as Devid leaves it. Neither server logged anything about it.
   - **MongoDB:** the M1 run did not start MongoDB, so its refusal there was only "MongoDB is not on". The refusal of `--create-databases` itself is checked in `tests/db.rs` and in `scripts/db-e2e.sh`.
 - **`scripts/db-e2e.sh`** gains `tenants()` for MySQL and PostgreSQL with the real builds, and the refusal on MongoDB. CI runs it on macOS and Ubuntu, and in the Arch VM.
+
+## S4 results (2026-11-28)
+
+What changed is in the timeline record `docs/implementation-timeline/subdomains/2026-11-28-s4-wordpress-multisite.md`. In short:
+
+- **`devid new wordpress <name> --multisite subdomain|subdir`** runs `wp core multisite-install`, with `--subdomains` for a subdomain network, instead of `wp core install`. WP-CLI writes the network's constants into `wp-config.php`.
+  - **`.htaccess`:** Devid writes WordPress's own, from its Network Setup, for the kind of network, so Apache serves it with no change to Devid's Apache config.
+  - **The output** says how to add a site: `wp site create --slug=shop`, and where it will be.
+- **Subfolder networks are detected** from `wp-config.php` (`sites::wp_subdir_network`): `MULTISITE` on, and `SUBDOMAIN_INSTALL` not. Devid only reads the file, as for presets. nginx and Caddy then add S1's rules for such a site. A network made by hand (`wp core multisite-convert`) is served the same way on nginx and Caddy; on Apache it needs the `.htaccess` that WordPress's Network Setup shows.
+- **Not for other templates:** `--multisite` is refused for anything but WordPress, and takes only `subdomain` or `subdir`.
+
+**A finding before the code: a port in the URL works.** WordPress's admin refuses to make a network when the address has a port, but WP-CLI does not, and WordPress 7.1 serves such a network. On the spare ports:
+- `wp core multisite-convert` wrote `DOMAIN_CURRENT_SITE` as `wpport.test:38443`;
+- `/` and a second site's `/shop2/` answered;
+- `multisite-install --subdomains` installed, with only a warning about wildcard DNS.
+
+So the weekly template check can make both kinds of network on its spare ports, and on a real install the URL has no port anyway.
+
+**Checks:**
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass: 189 tests with a fake HOME, and `passwd_home_matches_home` on its own with the real one. New tests cover:
+  - the detection, in five forms of `wp-config.php`;
+  - nginx's and Caddy's rules, present only for a subfolder network and placed before the PHP handling;
+  - `--multisite`'s checks, in the daemon and in the CLI;
+  - the two `.htaccess` texts.
+- **`scripts/new-e2e.sh`** gets `wp-subdir` and `wp-subdomain`. Each makes a second site with `wp site create`, then opens its page and its admin, which sends the visitor to its login page. On the M1 (`SPARE_PORTS=1`, MySQL on 13306): `wordpress` was made in 25 s, `wp-subdir` in 13 s and `wp-subdomain` in 14 s, and all three answered.
+- **On the M1, real networks** made by the S4 build on a throwaway Devid (38xxx, MySQL on 13306), on each web server:
+
+  | Request | nginx | Caddy | Apache |
+  |---|---|---|---|
+  | `net1.test/shop2/` (subfolder network) | Shop2 | Shop2 | Shop2 |
+  | `net1.test/shop2/wp-admin`, `/shop2/wp-admin/`, `/shop2/wp-login.php` | Shop2's login page | the same | the same |
+  | `net1.test/shop2/wp-includes/js/jquery/jquery.min.js` | 200 | 200 | 200 |
+  | `shop2.net2.test/` (subdomain network) and its `/wp-admin/` | Shop2, then its login page | the same | the same |
+  | `a.b.net2.test` | handshake refused | handshake refused | no valid certificate |
+
+  Before the rules, S1's probe got 404 for `/shop2/wp-login.php` and a redirect loop for `/shop2/wp-admin/`.
 
 ## Milestones
 

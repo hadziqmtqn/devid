@@ -106,6 +106,9 @@ pub struct Site {
     pub on_demand: Option<String>,
     /// Minutes without use before the on-demand command stops; 0 never.
     pub idle_stop: u32,
+    /// D-065: a WordPress network in subfolders (`wp_subdir_network`), which nginx and Caddy serve
+    /// with WordPress's rules for it; Apache reads its .htaccess.
+    pub wp_subdir: bool,
 }
 
 impl Site {
@@ -188,6 +191,20 @@ pub fn detect(dir: &Path) -> Option<&'static str> {
         return Some("static");
     }
     None
+}
+
+/// D-065: whether `wp-config.php` makes a WordPress network in subfolders: `MULTISITE` on and
+/// `SUBDOMAIN_INSTALL` not, as WP-CLI writes them (`define( 'MULTISITE', true );`). Only that file
+/// is read, and nothing in it runs.
+pub fn wp_subdir_network(dir: &Path) -> bool {
+    let Ok(text) = fs::read_to_string(dir.join("wp-config.php")) else { return false };
+    let flat: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| if c == '"' { '\'' } else { c })
+        .collect::<String>()
+        .to_lowercase();
+    flat.contains("define('multisite',true)") && !flat.contains("define('subdomain_install',true)")
 }
 
 /// `PORT=<n>` in the project's `.env`, the port its dev server listens on. Only that line is read.
@@ -375,6 +392,7 @@ pub fn resolve(config: &Config) -> Vec<Site> {
                     .and_then(|a| a.on_demand.clone())
                     .filter(|c| mode == Mode::Proxy && app.is_some_and(|a| a.commands.iter().any(|x| x.name == *c))),
                 idle_stop: app.and_then(|a| a.idle_stop).unwrap_or(crate::config::DEFAULT_IDLE_STOP),
+                wp_subdir: mode == Mode::Php && preset.key == "wordpress" && wp_subdir_network(&path),
                 name,
                 path,
             }
@@ -430,6 +448,24 @@ pub fn find_by_dir<'a>(sites: &'a [Site], dir: &Path) -> Option<&'a Site> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wordpress_networks_in_subfolders() {
+        let dir = std::env::temp_dir().join(format!("devid-wpms-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let config = |text: &str| {
+            fs::write(dir.join("wp-config.php"), text).unwrap();
+            wp_subdir_network(&dir)
+        };
+        // As WP-CLI writes them (D-065), and as people type them.
+        assert!(config("<?php\ndefine( 'MULTISITE', true );\ndefine( 'SUBDOMAIN_INSTALL', false );\n"));
+        assert!(config("<?php define(\"MULTISITE\",TRUE);"), "no SUBDOMAIN_INSTALL means subfolders");
+        assert!(!config("<?php\ndefine( 'MULTISITE', true );\ndefine( 'SUBDOMAIN_INSTALL', true );\n"));
+        assert!(!config("<?php\ndefine( 'WP_ALLOW_MULTISITE', true );\n"), "allowed, not set up yet");
+        assert!(!config("<?php\ndefine( 'DB_NAME', 'shop' );\n"), "one site");
+        fs::remove_dir_all(&dir).unwrap();
+        assert!(!wp_subdir_network(&dir), "no wp-config.php");
+    }
 
     #[test]
     fn names() {

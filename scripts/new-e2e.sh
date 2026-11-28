@@ -30,6 +30,8 @@ CASES=(
   "symfony|symfony|404|Welcome to Symfony"
   "skeleton|symfony --kit skeleton|404|Welcome to Symfony"
   "wordpress|wordpress|200|wp-content|wp"
+  "wp-subdir|wordpress --multisite subdir|200|wp-content|network subdir"
+  "wp-subdomain|wordpress --multisite subdomain|200|wp-content|network subdomain"
   "laravel-mysql|laravel --db mysql|200|Laravel|env DB_CONNECTION=mysql"
   "symfony-mysql|symfony --db mysql|404|Welcome to Symfony|sql"
   "laravel-pgsql|laravel --db pgsql|200|Laravel|env DB_CONNECTION=pgsql"
@@ -89,7 +91,9 @@ visit() {
 }
 
 # The checks after a page: build (a kit's built assets), env <line> (in .env), sql (Symfony reaches
-# its database), wp (WordPress's URL and login page), node (stop the dev server again).
+# its database), wp (WordPress's URL and login page), network <kind> (a WordPress network, D-065: a
+# second site, its page and its admin, which sends the visitor to its login page), node (stop the
+# dev server again).
 more() {
   local name="$1" dir="$2" check="$3"
   case "$check" in
@@ -102,6 +106,13 @@ more() {
       url="$(cd "$dir" && "$BIN/wp" option get siteurl)" || { echo "wp option get siteurl failed"; return 1; }
       [ "$url" = "https://$name.test:$HTTPS" ] || { echo "siteurl is $url"; return 1; }
       visit "$name" 200 user_login /wp-login.php || { echo "wp-login.php: $VISIT"; return 1; }
+      ;;
+    network\ *)
+      (cd "$dir" && "$BIN/wp" site create --slug=shop2 --title=Shop2 >/dev/null) || { echo "wp site create failed"; return 1; }
+      local host="$name" base=/shop2
+      [ "$check" = "network subdomain" ] && { host="shop2.$name"; base=""; }
+      visit "$host" 200 "Shop2" "$base/" || { echo "the second site: $VISIT"; return 1; }
+      visit "$host" 200 user_login "$base/wp-admin/" || { echo "its admin: $VISIT"; return 1; }
       ;;
     node) "$DEVID" cmd stop "$name" dev >/dev/null || { echo "devid cmd stop $name dev failed"; return 1; } ;;
   esac
