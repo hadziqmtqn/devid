@@ -176,12 +176,27 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
 /// tunnel); None if a path cannot be quoted.
 fn site_body(paths: &Paths, site: &Site, scheme: &str) -> Option<String> {
     let host = &site.host;
+    // D-065: one level of subdomains on the .test ports. Apache's alias matches every depth, so
+    // deeper names get 421 here; over HTTPS the handshake has already served the site's
+    // certificate, which does not cover them, as for unknown hosts. The local port answers any
+    // Host (a tunnel's name) and stays as it is.
+    let names = match scheme {
+        "local" => format!("\x20   ServerName {host}\n"),
+        _ => format!(
+            "\x20   ServerName {host}\n\
+             \x20   ServerAlias *.{host}\n\
+             \x20   RewriteEngine on\n\
+             \x20   RewriteCond %{{HTTP_HOST}} ^[^.]+\\.[^.]+\\.{escaped}(:[0-9]+)?$ [NC]\n\
+             \x20   RewriteRule ^ - [R=421,L]\n",
+            escaped = host.replace('.', "\\."),
+        ),
+    };
     // `dir_rules` go inside <Directory>, where paths are relative to the web root: hidden files and
     // folders (.git/config, .env) are refused there, as nginx does, but not on proxy sites, whose
     // dev servers use paths such as /node_modules/.vite/.
     let files = |root: &str, dir_rules: &str, extra: &str| {
         format!(
-            "\x20   ServerName {host}\n\
+            "{names}\
              \x20   DocumentRoot {root}\n\
              \x20   <Directory {root}>\n\
              \x20       AllowOverride All\n\
@@ -216,13 +231,14 @@ fn site_body(paths: &Paths, site: &Site, scheme: &str) -> Option<String> {
         }
         Mode::Proxy => {
             let up = site.upstream;
-            // As in nginx: Host and the site's own Origin become the dev server's (A1). mod_proxy
-            // would add X-Forwarded-Host from the rewritten Host, so Devid sets those headers itself.
+            // As in nginx: Host and the site's own Origin become the dev server's (A1), its
+            // subdomains' included (D-065). mod_proxy would add X-Forwarded-Host from the rewritten
+            // Host, so Devid sets those headers itself.
             let rewrite = match site.pass_host {
                 true => String::new(),
                 false => format!(
                     "\x20   RequestHeader set Host \"localhost:{up}\"\n\
-                     \x20   RequestHeader set Origin \"http://localhost:{up}\" \"expr=%{{HTTP:Origin}} =~ m#^https?://{own}(:[0-9]+)?$#\"\n",
+                     \x20   RequestHeader set Origin \"http://localhost:{up}\" \"expr=%{{HTTP:Origin}} =~ m#^https?://([a-z0-9-]+[.])?{own}(:[0-9]+)?$#\"\n",
                     own = host.replace('.', "[.]"),
                 ),
             };
@@ -248,7 +264,7 @@ fn site_body(paths: &Paths, site: &Site, scheme: &str) -> Option<String> {
             // stays open for an hour, as nginx's `proxy_read_timeout 1h`; Apache's `Timeout` (60 s)
             // cut them before.
             format!(
-                "\x20   ServerName {host}\n\
+                "{names}\
                  \x20   ProxyPreserveHost On\n\
                  \x20   ProxyAddHeaders Off\n\
                  \x20   RequestHeader {set} X-Forwarded-Host \"expr=%{{HTTP_HOST}}\"\n\
@@ -352,6 +368,15 @@ mod tests {
         // One serving process, and room for old ones that finish open connections after a reload.
         assert!(conf.contains("StartServers 1\nServerLimit 16\nThreadsPerChild 25\nMaxRequestWorkers 25\n"));
         assert!(conf.contains("ServerName blog.test"));
+        // D-065: one level of subdomains; Apache's alias matches every depth, so deeper names get 421.
+        assert_eq!(conf.matches("ServerAlias *.blog.test").count(), 2, "on HTTP and HTTPS");
+        assert_eq!(
+            conf.matches(
+                "RewriteCond %{HTTP_HOST} ^[^.]+\\.[^.]+\\.blog\\.test(:[0-9]+)?$ [NC]\n    RewriteRule ^ - [R=421,L]"
+            )
+            .count(),
+            2
+        );
         assert!(conf.contains("SetHandler \"proxy:unix:/h/.devid/run/php84.sock|fcgi://localhost\""));
         assert!(conf.contains("SSLCertificateFile \"/h/.devid/certs/blog.test.crt\""));
         assert!(conf.contains("LoadModule proxy_fcgi_module"));
@@ -372,7 +397,7 @@ mod tests {
         assert!(conf.contains("LoadModule proxy_http_module libexec/apache2/mod_proxy_http.so"));
         assert!(conf.contains("ProxyPass / http://localhost:5173/ upgrade=websocket retry=0 timeout=3600\n"));
         assert!(conf.contains("RequestHeader set Host \"localhost:5173\""));
-        assert!(conf.contains("\"expr=%{HTTP:Origin} =~ m#^https?://erd[.]test(:[0-9]+)?$#\""));
+        assert!(conf.contains("\"expr=%{HTTP:Origin} =~ m#^https?://([a-z0-9-]+[.])?erd[.]test(:[0-9]+)?$#\""));
         assert!(
             conf.contains("RequestHeader set X-Forwarded-Proto \"https\"")
                 && conf.contains("X-Forwarded-Proto \"http\"")
@@ -446,5 +471,7 @@ mod tests {
         let local = &conf[conf.find("<VirtualHost 127.0.0.1:8001>").unwrap()..];
         assert!(local.contains("RequestHeader setifempty X-Forwarded-Proto \"http\""), "a tunnel's scheme is kept");
         assert!(!local.contains("SSLEngine"));
+        let local = &local[..local.find("</VirtualHost>").unwrap()];
+        assert!(!local.contains("ServerAlias") && !local.contains("R=421"), "the local port is left as it was");
     }
 }

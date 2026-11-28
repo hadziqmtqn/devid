@@ -112,11 +112,17 @@ pub fn ensure_ca(paths: &Paths, tld: &str) -> io::Result<bool> {
     Ok(true)
 }
 
-/// Make sure `host` has a certificate from the current CA that is not about to expire.
-/// Returns true if one was (re)issued.
+/// The names a site's certificate covers (D-065): its host and one level of subdomains.
+pub fn site_names(host: &str) -> Vec<String> {
+    vec![host.to_string(), format!("*.{host}")]
+}
+
+/// Make sure `host` has a certificate from the current CA that is not about to expire and names
+/// what `site_names` gives. Returns true if one was (re)issued.
 pub fn ensure_site_cert(paths: &Paths, host: &str) -> io::Result<bool> {
     let (cert_path, key_path) = (site_cert(paths, host), site_key(paths, host));
-    if cert_path.is_file() && key_path.is_file() && !expiring(&cert_path) {
+    let names = site_names(host);
+    if cert_path.is_file() && key_path.is_file() && !expiring(&cert_path) && same_names(&cert_path, &names) {
         return Ok(false);
     }
     let ca_key = KeyPair::from_pem(&fs::read_to_string(ca_key(paths))?).map_err(err)?;
@@ -124,7 +130,7 @@ pub fn ensure_site_cert(paths: &Paths, host: &str) -> io::Result<bool> {
     let issuer = Issuer::new(ca_params("test"), ca_key);
 
     let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).map_err(err)?;
-    let mut params = CertificateParams::new(vec![host.to_string()]).map_err(err)?;
+    let mut params = CertificateParams::new(names.clone()).map_err(err)?;
     params.distinguished_name.push(DnType::CommonName, host);
     params.is_ca = IsCa::ExplicitNoCa;
     params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
@@ -140,7 +146,18 @@ pub fn ensure_site_cert(paths: &Paths, host: &str) -> io::Result<bool> {
     write_secret(&key_path, &key.serialize_pem())?;
     fs::write(&cert_path, cert.pem())?;
     fs::write(expiry_file(&cert_path), params.not_after.unix_timestamp().to_string())?;
+    fs::write(names_file(&cert_path), names.join("\n"))?;
     Ok(true)
+}
+
+/// The names a certificate was issued for, recorded beside it like its expiry. Leaves from before
+/// D-065 have no such file, so they are reissued once with the subdomains.
+fn names_file(cert: &Path) -> PathBuf {
+    cert.with_extension("names")
+}
+
+fn same_names(cert: &Path, names: &[String]) -> bool {
+    fs::read_to_string(names_file(cert)).is_ok_and(|s| s.lines().eq(names.iter().map(String::as_str)))
 }
 
 /// Expiry is recorded next to the cert at issue time, so checking it needs no X.509 parser.
@@ -218,7 +235,7 @@ mod tests {
             .output()
             .unwrap();
         let text = String::from_utf8_lossy(&text.stdout);
-        assert!(text.contains("DNS:blog.test"), "SAN present");
+        assert!(text.contains("DNS:blog.test, DNS:*.blog.test"), "SANs: the host and its subdomains");
         assert!(text.contains("TLS Web Server Authentication"), "serverAuth EKU present");
 
         // Name constraints: the CA is only valid for *.test, so a leaf for a real domain fails
@@ -234,6 +251,11 @@ mod tests {
             .output()
             .unwrap();
         assert!(!out.status.success(), "a non-.test leaf must not verify");
+
+        // A leaf from before D-065 (no names file) is reissued once, then kept.
+        fs::remove_file(names_file(&site_cert(&paths, "blog.test"))).unwrap();
+        assert!(ensure_site_cert(&paths, "blog.test").unwrap(), "reissued with the subdomains");
+        assert!(!ensure_site_cert(&paths, "blog.test").unwrap(), "kept afterwards");
 
         // An expiring leaf is reissued.
         fs::write(expiry_file(&site_cert(&paths, "blog.test")), "0").unwrap();

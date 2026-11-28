@@ -114,6 +114,16 @@ dom="$("$CHROME" --headless=new --disable-gpu --user-data-dir="$T/chrome" --dump
 echo "$(basename "$CHROME"): $(tr -d '\n' <<<"$dom" | cut -c1-200)"
 grep -q 'e2e 8\.' <<<"$dom" || fail "headless $(basename "$CHROME") did not load https://$SITE.test/ (a certificate error?)"
 
+step "A subdomain: https://acme.$SITE.test (D-065)"
+# One level of subdomains reaches the site with a certificate that names it, through the system's
+# store and Chrome's NSS database; a deeper name gets no valid certificate.
+page="$(curl -fsS "https://acme.$SITE.test/")" || fail "curl cannot reach https://acme.$SITE.test/"
+grep -q '^e2e 8\.' <<<"$page" || fail "unexpected page from acme.$SITE.test: $page"
+if curl -fsS -o /dev/null "https://a.b.$SITE.test/" 2>/dev/null; then fail "a.b.$SITE.test got a valid certificate"; fi
+dom="$("$CHROME" --headless=new --disable-gpu --user-data-dir="$T/chrome-sub" --dump-dom "https://acme.$SITE.test/" 2>/dev/null)"
+echo "$(basename "$CHROME"): $(tr -d '\n' <<<"$dom" | cut -c1-200)"
+grep -q 'e2e 8\.' <<<"$dom" || fail "headless $(basename "$CHROME") did not load https://acme.$SITE.test/ (a certificate error?)"
+
 step "devid doctor"
 # A new terminal would have ~/.devid/bin on PATH; this shell started before setup.
 PATH="$HOME/.devid/bin:$PATH" "$D" doctor

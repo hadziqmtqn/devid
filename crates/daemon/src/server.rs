@@ -212,9 +212,12 @@ impl State {
             .map(|v| (php_service(v), php::spec(&self.paths, v)))
             .collect();
 
-        // Every site gets a certificate from the Devid CA (issued once, renewed before expiry).
+        // Every site gets a certificate from the Devid CA (issued once, renewed before expiry, and
+        // reissued once with its subdomains, D-065). A web server only reads it at a reload.
+        let mut reissued = false;
         for site in &sites {
-            ca::ensure_site_cert(&self.paths, &site.host).map_err(|e| format!("certificate for {}: {e}", site.host))?;
+            reissued |= ca::ensure_site_cert(&self.paths, &site.host)
+                .map_err(|e| format!("certificate for {}: {e}", site.host))?;
         }
 
         // Only the active server is wanted, so switching servers stops the old one (D-005).
@@ -224,7 +227,7 @@ impl State {
             let changed = webserver::write_config(&self.paths, server, config, &sites).map_err(|e| e.to_string())?;
             let running = matches!(self.supervisor.state().get(server), Some(ProcState::Running(_)));
             // Reload only a server that is already up; a fresh one reads the new config anyway.
-            if changed && running {
+            if (changed || reissued) && running {
                 reload = Some(webserver::reload(server));
             }
             wanted.insert(server.into(), webserver::spec(&self.paths, server));
