@@ -308,6 +308,15 @@ pub enum Request {
         password: Option<String>,
         #[serde(default)]
         no_database: bool,
+        /// D-065: the account may also make databases (MySQL: named `<name>_…`; PostgreSQL: any).
+        #[serde(default)]
+        create_databases: bool,
+    },
+    /// D-065: let an account make databases (`on`), or stop it; MySQL and PostgreSQL only.
+    DbUserCreateDatabases {
+        engine: String,
+        name: String,
+        on: bool,
     },
     /// Give an account a new password: a generated one, or `password`.
     DbUserPassword {

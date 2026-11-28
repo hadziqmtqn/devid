@@ -904,7 +904,7 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                 _ => Err(format!("{} is not on; `devid db start {}` starts it", engine.label(), engine.name())),
             })
         }
-        Request::DbUserAdd { engine, name, database, password, no_database } => {
+        Request::DbUserAdd { engine, name, database, password, no_database, create_databases } => {
             let engine = parse_engine(&engine)?;
             db::check_name("account", &name)?;
             if ["root", "postgres", "devid", "admin"].contains(&name.as_str()) {
@@ -931,9 +931,22 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                     engine.name()
                 ));
             }
-            admin.add_user(&name, database.as_deref(), &password).map_err(|e| e.to_string())?;
+            admin.add_user(&name, database.as_deref(), &password, create_databases).map_err(|e| e.to_string())?;
             Ok(json!({"ok": true, "engine": engine.name(), "name": name, "database": database, "password": password,
+                      "create_databases": create_databases,
                       "env": db::env_lines(engine, port, &name, &password, database.as_deref())}))
+        }
+        Request::DbUserCreateDatabases { engine, name, on } => {
+            let engine = parse_engine(&engine)?;
+            db::check_name("account", &name)?;
+            if ["root", "postgres", "devid"].contains(&name.as_str()) {
+                return Err(format!("{name} is one of the server's own accounts, which can make databases already"));
+            }
+            let (series, port) = db_running(state, engine)?;
+            let admin = db::Admin::new(&state.paths, engine, &series, port);
+            has_account(&admin, engine, &name)?;
+            admin.allow_create(&name, on).map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true, "engine": engine.name(), "name": name, "create_databases": on}))
         }
         Request::DbUserPassword { engine, name, password } => {
             let engine = parse_engine(&engine)?;
@@ -959,7 +972,8 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
         Request::DbUserList { engine } => {
             let engine = parse_engine(&engine)?;
             let (series, port) = db_running(state, engine)?;
-            let users = db::Admin::new(&state.paths, engine, &series, port).users().map_err(|e| e.to_string())?;
+            let admin = db::Admin::new(&state.paths, engine, &series, port);
+            let users = admin.users().map_err(|e| e.to_string())?;
             let accounts = db::read_accounts(&state.paths, engine, &series).unwrap_or_default();
             let main = db::main_account(engine);
             let list: Vec<Value> = users
@@ -973,8 +987,10 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                         None if u == main && engine != Engine::Mongodb => "none",
                         None => "unknown",
                     };
+                    // D-065: whether it was let make databases; the main account has every right anyway.
+                    let create = u != main && admin.can_create(u).unwrap_or(false);
                     json!({"name": u, "database": known.and_then(|a| a.database.clone()), "main": u == main,
-                           "password": password})
+                           "password": password, "create_databases": create})
                 })
                 .collect();
             Ok(json!({"ok": true, "engine": engine.name(), "series": series, "port": port, "users": list}))
@@ -2264,7 +2280,7 @@ impl newproject::Host for JobHost<'_> {
             ));
         }
         let password = db::password();
-        admin.add_user(name, Some(name), &password).map_err(|e| e.to_string())?;
+        admin.add_user(name, Some(name), &password, false).map_err(|e| e.to_string())?;
         *self.account.lock().unwrap() = Some((engine, name.to_string()));
         Ok(password)
     }

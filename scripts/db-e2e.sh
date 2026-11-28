@@ -89,6 +89,38 @@ as_main() {
   esac
 }
 
+# D-065 (Phase 16 S3): an account that may make databases, as a tenancy package needs, for one
+# per tenant. On MySQL only those named <account>_…; on PostgreSQL any, which it then owns, while
+# another account's database stays out of its reach. `off` takes the right back.
+tenants() {
+  local engine="$1" port="$2" tpw
+  tpw="$("$DEVID" db user add "$engine" tenant --create-databases | pw_of)" ||
+    fail "devid db user add $engine tenant --create-databases"
+  [[ "$("$DEVID" db user list "$engine")" == *"tenant may make"* ]] || fail "$engine: db user list does not say so"
+  as_user "$engine" "$port" tenant "$tpw" tenant "CREATE DATABASE tenant_t1" >/dev/null ||
+    fail "$engine: tenant cannot make tenant_t1"
+  [ "$(as_user "$engine" "$port" tenant "$tpw" tenant_t1 "$(migrate "$engine")")" = 1 ] ||
+    fail "$engine: tenant cannot use tenant_t1"
+  as_user "$engine" "$port" tenant "$tpw" tenant "DROP DATABASE tenant_t1" >/dev/null ||
+    fail "$engine: tenant cannot drop tenant_t1"
+  case "$engine" in
+    mysql)
+      ! as_user mysql "$port" tenant "$tpw" tenant "CREATE DATABASE other" >/dev/null 2>&1 ||
+        fail "mysql: tenant made a database outside tenant_…"
+      ! as_user mysql "$port" tenant "$tpw" tenant "SELECT COUNT(*) FROM shop.migrations" >/dev/null 2>&1 ||
+        fail "mysql: tenant reads shop's database" ;;
+    postgresql)
+      ! as_user postgresql "$port" tenant "$tpw" tenant "DROP DATABASE shop" >/dev/null 2>&1 ||
+        fail "postgresql: tenant dropped shop's database" ;;
+  esac
+  "$DEVID" db user create-databases "$engine" tenant off >/dev/null ||
+    fail "devid db user create-databases $engine tenant off"
+  ! as_user "$engine" "$port" tenant "$tpw" tenant "CREATE DATABASE tenant_t2" >/dev/null 2>&1 ||
+    fail "$engine: tenant still makes databases after off"
+  "$DEVID" db user remove "$engine" tenant >/dev/null || fail "devid db user remove $engine tenant"
+  echo "ok: $engine: an account that may make databases (D-065)"
+}
+
 # D3 (D-061): accounts on a running server.
 accounts() {
   local engine="$1" port="$2" out pw new bpw
@@ -112,6 +144,10 @@ accounts() {
     ! as_user "$engine" "$port" blog "$bpw" shop "$(count "$engine")" >/dev/null 2>&1 ||
       fail "$engine: blog reads shop's database"
     "$DEVID" db create "$engine" news >/dev/null || fail "devid db create $engine news"
+    tenants "$engine" "$port"
+  else
+    ! "$DEVID" db user add mongodb tenant --create-databases >/dev/null 2>&1 ||
+      fail "mongodb: an account was let make databases"
   fi
 
   [[ "$("$DEVID" db user list "$engine")" == *$'\n'"shop "* ]] || fail "$engine: db user list has no shop"
