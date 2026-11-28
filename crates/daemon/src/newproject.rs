@@ -199,6 +199,8 @@ pub struct Options {
     pub mail: Option<u16>,
     /// A Node.js template's dev port: a free one from its framework's usual port.
     pub port: Option<u16>,
+    /// D-065: WordPress Multisite, "subdomain" or "subdir"; None for one site.
+    pub multisite: Option<&'static str>,
 }
 
 /// A project name: a site name (D-011) that also works as a database and account name once `-`
@@ -244,6 +246,17 @@ pub fn choose(t: &Template, kit: Option<&str>, db: Option<&str>) -> Result<(Stri
         Some("sqlite") => (kit, None, true),
         _ => (kit, None, false),
     })
+}
+
+/// D-065: `--multisite subdomain|subdir`, for WordPress only.
+pub fn multisite(t: &Template, value: Option<&str>) -> Result<Option<&'static str>, String> {
+    match value {
+        None => Ok(None),
+        Some(_) if t.key != "wordpress" => Err(format!("{} has no networks; --multisite is for WordPress", t.label)),
+        Some("subdomain") => Ok(Some("subdomain")),
+        Some("subdir") => Ok(Some("subdir")),
+        Some(v) => Err(format!("--multisite takes subdomain or subdir, not {v}")),
+    }
 }
 
 /// The project folder must not exist, or be empty; its parent must exist.
@@ -310,7 +323,10 @@ pub fn steps(o: &Options) -> Vec<&'static str> {
             steps.push("Downloading WordPress");
             steps.push("Checking WordPress's files");
             steps.push("Writing wp-config.php");
-            steps.push("Installing WordPress");
+            steps.push(match o.multisite {
+                Some(_) => "Installing WordPress Multisite",
+                None => "Installing WordPress",
+            });
         }
         _ => {}
     }
@@ -938,21 +954,34 @@ fn wordpress(o: &Options, r: &Runner, host: &dyn Host, made: &mut Made) -> Resul
             format!("--dbhost=127.0.0.1:{port}"),
         ],
     )?;
-    host.step("Installing WordPress");
     let admin = crate::db::password();
-    r.wp(
-        &o.dir,
-        &[
-            "core".into(),
-            "install".into(),
-            format!("--url={}", o.url),
-            format!("--title={}", o.name),
-            "--admin_user=admin".into(),
-            format!("--admin_password={admin}"),
-            format!("--admin_email=admin@{}", o.host),
-            "--skip-email".into(),
-        ],
-    )?;
+    let mut args: Vec<String> = vec![
+        format!("--url={}", o.url),
+        format!("--title={}", o.name),
+        "--admin_user=admin".into(),
+        format!("--admin_password={admin}"),
+        format!("--admin_email=admin@{}", o.host),
+        "--skip-email".into(),
+    ];
+    match o.multisite {
+        // D-065: a network. WP-CLI adds its constants to wp-config.php; the web servers read them
+        // (`sites::wp_subdir_network`), and Apache reads the .htaccess WordPress documents.
+        Some(kind) => {
+            host.step("Installing WordPress Multisite");
+            args.splice(0..0, ["core".to_string(), "multisite-install".to_string()]);
+            if kind == "subdomain" {
+                args.push("--subdomains".into());
+            }
+            r.wp(&o.dir, &args)?;
+            let rules = if kind == "subdomain" { HTACCESS_SUBDOMAIN } else { HTACCESS_SUBDIR };
+            fs::write(o.dir.join(".htaccess"), rules).map_err(|e| format!(".htaccess: {e}"))?;
+        }
+        None => {
+            host.step("Installing WordPress");
+            args.splice(0..0, ["core".to_string(), "install".to_string()]);
+            r.wp(&o.dir, &args)?;
+        }
+    }
     for option in ["siteurl", "home"] {
         let value = r.wp(&o.dir, &["option".into(), "get".into(), option.into()])?;
         if value.trim() != o.url {
@@ -962,8 +991,55 @@ fn wordpress(o: &Options, r: &Runner, host: &dyn Host, made: &mut Made) -> Resul
     }
     made.admin = Some(("admin".into(), admin));
     made.notes.push(format!("sign in at {}/wp-admin; `wp user update admin --user_pass=…` sets a new password", o.url));
+    match o.multisite {
+        Some("subdomain") => made.notes.push(format!(
+            "a network of sites on subdomains: `wp site create --slug=shop` adds https://shop.{}",
+            o.url.trim_start_matches("https://")
+        )),
+        Some(_) => made
+            .notes
+            .push(format!("a network of sites in subfolders: `wp site create --slug=shop` adds {}/shop/", o.url)),
+        None => {}
+    }
     Ok(())
 }
+
+/// WordPress's own .htaccess for a network (from its Network Setup), for Apache.
+const HTACCESS_SUBDIR: &str = "# BEGIN WordPress Multisite (written by Devid, from WordPress's Network Setup)
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\\.php$ - [L]
+
+# add a trailing slash to /wp-admin
+RewriteRule ^([_0-9a-zA-Z-]+/)?wp-admin$ $1wp-admin/ [R=301,L]
+
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+RewriteRule ^([_0-9a-zA-Z-]+/)?(wp-(content|admin|includes).*) $2 [L]
+RewriteRule ^([_0-9a-zA-Z-]+/)?(.*\\.php)$ $2 [L]
+RewriteRule . index.php [L]
+# END WordPress Multisite
+";
+
+const HTACCESS_SUBDOMAIN: &str = "# BEGIN WordPress Multisite (written by Devid, from WordPress's Network Setup)
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\\.php$ - [L]
+
+# add a trailing slash to /wp-admin
+RewriteRule ^wp-admin$ wp-admin/ [R=301,L]
+
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+RewriteRule ^(wp-(content|admin|includes).*) $1 [L]
+RewriteRule ^(.*\\.php)$ $1 [L]
+RewriteRule . index.php [L]
+# END WordPress Multisite
+";
 
 /// What `devid new --list` shows: each template, its kits and databases, and why it cannot run here.
 pub fn templates_json(php_installed: bool, node: Option<(u32, u32, u32)>) -> Value {
@@ -1106,7 +1182,22 @@ mod tests {
             url: "https://shop.test".into(),
             mail: Some(2525),
             port: None,
+            multisite: None,
         }
+    }
+
+    #[test]
+    fn multisite_is_for_wordpress() {
+        let wordpress = find("wordpress").unwrap();
+        assert_eq!(multisite(wordpress, None).unwrap(), None);
+        assert_eq!(multisite(wordpress, Some("subdir")).unwrap(), Some("subdir"));
+        assert_eq!(multisite(wordpress, Some("subdomain")).unwrap(), Some("subdomain"));
+        assert!(multisite(wordpress, Some("both")).unwrap_err().contains("subdomain or subdir"));
+        assert!(multisite(find("laravel").unwrap(), Some("subdir")).unwrap_err().contains("is for WordPress"));
+        let network = Options { multisite: Some("subdir"), ..options("wordpress", "", Some(Engine::Mysql)) };
+        assert!(steps(&network).contains(&"Installing WordPress Multisite"));
+        assert!(HTACCESS_SUBDIR.contains("RewriteRule ^([_0-9a-zA-Z-]+/)?(wp-(content|admin|includes).*) $2 [L]"));
+        assert!(HTACCESS_SUBDOMAIN.contains("RewriteRule ^(wp-(content|admin|includes).*) $1 [L]"));
     }
 
     #[test]

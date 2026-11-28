@@ -246,10 +246,24 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
         Mode::Php => {
             let root = quotable(&site.docroot)?;
             let sock = quotable(Path::new(&format!("unix:{}", php::socket(paths, &site.php).display())))?;
+            // D-065: a WordPress network in subfolders, with WordPress's nginx rules: /<site>/wp-…
+            // and /<site>/….php are the main site's files. The redirect is relative, so the port
+            // stays (S1).
+            let network = match site.wp_subdir {
+                true => {
+                    "        if (!-e $request_filename) {\n\
+                     \x20           rewrite /wp-admin$ $uri/ permanent;\n\
+                     \x20           rewrite ^(/[^/]+)?(/wp-.*) $2 last;\n\
+                     \x20           rewrite ^(/[^/]+)?(/.*\\.php) $2 last;\n\
+                     \x20       }\n"
+                }
+                false => "",
+            };
             format!(
                 "        root {root};\n\
                  \x20       index index.php index.html;\n\
                  \x20       charset utf-8;\n\
+                 {network}\
                  \x20       location / {{ try_files $uri $uri/ /index.php?$query_string; }}\n\
                  \x20       location ~ \\.php$ {{\n\
                  \x20           fastcgi_pass {sock};\n\
@@ -574,6 +588,18 @@ mod tests {
 
         let erd = &conf[conf.find("server_name erd.test ").unwrap()..];
         assert!(!erd.contains("access_log") && !erd.contains("@devid_wake"), "only on-demand sites: {erd}");
+    }
+
+    #[test]
+    fn render_wordpress_network_in_subfolders() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let net = Site { wp_subdir: true, preset: "wordpress", ..site("net", "/p/net", "8.5") };
+        let conf = render(&paths, &Config::default(), &[net, site("blog", "/p/blog", "8.5")]);
+        let rules = "        if (!-e $request_filename) {\n            rewrite /wp-admin$ $uri/ permanent;\n            \
+                     rewrite ^(/[^/]+)?(/wp-.*) $2 last;\n            rewrite ^(/[^/]+)?(/.*\\.php) $2 last;\n        }\n";
+        assert_eq!(conf.matches(rules).count(), 1, "the network only (D-065): {conf}");
+        let net = &conf[conf.find("server_name net.test ").unwrap()..];
+        assert!(net.find(rules).unwrap() < net.find("location / {").unwrap(), "before the locations");
     }
 
     #[test]

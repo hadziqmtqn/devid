@@ -122,7 +122,21 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
         Mode::Php => {
             let root = quote(&site.docroot)?;
             let sock = quote(Path::new(&format!("unix/{}", php::socket(paths, &site.php).display())))?;
-            format!("\troot * {root}\n\tencode\n{hidden}\tphp_fastcgi {sock}\n\tfile_server\n")
+            // D-065: a WordPress network in subfolders, with WordPress's nginx rules written for
+            // Caddy (S1): /<site>/wp-… and /<site>/….php are the main site's files.
+            let network = match site.wp_subdir {
+                true => {
+                    "\t@wpms_admin path_regexp ^/[^/]+/wp-admin$\n\
+                     \tredir @wpms_admin {path}/ 301\n\
+                     \t@wpms {\n\
+                     \t\tnot file\n\
+                     \t\tpath_regexp wpms ^/[^/]+(/wp-.*|/.*\\.php)$\n\
+                     \t}\n\
+                     \trewrite @wpms {re.wpms.1}\n"
+                }
+                false => "",
+            };
+            format!("\troot * {root}\n\tencode\n{hidden}{network}\tphp_fastcgi {sock}\n\tfile_server\n")
         }
         Mode::Static => {
             let root = quote(&site.docroot)?;
@@ -317,6 +331,18 @@ mod tests {
         assert!(conf.contains("\treverse_proxy localhost:3000\n"), "pass_host: no rewrites");
         assert_eq!(conf.matches("handle_errors 502").count(), 4, "https and http block of both proxy sites");
         assert!(!conf.contains("devid_refused") && !conf.contains("requests-"), "no on-demand");
+    }
+
+    #[test]
+    fn render_wordpress_network_in_subfolders() {
+        let paths = Paths { home: PathBuf::from("/h/.devid") };
+        let net = Site { wp_subdir: true, preset: "wordpress", ..site("net", "/p/net", "8.5") };
+        let conf = render(&paths, &Config::default(), &[net, site("blog", "/p/blog", "8.5")]);
+        let rules = "\t@wpms {\n\t\tnot file\n\t\tpath_regexp wpms ^/[^/]+(/wp-.*|/.*\\.php)$\n\t}\n\trewrite @wpms {re.wpms.1}\n";
+        assert_eq!(conf.matches(rules).count(), 2, "the network's HTTPS and HTTP blocks (D-065)");
+        assert_eq!(conf.matches("redir @wpms_admin {path}/ 301").count(), 2);
+        let block = &conf[conf.find("https://net.test").unwrap()..];
+        assert!(block.find(rules).unwrap() < block.find("php_fastcgi").unwrap(), "before php_fastcgi");
     }
 
     #[test]

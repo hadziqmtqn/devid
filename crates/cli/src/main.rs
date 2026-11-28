@@ -179,6 +179,10 @@ enum Command {
         /// Laravel: react, vue, svelte or livewire (a starter kit, needs Node.js); Symfony: skeleton
         #[arg(long)]
         kit: Option<String>,
+        /// WordPress: a network of sites, on subdomains (shop.<name>.test) or in subfolders
+        /// (<name>.test/shop)
+        #[arg(long, value_parser = ["subdomain", "subdir"])]
+        multisite: Option<String>,
         /// Open the site in the browser when it is ready
         #[arg(long)]
         open: bool,
@@ -749,9 +753,9 @@ fn run(command: Command, paths: &Paths) -> Result<(), String> {
             })
         }
         Command::ShellPath { state } => shell_path(paths, state.as_deref()),
-        Command::New { template, name, path, php, db, kit, open, list } => match (template, name) {
+        Command::New { template, name, path, php, db, kit, multisite, open, list } => match (template, name) {
             (Some(template), Some(name)) if !list => {
-                new_project(paths, NewArgs { template, name, path, php, db, kit, open })
+                new_project(paths, NewArgs { template, name, path, php, db, kit, multisite, open })
             }
             (Some(_), None) if !list => Err("name the project: `devid new <template> <name>`".into()),
             _ => send(Request::NewTemplates).map(|v| print_templates(&v["templates"])),
@@ -1660,6 +1664,7 @@ struct NewArgs {
     php: Option<String>,
     db: Option<String>,
     kit: Option<String>,
+    multisite: Option<String>,
     open: bool,
 }
 
@@ -1696,7 +1701,15 @@ fn new_project(paths: &Paths, a: NewArgs) -> Result<(), String> {
             println!("parked {folder}");
         }
     }
-    let req = Request::NewProject { template: a.template, name: a.name, path, php: a.php, db: a.db, kit: a.kit };
+    let req = Request::NewProject {
+        template: a.template,
+        name: a.name,
+        path,
+        php: a.php,
+        db: a.db,
+        kit: a.kit,
+        multisite: a.multisite,
+    };
     let reply = new_with_progress(paths, req, |label| println!("  → {label}"));
     let v = reply?;
     let s = |v: &serde_json::Value| v.as_str().unwrap_or("?").to_string();

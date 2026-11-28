@@ -1146,8 +1146,9 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                 "node": node.map(|v| format!("{}.{}.{}", v.0, v.1, v.2)),
             }))
         }
-        Request::NewProject { template, name, path, php, db, kit } => {
-            let reply = new_project(state, &template, &name, path, php, db.as_deref(), kit.as_deref());
+        Request::NewProject { template, name, path, php, db, kit, multisite } => {
+            let choices = Choices { db: db.as_deref(), kit: kit.as_deref(), multisite: multisite.as_deref() };
+            let reply = new_project(state, &template, &name, path, php, choices);
             // D-054: a Node.js project is on demand, and may be the first site that is, so the
             // daemon must listen for its first visit now.
             if reply.is_ok() {
@@ -2292,6 +2293,13 @@ impl newproject::Host for JobHost<'_> {
     }
 }
 
+/// A template's options in `devid new`: `--db`, `--kit` and `--multisite` (D-065).
+struct Choices<'a> {
+    db: Option<&'a str>,
+    kit: Option<&'a str>,
+    multisite: Option<&'a str>,
+}
+
 /// `devid new` (D-063): check everything that can be checked first, run the template's steps,
 /// then serve the folder (parked folders serve it already; elsewhere it is linked), pin its PHP
 /// and save its commands.
@@ -2301,12 +2309,12 @@ fn new_project(
     name: &str,
     path: Option<String>,
     php_version: Option<String>,
-    db: Option<&str>,
-    kit: Option<&str>,
+    choices: Choices,
 ) -> Result<Value, String> {
     let t = newproject::find(template)?;
     newproject::check_name(name)?;
-    let (kit, engine, sqlite) = newproject::choose(t, kit, db)?;
+    let (kit, engine, sqlite) = newproject::choose(t, choices.kit, choices.db)?;
+    let multisite = newproject::multisite(t, choices.multisite)?;
     let config = state.config.lock().unwrap().clone();
     if let Some(s) = sites::resolve(&config).into_iter().find(|s| s.name == name) {
         return Err(format!("a site named {name} exists already ({}); pick another name", s.path.display()));
@@ -2365,6 +2373,7 @@ fn new_project(
             Some(app) => Some(free_dev_port(&config, app.port)?),
             None => None,
         },
+        multisite,
     };
     let log = state.paths.log_dir().join(format!("new-{name}.log"));
     {
