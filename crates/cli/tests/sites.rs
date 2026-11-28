@@ -61,7 +61,7 @@ fn park_link_isolate_and_nginx() {
     assert_eq!(site(&sites, "shop")["linked"], true);
     let conf = fs::read_to_string(home.join("nginx/conf/nginx.conf")).unwrap();
     for host in ["blog.test", "api.test", "shop.test"] {
-        assert!(conf.contains(&format!("server_name {host};")), "{host} in nginx.conf");
+        assert!(conf.contains(&format!("server_name {host} ")), "{host} in nginx.conf");
     }
     wait_for("reload after site changes", || reloads(&home) >= 1);
 
@@ -70,7 +70,7 @@ fn park_link_isolate_and_nginx() {
     wait_for("8.4 running", || proc_of(&json(&home, &["status", "--json"]), "8.4").0 == "running");
     assert_eq!(proc_of(&json(&home, &["status", "--json"]), "8.5").0, "running");
     let conf = fs::read_to_string(home.join("nginx/conf/nginx.conf")).unwrap();
-    let blog = &conf[conf.find("server_name blog.test;").unwrap()..];
+    let blog = &conf[conf.find("server_name blog.test ").unwrap()..];
     let blog = &blog[..blog.find("\n    }").unwrap()];
     assert!(blog.contains("php84.sock"), "blog uses the 8.4 socket:\n{blog}");
 
@@ -112,7 +112,7 @@ fn park_link_isolate_and_nginx() {
     assert!(projects.join("api").is_dir(), "the folder stays");
     let full = request_json(&home, r#"{"cmd":"sites"}"#);
     assert_eq!(full["ignored"], serde_json::json!([{"name": "api", "path": s(&projects.join("api"))}]));
-    assert!(!fs::read_to_string(home.join("nginx/conf/nginx.conf")).unwrap().contains("server_name api.test;"));
+    assert!(!fs::read_to_string(home.join("nginx/conf/nginx.conf")).unwrap().contains("server_name api.test "));
     assert!(stderr(&devid(&home, &["ignore", "shop"])).contains("shop is linked; use `devid unlink shop`"));
     assert!(devid(&home, &["unignore", "api"]).status.success());
     assert_eq!(site(&json(&home, &["sites", "--json"]), "api")["linked"], false);
@@ -255,7 +255,7 @@ fn local_port() {
     assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("port:     {busy} is in use by")));
     assert!(site(&json(&home, &["sites", "--json"]), "shop")["port_busy"].is_string());
     assert!(!conf().contains(&format!("listen 127.0.0.1:{busy}")));
-    assert!(conf().contains("server_name blog.test;"), "every other site is still served");
+    assert!(conf().contains("server_name blog.test "), "every other site is still served");
     drop(other);
     assert!(devid(&home, &["app", "port", "shop"]).status.success());
     assert!(site(&json(&home, &["sites", "--json"]), "shop")["port_busy"].is_null());

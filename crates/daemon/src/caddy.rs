@@ -92,15 +92,16 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
             continue;
         };
         // Caddy rejects `tls` in a block that also listens on plain HTTP, so each site gets an
-        // HTTPS block and an HTTP block with the same body.
+        // HTTPS block and an HTTP block with the same body. D-065: each also answers on one level
+        // of subdomains; Caddy's `*` is one label, so deeper names find no site.
         let _ = write!(
             c,
-            "\nhttps://{host}:{https} {{\n\
+            "\nhttps://{host}:{https}, https://*.{host}:{https} {{\n\
              \tbind 127.0.0.1\n\
              \ttls {crt} {key}\n\
              {body}\
              }}\n\
-             \nhttp://{host}:{http} {{\n\
+             \nhttp://{host}:{http}, http://*.{host}:{http} {{\n\
              \tbind 127.0.0.1\n\
              {body}\
              }}\n",
@@ -133,11 +134,12 @@ fn site_body(paths: &Paths, site: &Site) -> Option<String> {
             let message = format!(
                 "Nothing answers on localhost:{up} for {host}. Start its dev server (or its command in Devid)."
             );
-            // As in nginx: Host and the site's own Origin become the dev server's (A1).
+            // As in nginx: Host and the site's own Origin become the dev server's (A1), its
+            // subdomains' included (D-065).
             let origin = match site.pass_host {
                 true => String::new(),
                 false => format!(
-                    "\t@devid_own_origin header_regexp Origin \"^https?://{own}(:[0-9]+)?$\"\n\
+                    "\t@devid_own_origin header_regexp Origin \"^https?://([a-z0-9-]+[.])?{own}(:[0-9]+)?$\"\n\
                      \trequest_header @devid_own_origin Origin http://localhost:{up}\n",
                     own = host.replace('.', "[.]"),
                 ),
@@ -284,8 +286,15 @@ mod tests {
             &[site("blog", "/p/blog/public", "8.4"), site("evil", "/p/{env.HOME}", "8.5")],
         );
         assert!(conf.contains("admin off") && conf.contains("auto_https off"));
-        assert!(conf.contains("https://blog.test:8443 {") && conf.contains("http://blog.test:8088 {"));
-        assert!(!conf.contains(", https://"), "Caddy rejects http and https addresses sharing a tls block");
+        assert!(
+            conf.contains("https://blog.test:8443, https://*.blog.test:8443 {")
+                && conf.contains("http://blog.test:8088, http://*.blog.test:8088 {"),
+            "the site and one level of subdomains (D-065)"
+        );
+        assert!(
+            !conf.contains(":8088, https://") && !conf.contains(":8443, http://"),
+            "Caddy rejects http and https addresses sharing a tls block"
+        );
         assert!(conf.contains("tls \"/h/.devid/certs/blog.test.crt\" \"/h/.devid/certs/blog.test.key\""));
         assert!(conf.contains("php_fastcgi \"unix//h/.devid/run/php84.sock\""));
         assert!(conf.matches("bind 127.0.0.1").count() == 3, "default + blog (https, http), all local only");
@@ -302,7 +311,7 @@ mod tests {
         let conf = render(&paths, &Config::default(), &[spa, dev, raw]);
         assert!(conf.contains("root * \"/p/app/dist\"") && conf.contains("try_files {path} {path}.html /index.html"));
         assert!(!conf.contains("php_fastcgi"));
-        assert!(conf.contains("header_regexp Origin \"^https?://erd[.]test(:[0-9]+)?$\""));
+        assert!(conf.contains("header_regexp Origin \"^https?://([a-z0-9-]+[.])?erd[.]test(:[0-9]+)?$\""));
         assert!(conf.contains("request_header @devid_own_origin Origin http://localhost:5173"));
         assert!(conf.contains("reverse_proxy localhost:5173 {\n\t\theader_up Host localhost:5173"));
         assert!(conf.contains("\treverse_proxy localhost:3000\n"), "pass_host: no rewrites");
@@ -332,7 +341,7 @@ mod tests {
         assert_eq!(conf.matches("reverse_proxy \"unix//h/.devid/run/wake.sock\" {").count(), 6);
         assert_eq!(conf.matches("respond \"Nothing answers on localhost:3000").count(), 2, "erd as before");
 
-        let block = &conf[conf.find("https://devid-site.test:8443 {").unwrap()..];
+        let block = &conf[conf.find("https://devid-site.test:8443, https://*.devid-site.test:8443 {").unwrap()..];
         let block = &block[..block.find("\n}\n").unwrap()];
         for line in [
             "\t\t\t\tmethod GET\n",
@@ -360,9 +369,9 @@ mod tests {
         ] {
             assert!(block.contains(line), "missing {line:?} in {block}");
         }
-        let raw = &conf[conf.find("https://raw.test:8443 {").unwrap()..];
+        let raw = &conf[conf.find("https://raw.test:8443, https://*.raw.test:8443 {").unwrap()..];
         assert!(raw.starts_with(
-            "https://raw.test:8443 {\n\tbind 127.0.0.1\n\ttls \"/h/.devid/certs/raw.test.crt\" \"/h/.devid/certs/raw.test.key\"\n\
+            "https://raw.test:8443, https://*.raw.test:8443 {\n\tbind 127.0.0.1\n\ttls \"/h/.devid/certs/raw.test.crt\" \"/h/.devid/certs/raw.test.key\"\n\
              \treverse_proxy localhost:4321 {\n\t\ttransport http {\n\t\t\tkeepalive off\n\t\t}\n\t}\n"
         ));
         assert_eq!(conf.matches("keepalive off").count(), 12, "on demand only: 2 sites x 3 blocks x 2 proxies");

@@ -55,6 +55,21 @@ case "$got" in
   *) echo "FAIL: expected '$want<patch> $(uname -m)'" >&2; exit 1 ;;
 esac
 
+# Subdomains (D-065): one level answers with a certificate that names it, checked against Devid's CA
+# (no -k); a deeper name gets no valid certificate and no site.
+subdomains() {
+  local server="$1" ca="$DEVID_HOME/ca/devid-ca.crt" got code
+  got="$(curl -fsS --cacert "$ca" --resolve acme.shop.test:28443:127.0.0.1 https://acme.shop.test:28443/ 2>&1 || true)"
+  case "$got" in "smoke "*) ;; *) echo "FAIL: acme.shop.test on $server: $got" >&2; exit 1 ;; esac
+  if curl -fsS -o /dev/null --cacert "$ca" --resolve a.b.shop.test:28443:127.0.0.1 https://a.b.shop.test:28443/ 2> /dev/null; then
+    echo "FAIL: a.b.shop.test got a valid certificate on $server" >&2; exit 1
+  fi
+  code="$(curl -s -o /dev/null -w '%{http_code}' --resolve a.b.shop.test:28088:127.0.0.1 http://a.b.shop.test:28088/)"
+  [ "$code" != 200 ] || { echo "FAIL: a.b.shop.test was served on $server over HTTP" >&2; exit 1; }
+  echo "subdomain smoke test passed on $server ($code for a deeper name)"
+}
+subdomains nginx
+
 # A proxy site (D-035) answers as soon as its dev server starts, whether that listens on 127.0.0.1
 # or only on ::1 (as Vite does). nginx skips a localhost address that refused for 10 s, so up to
 # 0.16 the site said "Nothing answers" for that long; the retry group fixes it (Phase 10 O2).
@@ -130,6 +145,7 @@ for server in $servers; do
   "$DEVID" cmd stop front dev > /dev/null 2>&1 || true
   "$DEVID" server use "$server" > /dev/null
   settle "proxy smoke" -L || { echo "FAIL: on-demand front.test on $server: $(front -L)" >&2; exit 1; }
+  subdomains "$server"
   "$DEVID" cmd front | grep 'on demand: running' > /dev/null || { echo "FAIL: $server did not wake dev" >&2; "$DEVID" cmd front; exit 1; }
 done
 "$DEVID" server use nginx > /dev/null

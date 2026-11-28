@@ -12,3 +12,4 @@
 | [linux](linux/README.md) | Devid on Linux: Ubuntu (Phase 12) and Arch (Phase 13) |
 | [databases](databases/README.md) | MySQL, PostgreSQL and MongoDB run by Devid (Phase 14) |
 | [new-project](new-project/README.md) | `devid new`: projects made with each framework's own tool (Phase 15) |
+| [subdomains](subdomains/README.md) | subdomains of a site, their certificates, and what builds on them (Phase 16) |

@@ -2,7 +2,7 @@
 
 > Scope: every site also answers on its subdomains, `https://<sub>.<name>.test`, with a certificate for them; accounts that may create databases; WordPress Multisite in `devid new` (D-065)
 > Verified against: 2026-11-28 (Devid 0.22.0, main c11bebd; `dns.rs`, `ca.rs`, `nginx.rs`, `caddy.rs`, `apache.rs`, `db.rs`)
-> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results").
+> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results"). **S2 built 2026-11-28:** subdomains and their certificates on nginx, Caddy and Apache, checked on the M1 (see "S2 results").
 
 On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owner said "ya nanti kamu catat") and a multi-tenant option for Laravel ("Ya, catat"). Both need the same serving, which Devid lacks: subdomains of a site and their certificates. Multi-tenant apps with one database per tenant also need an account that may create databases (`phase-15.md`, "Not in this phase"). On 2026-11-28 the owner chose this work as Phase 16. They asked for suggestions before any documentation, and this plan records the ones they accepted.
 
@@ -189,6 +189,42 @@ A tree shaped like WordPress's (`index.php`, `wp-login.php`, `wp-admin/`, `wp-in
 - Apache: `ServerAlias *.<host>` and the 421 guard on every vhost of the site.
 - `ca.rs`: the leaf names `<host>` and `*.<host>`, with a marker that the daemon's check reads to reissue older leaves once.
 - `scripts/linux-e2e.sh`: a subdomain of its site, in curl and headless Chrome.
+
+## S2 results (2026-11-28)
+
+What changed is in the timeline record `docs/implementation-timeline/subdomains/2026-11-28-s2-routing-certificates.md`. In short:
+- **The certificate:** a site's leaf names `<host>` and `*.<host>`. A `<host>.names` file beside it records them, so leaves from before D-065 are reissued once, and the web server reloads when one is.
+- **The web servers:**
+  - nginx gets the one-level expression from S1;
+  - Caddy lists `*.<host>` in each block;
+  - Apache gets the alias and the 421 guard, except on the local port.
+- **Proxy sites:** the `Origin` rewrite covers the subdomains on all three servers.
+
+**Checks on the M1 (Devid 0.22.0 built from `phase16-s2`; the owner's Devid and DBngin were not touched):**
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass: 184 tests with a fake HOME, and `passwd_home_matches_home` on its own with the real one.
+- `scripts/smoke.sh` passed with the new subdomain step: a throwaway Devid on ports 28xxx, `acme.shop.test` against Devid's CA, and `a.b.shop.test` refused.
+
+  | Web server | `acme.shop.test` (HTTPS, Devid's CA) | `a.b.shop.test` over HTTPS | `a.b.shop.test` over HTTP |
+  |---|---|---|---|
+  | nginx | the site | no valid certificate | 404 |
+  | Caddy 2.11.9 | the site | no valid certificate | 404 |
+  | Apache 2.4.67 (macOS) | the site | no valid certificate | 421 |
+
+- **A Next.js 16 app and a Laravel 13 app,** on a throwaway Devid on ports 38xxx (dev servers on 38301 and 38173, away from the owner's 3xxx ports and 5173):
+
+  | Check | nginx | Caddy | Apache |
+  |---|---|---|---|
+  | `https://acme.nx.test/` (proxy site) | 200 | 200 | 200 |
+  | `/_next/hmr` upgrade with `Origin: https://acme.nx.test` | 101 | 101 | 101 |
+  | the same with `Origin: https://other.test` | refused (000) | refused (502) | refused (502) |
+  | `a.b.nx.test` over HTTP / HTTPS | 404 / handshake refused | 404 / handshake refused | 421 / no valid certificate |
+  | `https://acme.lara.test/` (Laravel, `devid new laravel`) | the page, loading `https://lara.test:38173/@vite/client` | the same | the same |
+  | Vite over HTTPS (D-056) with `Origin: https://acme.lara.test` | `Access-Control-Allow-Origin` echoes it | the same | the same |
+
+  - **Apache's guard runs before `ProxyPass`:** a deeper name of a proxy site gets 421 and never reaches the dev server.
+  - **Vite over HTTPS needs `APP_URL` without a port,** as D-056 says. On the spare ports `devid new` wrote `https://lara.test:38443`, so Vite ran on plain HTTP until the check set `https://lara.test`, which a real install, serving 443, writes.
+- **Linux:** `scripts/linux-e2e.sh` now opens `https://acme.e2e.test/` in curl and in headless Chrome and refuses `a.b.e2e.test`. It runs on this pull request's CI.
+- **Not checked by hand:** a browser on the M1 against the S2 build. Its daemon has its own CA, which no browser trusts, and S1 already ran the same configuration lines in Safari's stack, Chromium and Firefox. The owner's own try comes with the rc.
 
 ## Milestones
 

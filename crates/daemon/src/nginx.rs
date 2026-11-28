@@ -152,10 +152,11 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
              \x20       http2 on;\n\
              \x20       ssl_certificate {crt};\n\
              \x20       ssl_certificate_key {key};\n\
-             \x20       server_name {host};\n\
+             \x20       server_name {host} {subdomains};\n\
              {body}\
              \x20   }}\n",
             host = site.host,
+            subdomains = subdomains(&site.host),
         );
         // D-037: plain HTTP on 127.0.0.1:<port>, any Host (a tunnel sends its public name).
         if let Some(local) = site.port {
@@ -174,6 +175,19 @@ pub fn render(paths: &Paths, config: &Config, sites: &[Site]) -> String {
     }
     c.push_str("}\n");
     c
+}
+
+/// `host` as a regular expression: hosts are DNS labels joined by dots.
+fn escaped(host: &str) -> String {
+    host.replace('.', "\\.")
+}
+
+/// D-065: one level of subdomains, as a `server_name` expression. A wildcard name (`*.blog.test`)
+/// would match every depth and serve the site's certificate for names it does not cover; deeper
+/// names fall to the default servers instead, which refuse the handshake. nginx matches exact
+/// names first, so a site's own host never reaches the expressions.
+fn subdomains(host: &str) -> String {
+    format!("~^[a-z0-9-]+\\.{}$", escaped(host))
 }
 
 /// nginx variable holding the Origin a proxy site sends upstream (site names are DNS labels).
@@ -219,6 +233,8 @@ fn own_origin_map(config: &Config, site: &Site) -> String {
     ] {
         let _ = writeln!(m, "        \"{origin}\" \"http://localhost:{up}\";");
     }
+    // D-065: its subdomains' too, on any port (Next.js refuses /_next/hmr from another origin).
+    let _ = writeln!(m, "        \"~^https?://[a-z0-9-]+\\.{}(:[0-9]+)?$\" \"http://localhost:{up}\";", escaped(host));
     m.push_str("    }\n");
     m
 }
@@ -434,7 +450,8 @@ mod tests {
         assert!(conf.contains("listen 127.0.0.1:8443 ssl default_server;"));
         assert!(conf.contains("ssl_certificate \"/h/.devid/certs/blog.test.crt\";"));
         assert!(conf.contains("listen 127.0.0.1:8443 ssl;"));
-        assert!(conf.contains("server_name blog.test;"));
+        // D-065: one level of subdomains, by an expression (a wildcard name matches every depth).
+        assert!(conf.contains(r"server_name blog.test ~^[a-z0-9-]+\.blog\.test$;"), "{conf}");
         assert!(conf.contains("root \"/p/blog/public\";"));
         assert!(conf.contains("fastcgi_pass \"unix:/h/.devid/run/php84.sock\";"));
         assert!(conf.contains("client_body_temp_path \"/h/.devid/nginx/tmp/body\";"));
@@ -466,6 +483,10 @@ mod tests {
         {
             assert!(conf.contains(&format!("\"{own}\" \"http://localhost:5173\";")), "{own}");
         }
+        assert!(
+            conf.contains(r#""~^https?://[a-z0-9-]+\.erd-pro\.test(:[0-9]+)?$" "http://localhost:5173";"#),
+            "the subdomains' origins too (D-065)"
+        );
         assert!(conf.contains("proxy_set_header Origin $devid_origin_erd_pro;"));
         assert!(conf.contains("proxy_set_header Connection $connection_upgrade;"));
         assert!(conf.contains("return 502 \"Nothing answers on localhost:5173 for erd-pro.test."));
@@ -489,7 +510,7 @@ mod tests {
         assert!(again.contains("proxy_pass http://devid_again_erd_pro;"), "{again}");
         assert!(again.contains("proxy_set_header Origin $devid_origin_erd_pro;"), "same headers as the main path");
         assert!(again.contains("error_page 502 504 = @devid_down;"), "{again}");
-        let main = &conf[conf.find("server_name erd-pro.test;").unwrap()..];
+        let main = &conf[conf.find("server_name erd-pro.test ").unwrap()..];
         assert!(
             main.contains("location / {\n            proxy_pass http://localhost:5173;"),
             "the quiet path stays first"
@@ -551,7 +572,7 @@ mod tests {
         assert!(retry.contains("proxy_set_header Origin $devid_origin_devid_site;"), "same headers");
         assert!(retry.contains("error_page 502 504 = @devid_down;"), "a failed retry cannot loop back");
 
-        let erd = &conf[conf.find("server_name erd.test;").unwrap()..];
+        let erd = &conf[conf.find("server_name erd.test ").unwrap()..];
         assert!(!erd.contains("access_log") && !erd.contains("@devid_wake"), "only on-demand sites: {erd}");
     }
 
@@ -565,6 +586,7 @@ mod tests {
         assert!(local.contains("listen 127.0.0.1:8000 default_server;"), "{local}");
         assert!(local.contains("fastcgi_pass \"unix:/h/.devid/run/php85.sock\";"), "same body as the .test block");
         assert!(!local.contains("ssl"), "plain HTTP: the tunnel's edge does TLS");
+        assert!(local.contains("server_name saas.test;"), "no subdomains on the local port (D-065)");
         assert_eq!(conf.matches("listen 127.0.0.1:8000").count(), 1);
 
         // A proxy site on a local port: one retry group, used by both of its server blocks.
