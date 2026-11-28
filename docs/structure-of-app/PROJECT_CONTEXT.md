@@ -35,6 +35,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 - Phase 13 (accepted 2026-11-24, done in 0.20.0): Arch-based Linux, Arch Linux and the distributions built on it, such as CachyOS, on x86_64 (D-059).
 - Phase 14 (accepted 2026-11-25, done in 0.21.0): databases. Devid runs MySQL, PostgreSQL and MongoDB, with accounts and passwords in one step, in the CLI, the TUI and the app (D-061). D2 and D3 shipped in 0.20.1, off by default.
 - Phase 15 (accepted 2026-11-25, done in 0.22.0): new projects. `devid new` creates projects with each framework's own tool, in the CLI, the TUI and the app (D-063). A weekly check makes every template with the real tools on macOS and Ubuntu.
+- Phase 16 (accepted 2026-11-28): subdomains. Every site also answers on `<sub>.<name>.test` with a certificate for it, MySQL and PostgreSQL accounts may be allowed to create databases, and `devid new` makes WordPress Multisite networks (D-065).
 
 **Non-goals:**
 - Databases beyond MySQL, PostgreSQL and MongoDB (Redis or Valkey, MariaDB, Elasticsearch), databases started on demand, and upgrades or imports across series other than dump and restore (D-061). The owner still uses DBngin, next to Devid's servers.
@@ -61,6 +62,7 @@ The driver is the owner's hardware. Until 2026-11-20 it was an Intel Mac (i5-821
 | 13 | Arch-based Linux: Arch Linux and the distributions built on it, x86_64, the CLI and the TUI (D-059); plan in `docs/roadmap/phase-13.md` | done 2026-11-25: A1 to A3 on 2026-11-24, and 0.20.0 released on 2026-11-24 after rc.1 on the owner's Arch Linux, Ubuntu 24.04 and CachyOS machines (install, browsers, reboot, fish, self-update, uninstall) |
 | 14 | Databases: Devid runs MySQL, PostgreSQL and MongoDB, with accounts and passwords in one step (D-061); plan in `docs/roadmap/phase-14.md` | done 2026-11-26: D1 to D4 on 2026-11-25 (D2 and D3 shipped in 0.20.1, off by default), and 0.21.0 released after its rc on the owner's M1 and the Ubuntu, Arch and CachyOS VMs (D5) |
 | 15 | `devid new`: creating projects with each framework's own tool (D-063); plan in `docs/roadmap/phase-15.md` | done 2026-11-27: N1 to N3 on 2026-11-26, N4's app sheet built the same day, and 0.22.0 released after rc.1 on the owner's M1 and the Ubuntu, Arch and CachyOS VMs and rc.2, with the owner's changes to the app's sheet, on the M1 (N5) |
+| 16 | Subdomains of a site, accounts that may create databases, WordPress Multisite (D-065); plan in `docs/roadmap/phase-16.md` | accepted 2026-11-28 |
 
 ## Open risks (Phase 1 must prove)
 

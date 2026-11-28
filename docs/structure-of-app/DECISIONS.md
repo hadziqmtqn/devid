@@ -45,6 +45,7 @@ Never delete an entry. When a decision is replaced, mark it `superseded by D-xxx
 | D-035 | 2026-11-08 | accepted (Phase 8) | Each site has a serving mode (`php`, `static`, `proxy`), filled in by a detected preset (Laravel, CodeIgniter, Node, Vite …); the user can change both |
 | D-036 | 2026-11-08 | accepted (Phase 8) | A site can have named user commands that the daemon starts and stops, one by one or all at once; never at login, never by themselves |
 | D-037 | 2026-11-08 | accepted (Phase 8; schedules D-011's deferred share/tunnel) | A site can also be served on a local port for tunnels; "Share" runs a Cloudflare quick tunnel on demand |
+| D-065 | 2026-11-28 | accepted 2026-11-28 (Phase 16; builds on D-008, D-035, D-061 and D-063) | Every site also answers on one level of subdomains, `<sub>.<name>.test`, with one certificate for `<name>.test` and `*.<name>.test` from the same CA, on nginx, Caddy and Apache, proxy sites included; MySQL and PostgreSQL accounts may be allowed to create databases (MySQL by the `<name>_` prefix, PostgreSQL `CREATEDB`); `devid new wordpress --multisite subdomain|subdir` |
 | D-063 | 2026-11-25 | accepted 2026-11-25 (Phase 15; builds on D-035, D-036, D-054 and D-061); done in 0.22.0 2026-11-27 | `devid new` creates projects with each framework's official tool: blank PHP, Laravel and its starter kits, WordPress (WP-CLI, a Devid MySQL account), Symfony, CodeIgniter 4, static, and Node.js (Vite's React, Vue, Svelte and vanilla, Next.js, Nuxt, SvelteKit, Astro, an Express API) on the user's own Node; the daemon runs the job, and the project is served at `https://<name>.test` with its database, Mail and dev-server commands set up |
 | D-062 | 2026-11-25 | accepted 2026-11-25 (amends D-009); done in 0.20.1 2026-11-25 | PHP 8.6 joins 8.3, 8.4 and 8.5 in devid 0.20.1, built with static-php-cli 2.8.5 plus small fixes for 8.6 only, Xdebug 3.6.0alpha1, phpredis 6.4.0RC1 and pcov's fix commit; 8.3 stays until 2027-12-31; 8.5 stays the default until Xdebug 3.6.0 is stable and the catalog builds for 8.6, which has imagick, ldap and mongodb so far |
 | D-061 | 2026-11-25 | accepted 2026-11-25 (Phase 14; supersedes what D-006 left, builds on D-058 and D-060); D2 and D3 in 0.20.1, off by default; done in 0.21.0 2026-11-26 | Devid runs D-058's MySQL, PostgreSQL and MongoDB: one server per engine under the daemon, on 127.0.0.1 at the usual port or the next free one, data in `~/.devid/data` that `uninstall --purge` keeps, accounts with generated passwords that one command creates or resets, the main MySQL and PostgreSQL account without a password, and `devid db` in the CLI, the TUI and the app |
@@ -1353,3 +1354,21 @@ See ARCHITECTURE, "PHP runtime".
     - with no parked folder, the Folder field opens Finder's folder chooser directly (`phase-15.md`, "rc.1").
 - **rc.2 and 0.22.0 (2026-11-27):** the decision holds. rc.2 carries the sheet's changes, and passed the owner's try in the app on the M1 ("Sudah saya coba, semua berjalan normal"). 0.22.0 ships `devid new` in the CLI, the TUI and the app, WP-CLI as the terminal command `wp`, and the weekly check of every template; the guide's `/docs/new-project` merges with the release (`phase-15.md`, "rc.2").
 - **Status:** accepted on 2026-11-25. N1, N2 and N3 done on 2026-11-26; N4 and N5 done on 2026-11-27, after the owner's tries of rc.1 and rc.2; done in 0.22.0 on 2026-11-27.
+
+## D-065: subdomains of a site, accounts that may create databases, WordPress Multisite (accepted 2026-11-28, Phase 16)
+
+- **Context:**
+  - Phase 15 left WordPress Multisite and a multi-tenant option for Laravel for later (D-063, owner's answers of 2026-11-26). Both need a site's subdomains served, with certificates, and per-tenant databases need an account that may create them.
+  - Devid's DNS already answers every name under `.test`. The web servers match each site's exact host, and each certificate names one host. Devid accounts have rights on their own database only (D-061).
+  - Valet serves a site's subdomains, and its certificates name `*.<name>.test`. Herd follows it.
+  - On 2026-11-28 the owner chose this work over a Linux desktop app and Windows 10/11 ("Subdomain dulu"), and took every recommendation ("Ya, ikuti semua").
+- **Decision:**
+  - **Subdomains:** every site also answers on one level of subdomains, `<sub>.<name>.test`, with no setting. Deeper names are refused like unknown hosts. Proxy sites get them too, with their `Origin` rewrite widened to the subdomains.
+  - **Certificates:** one per site, naming `<name>.test` and `*.<name>.test`, from the same CA. Existing leaves are reissued once; no sudo and no new trust step.
+  - **Accounts:** `devid db user add <engine> <name> --create-databases`, and a checkbox in the TUI and the app. On MySQL the account gets every right on databases named `<name>_…`; on PostgreSQL it gets `CREATEDB`. MongoDB is not included.
+  - **WordPress Multisite:** `devid new wordpress <name> --multisite subdomain|subdir`. nginx and Caddy get WordPress's subdirectory rules, for a site whose `wp-config.php` turns `MULTISITE` on without `SUBDOMAIN_INSTALL`.
+  - **Clients:** a site's details say once that it answers on `*.<name>.test`, with an (i) tooltip (D-055); no design board. The guide gets `/docs/subdomains`.
+- **Not decided here:** how nginx and Apache are held to one level (S1), and the name of the command that changes an existing account.
+- **Not in this phase:** deeper subdomains, subdomains on a local port or through Share (D-037), a tenancy option in `devid new laravel`, MongoDB accounts that may create databases, and aliases.
+- **Plan:** `docs/roadmap/phase-16.md`, milestones S1 to S5, released as 0.23.0.
+- **Status:** accepted on 2026-11-28.
