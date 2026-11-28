@@ -315,7 +315,7 @@ enum DbAction {
         #[arg(long)]
         delete_data: bool,
     },
-    /// Accounts: add, password, list, remove
+    /// Accounts: add, create-databases, password, list, remove
     User {
         #[command(subcommand)]
         action: DbUserAction,
@@ -337,6 +337,17 @@ enum DbUserAction {
         /// No database of its own (MySQL and PostgreSQL)
         #[arg(long, conflicts_with = "database")]
         no_database: bool,
+        /// It may also make databases, for an app with one per tenant: on MySQL those named
+        /// `<name>_…`, on PostgreSQL any (it owns them); not on MongoDB
+        #[arg(long)]
+        create_databases: bool,
+    },
+    /// Let an account make databases (`on`), as --create-databases does, or stop it (`off`)
+    CreateDatabases {
+        engine: String,
+        name: String,
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
     },
     /// Give an account a new password: a generated one, or --password
     Password {
@@ -994,11 +1005,24 @@ fn db_user(action: DbUserAction, paths: &Paths) -> Result<(), String> {
             .map_or_else(|| "?".to_string(), |e| e.label().to_string())
     };
     match action {
-        DbUserAction::Add { engine, name, database, password, no_database } => {
-            let v = send(Request::DbUserAdd { engine, name, database, password, no_database })?;
+        DbUserAction::Add { engine, name, database, password, no_database, create_databases } => {
+            let v = send(Request::DbUserAdd { engine, name, database, password, no_database, create_databases })?;
             let with = v["database"].as_str().map(|d| format!(", with the database {d}")).unwrap_or_default();
-            println!("made the {} account {}{with}", label(&v["engine"]), v["name"].as_str().unwrap_or("?"));
+            let name = v["name"].as_str().unwrap_or("?");
+            println!("made the {} account {name}{with}", label(&v["engine"]));
+            if v["create_databases"] == true {
+                println!("{}", may_create(&v["engine"], name));
+            }
             print_account(&v);
+            Ok(())
+        }
+        DbUserAction::CreateDatabases { engine, name, state } => {
+            let v = send(Request::DbUserCreateDatabases { engine, name, on: state == "on" })?;
+            let name = v["name"].as_str().unwrap_or("?");
+            match v["create_databases"] == true {
+                true => println!("{}", may_create(&v["engine"], name)),
+                false => println!("{name} can no longer make databases; the ones it made stay"),
+            }
             Ok(())
         }
         DbUserAction::Password { engine, name, password } => {
@@ -1021,6 +1045,9 @@ fn db_user(action: DbUserAction, paths: &Paths) -> Result<(), String> {
                 };
                 println!("{name:<20} {:<20} {password}", u["database"].as_str().unwrap_or("-"));
             }
+            for u in v["users"].as_array().into_iter().flatten().filter(|u| u["create_databases"] == true) {
+                println!("\n{}", may_create(&v["engine"], u["name"].as_str().unwrap_or("?")));
+            }
             Ok(())
         }
         DbUserAction::Remove { engine, name } => send(Request::DbUserRemove { engine, name }).map(|v| {
@@ -1030,6 +1057,16 @@ fn db_user(action: DbUserAction, paths: &Paths) -> Result<(), String> {
                 v["name"].as_str().unwrap_or("?")
             )
         }),
+    }
+}
+
+/// D-065: what an account that may make databases can make.
+fn may_create(engine: &serde_json::Value, name: &str) -> String {
+    match engine.as_str() {
+        Some("mysql") => {
+            format!("{name} may make and drop databases named {name}_… (a tenancy package's database prefix: {name}_)")
+        }
+        _ => format!("{name} may make databases, and owns the ones it makes"),
     }
 }
 

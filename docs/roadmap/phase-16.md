@@ -2,7 +2,7 @@
 
 > Scope: every site also answers on its subdomains, `https://<sub>.<name>.test`, with a certificate for them; accounts that may create databases; WordPress Multisite in `devid new` (D-065)
 > Verified against: 2026-11-28 (Devid 0.22.0, main c11bebd; `dns.rs`, `ca.rs`, `nginx.rs`, `caddy.rs`, `apache.rs`, `db.rs`)
-> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results"). **S2 built 2026-11-28:** subdomains and their certificates on nginx, Caddy and Apache, checked on the M1 (see "S2 results").
+> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results"). **S2 built 2026-11-28:** subdomains and their certificates on nginx, Caddy and Apache, checked on the M1 and in CI (see "S2 results"). **S3 built 2026-11-28:** accounts that may make databases, on MySQL and PostgreSQL in the CLI (see "S3 results").
 
 On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owner said "ya nanti kamu catat") and a multi-tenant option for Laravel ("Ya, catat"). Both need the same serving, which Devid lacks: subdomains of a site and their certificates. Multi-tenant apps with one database per tenant also need an account that may create databases (`phase-15.md`, "Not in this phase"). On 2026-11-28 the owner chose this work as Phase 16. They asked for suggestions before any documentation, and this plan records the ones they accepted.
 
@@ -51,7 +51,7 @@ On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owne
 
 ### Accounts that may create databases
 
-- **New option:** `devid db user add <engine> <name> --create-databases`; the TUI and the app get a checkbox. An existing account can get it or lose it too, with a command whose name S3 settles.
+- **New option:** `devid db user add <engine> <name> --create-databases`; the TUI and the app get a checkbox. An existing account can get it or lose it too: `devid db user create-databases <engine> <name> on|off` (S3).
 - **MySQL:** the account gets every right on the databases whose names start with `<name>_` (`GRANT ALL ON \`<name>\_%\`.*`), not a global `CREATE`. It can make and drop its tenants' databases, and still cannot touch anyone else's. The app sets its tenancy prefix to `<name>_`; the guide shows how.
 - **PostgreSQL:** `CREATEDB`. The account owns the databases it makes, and gets no rights on other databases from it.
 - **MongoDB:** not in this phase. The tenancy packages that make a database per tenant target SQL databases.
@@ -223,8 +223,43 @@ What changed is in the timeline record `docs/implementation-timeline/subdomains/
 
   - **Apache's guard runs before `ProxyPass`:** a deeper name of a proxy site gets 421 and never reaches the dev server.
   - **Vite over HTTPS needs `APP_URL` without a port,** as D-056 says. On the spare ports `devid new` wrote `https://lara.test:38443`, so Vite ran on plain HTTP until the check set `https://lara.test`, which a real install, serving 443, writes.
-- **Linux:** `scripts/linux-e2e.sh` now opens `https://acme.e2e.test/` in curl and in headless Chrome and refuses `a.b.e2e.test`. It runs on this pull request's CI.
+- **Linux:** `scripts/linux-e2e.sh` now opens `https://acme.e2e.test/` in curl and in headless Chrome and refuses `a.b.e2e.test`. On devid#167's CI (run 46138688807, Ubuntu 24.04) Chrome loaded the subdomain with Devid's CA from NSS. That closes S1's Linux gap, where Brave headless never finished a page.
 - **Not checked by hand:** a browser on the M1 against the S2 build. Its daemon has its own CA, which no browser trusts, and S1 already ran the same configuration lines in Safari's stack, Chromium and Firefox. The owner's own try comes with the rc.
+
+## S3 results (2026-11-28)
+
+What changed is in the timeline record `docs/implementation-timeline/subdomains/2026-11-28-s3-create-databases.md`. In short:
+
+- **Adding an account:** `devid db user add <engine> <name> --create-databases` gives it the right.
+  - MySQL grants every right on `` `<name>\_%` ``. The name's own `_` are escaped, since `_` is a wildcard in that pattern.
+  - PostgreSQL creates the role with `CREATEDB`.
+  - MongoDB refuses the option, and nothing is made.
+- **An existing account:** `devid db user create-databases <engine> <name> on|off`, the name S3 settles.
+  - MySQL: `GRANT`, or `REVOKE IF EXISTS`, so `off` twice is fine.
+  - PostgreSQL: `CREATEDB` or `NOCREATEDB`.
+  - The server's own accounts are refused: they can make databases already.
+- **`devid db user list`** ends with a line for each account that has the right, reading it from the server (`mysql.db`, `pg_roles`).
+- **The output says what the account may make.** On MySQL it also names the prefix for a tenancy package: "my_app may make and drop databases named my_app_… (a tenancy package's database prefix: my_app_)".
+- **The TUI and the app** get the checkbox in S5. The protocol field `create_databases` defaults to off, so they behave as before.
+
+**Checks:**
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass: 186 tests with a fake HOME, and `passwd_home_matches_home` on its own with the real one.
+  - `crates/cli/tests/db.rs` checks the statements against the fake servers.
+  - `db.rs` checks the escaped prefix.
+- **On the M1:** a throwaway Devid (the S3 build) ran MySQL 9.7, then 8.4, on port 13306, and PostgreSQL 18 on 15432, next to DBngin's 3306 and 5432, which were not touched.
+
+  | Check | MySQL 9.7 | MySQL 8.4 | PostgreSQL 18 |
+  |---|---|---|---|
+  | the account makes `<name>_t1`, uses it and drops it | yes | yes | yes |
+  | `CREATE DATABASE other` | refused (1044) | refused (1044) | allowed: `CREATEDB` covers any name, as decided |
+  | `myXapp_t1` for `my_app` (the `_` escaped) | refused | refused | |
+  | another account's data (`shop`) | refused | refused | `DROP DATABASE shop`: "must be owner" |
+  | after `off` | `CREATE DATABASE my_app_t2` refused | the same | "permission denied to create database" |
+  | `on` again, `on` twice, `off` twice | fine | fine | |
+
+  - **The deprecated wildcard works on both MySQL series.** A database grant with a wildcard is deprecated since MySQL 8.2, and works while `partial_revokes` is off, as Devid leaves it. Neither server logged anything about it.
+  - **MongoDB:** the M1 run did not start MongoDB, so its refusal there was only "MongoDB is not on". The refusal of `--create-databases` itself is checked in `tests/db.rs` and in `scripts/db-e2e.sh`.
+- **`scripts/db-e2e.sh`** gains `tenants()` for MySQL and PostgreSQL with the real builds, and the refusal on MongoDB. CI runs it on macOS and Ubuntu, and in the Arch VM.
 
 ## Milestones
 

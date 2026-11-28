@@ -383,6 +383,18 @@ fn accounts_env_port_and_remove() {
     ok(&["db", "create", "mysql", "news"]);
     assert!(calls(&home).contains("CREATE DATABASE `news`;"));
 
+    // D-065: an account that may make databases named after it, for an app with one per tenant. The
+    // `_` in its name is escaped, since `_` is a wildcard in a grant's database pattern.
+    let text = ok(&["db", "user", "add", "mysql", "my_app", "--create-databases"]);
+    assert!(text.contains("my_app may make and drop databases named my_app_…"), "{text}");
+    let log = calls(&home);
+    assert!(log.contains(r"GRANT ALL ON `my\_app\_%`.* TO 'my_app'@'%';"), "{log}");
+    ok(&["db", "user", "create-databases", "mysql", "my_app", "off"]);
+    assert!(calls(&home).contains(r"REVOKE IF EXISTS ALL ON `my\_app\_%`.* FROM 'my_app'@'%';"));
+    ok(&["db", "user", "create-databases", "mysql", "my_app", "on"]);
+    assert!(fails(&["db", "user", "create-databases", "mysql", "root", "on"]).contains("can make databases already"));
+    assert!(fails(&["db", "user", "create-databases", "mysql", "nobody", "on"]).contains("has no account nobody"));
+
     // PostgreSQL: a role that owns its database; postgres needs no password from this computer.
     let text = ok(&["db", "user", "add", "pg", "shop"]);
     let pg_pw = password_in(&text);
@@ -403,6 +415,12 @@ fn accounts_env_port_and_remove() {
     ok(&["db", "user", "remove", "postgresql", "shop"]);
     let log = calls(&home);
     assert!(log.contains("REASSIGN OWNED BY shop TO postgres;") && log.contains("DROP ROLE shop;"), "{log}");
+    // D-065: CREATEDB, so the account owns the databases it makes.
+    let text = ok(&["db", "user", "add", "postgresql", "tenants", "--create-databases"]);
+    assert!(text.contains("tenants may make databases, and owns the ones it makes"), "{text}");
+    assert!(calls(&home).contains("CREATE ROLE tenants LOGIN CREATEDB PASSWORD"));
+    ok(&["db", "user", "create-databases", "postgresql", "tenants", "off"]);
+    assert!(calls(&home).contains("ALTER ROLE tenants NOCREATEDB;"));
 
     // MongoDB: the account lives in its database; the main account has a password.
     let text = ok(&["db", "user", "add", "mongodb", "shop"]);
@@ -412,6 +430,8 @@ fn accounts_env_port_and_remove() {
     let root_env = ok(&["db", "env", "mongodb"]);
     assert!(root_env.contains("DB_URI=mongodb://root:") && root_env.contains("/admin?authSource=admin"), "{root_env}");
     assert!(fails(&["db", "user", "add", "mongodb", "x2", "--no-database"]).contains("lives in a database"));
+    assert!(fails(&["db", "user", "add", "mongodb", "x3", "--create-databases"]).contains("cannot be given that"));
+    assert!(!calls(&home).contains("createUser({user: \"x3\""), "nothing is made");
 
     // Another port: the server restarts there, and the `.env` lines follow.
     let port = free_tcp_port();

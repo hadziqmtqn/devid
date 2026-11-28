@@ -1520,6 +1520,7 @@ impl App {
                             database: words.next().map(String::from),
                             password: None,
                             no_database: false,
+                            create_databases: false,
                         }));
                     }
                     InputFor::Database(engine) => {
@@ -2392,7 +2393,7 @@ mod tests {
             Action::Do(Effect::DbAccount(r)) => assert_eq!(
                 serde_json::to_value(r).unwrap(),
                 json!({"cmd": "db_user_add", "engine": "mysql", "name": "blog", "database": "blogdb",
-                       "password": null, "no_database": false})
+                       "password": null, "no_database": false, "create_databases": false})
             ),
             other => panic!("expected a new account, got {other:?}"),
         }

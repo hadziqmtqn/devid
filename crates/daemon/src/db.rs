@@ -723,8 +723,18 @@ impl<'a> Admin<'a> {
     }
 
     /// Make an account with `password`, and by default a database of its own with every right on
-    /// it (on MongoDB it lives in that database, and reads and writes it).
-    pub fn add_user(&self, name: &str, database: Option<&str>, password: &str) -> io::Result<()> {
+    /// it (on MongoDB it lives in that database, and reads and writes it). With `create_databases`
+    /// it may also make databases (D-065, see `allow_create`); MongoDB accounts may not.
+    pub fn add_user(
+        &self,
+        name: &str,
+        database: Option<&str>,
+        password: &str,
+        create_databases: bool,
+    ) -> io::Result<()> {
+        if create_databases && self.engine == Engine::Mongodb {
+            return Err(err(NO_MONGO_CREATE));
+        }
         let mut accounts = self.accounts()?;
         match self.engine {
             Engine::Mysql => {
@@ -733,10 +743,14 @@ impl<'a> Admin<'a> {
                     sql =
                         format!("CREATE DATABASE IF NOT EXISTS `{db}`;\n{sql}GRANT ALL ON `{db}`.* TO '{name}'@'%';\n");
                 }
+                if create_databases {
+                    sql.push_str(&format!("GRANT ALL ON `{}`.* TO '{name}'@'%';\n", mysql_prefix(name)));
+                }
                 self.sql("", &sql)?;
             }
             Engine::Postgresql => {
-                self.sql("postgres", &format!("CREATE ROLE {name} LOGIN PASSWORD '{password}';\n"))?;
+                let createdb = if create_databases { " CREATEDB" } else { "" };
+                self.sql("postgres", &format!("CREATE ROLE {name} LOGIN{createdb} PASSWORD '{password}';\n"))?;
                 if let Some(db) = database {
                     let owned = self.pg_own_database(name, db);
                     if owned.is_err() {
@@ -822,6 +836,53 @@ impl<'a> Admin<'a> {
         self.save(&accounts)
     }
 
+    /// D-065: let an account make databases, or stop it, for an app with a database per tenant.
+    /// - **MySQL:** every right on the databases whose names start with `<name>_`, so it can make
+    ///   and drop its tenants' databases and still cannot touch anyone else's. A wildcard in a
+    ///   database grant is deprecated since MySQL 8.2 and works while `partial_revokes` is off,
+    ///   as it is by default.
+    /// - **PostgreSQL:** `CREATEDB`; the account owns the databases it makes.
+    /// - **MongoDB:** not offered.
+    pub fn allow_create(&self, name: &str, on: bool) -> io::Result<()> {
+        match self.engine {
+            Engine::Mysql => {
+                let prefix = mysql_prefix(name);
+                let sql: String = self
+                    .mysql_hosts(name)?
+                    .iter()
+                    .map(|host| match on {
+                        true => format!("GRANT ALL ON `{prefix}`.* TO '{name}'@'{}';\n", mysql_str(host)),
+                        false => format!("REVOKE IF EXISTS ALL ON `{prefix}`.* FROM '{name}'@'{}';\n", mysql_str(host)),
+                    })
+                    .collect();
+                self.sql("", &sql).map(|_| ())
+            }
+            Engine::Postgresql => {
+                let createdb = if on { "CREATEDB" } else { "NOCREATEDB" };
+                self.sql("postgres", &format!("ALTER ROLE {name} {createdb};\n")).map(|_| ())
+            }
+            Engine::Mongodb => Err(err(NO_MONGO_CREATE)),
+        }
+    }
+
+    /// Whether an account may make databases the way `allow_create` lets it.
+    pub fn can_create(&self, name: &str) -> io::Result<bool> {
+        let out = match self.engine {
+            Engine::Mysql => self.sql(
+                "",
+                &format!(
+                    "SELECT COUNT(*) FROM mysql.db WHERE User = '{name}' AND Db = '{}' AND Create_priv = 'Y';\n",
+                    mysql_str(&mysql_prefix(name))
+                ),
+            )?,
+            Engine::Postgresql => {
+                self.sql("postgres", &format!("SELECT 1 FROM pg_roles WHERE rolname = '{name}' AND rolcreatedb;\n"))?
+            }
+            Engine::Mongodb => return Ok(false),
+        };
+        Ok(out.trim().parse::<u64>().is_ok_and(|n| n > 0))
+    }
+
     /// A database without an account of its own; MongoDB makes one when an app first writes to it.
     pub fn create_database(&self, name: &str) -> io::Result<()> {
         match self.engine {
@@ -867,6 +928,15 @@ impl<'a> Admin<'a> {
             .map(String::from)
             .ok_or_else(|| err(format!("MongoDB has no account {name:?}")))
     }
+}
+
+const NO_MONGO_CREATE: &str =
+    "MongoDB accounts cannot be given that: the packages that make a database per tenant use MySQL or PostgreSQL";
+
+/// D-065: the databases a MySQL account may make, as a grant's database pattern: `<name>_` and
+/// anything after it. `_` is a wildcard in such patterns, so the name's own are escaped.
+pub fn mysql_prefix(name: &str) -> String {
+    format!("{}\\_%", name.replace('_', "\\_"))
 }
 
 /// A MySQL string's inside, for a host name read back from `mysql.user`.
@@ -1098,6 +1168,15 @@ mod tests {
         let text = toml::to_string_pretty(&now).unwrap();
         assert!(text.contains("[users.shop]") && text.contains("database = \"shop\""), "{text}");
         assert_eq!(toml::from_str::<Accounts>(&text).unwrap(), now);
+    }
+
+    #[test]
+    fn a_tenant_prefix_matches_only_the_accounts_own_names() {
+        // D-065: `_` is a wildcard in a grant's database pattern, so `my_app`'s own are escaped and
+        // the grant covers `my_app_t1`, not `myXapp_t1`.
+        assert_eq!(mysql_prefix("shop"), r"shop\_%");
+        assert_eq!(mysql_prefix("my_app"), r"my\_app\_%");
+        assert_eq!(mysql_str(&mysql_prefix("my_app")), r"my\\_app\\_%", "as a string, as mysql.db stores it");
     }
 
     #[test]
