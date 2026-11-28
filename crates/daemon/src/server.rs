@@ -1240,6 +1240,13 @@ fn dispatch(req: Request, state: &Arc<State>) -> Result<Value, String> {
                             format!("https://{}:{}", s.host, config.https_port)
                         },
                         "http_url": format!("http://{}:{}", s.host, config.http_port),
+                        // D-065: one level of subdomains reaches the site too.
+                        "subdomains": if standard_ports(&config, &state.paths) {
+                            format!("https://*.{}", s.host)
+                        } else {
+                            format!("https://*.{}:{}", s.host, config.https_port)
+                        },
+                        "wp_network": s.wp_subdir.then_some("subdir"),
                         "path": s.path.display().to_string(),
                         "docroot": s.docroot.display().to_string(),
                         "php": s.php,

@@ -1470,6 +1470,10 @@ fn print_app(s: &serde_json::Value) {
         (false, None) => "PHP (nothing detected; served as before)".into(),
     };
     println!("{}", text("url"));
+    // D-065: said once, here.
+    if let Some(sub) = s["subdomains"].as_str() {
+        println!("  also:     {sub} (one level of subdomains, same certificate)");
+    }
     println!("  type:     {typ}");
     println!("  serve as: {}", serving(s));
     if let Some(port) = s["port"].as_u64() {

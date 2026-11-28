@@ -107,8 +107,14 @@ pub enum NewField {
     Name,
     Kit,
     Db,
+    /// D-065: WordPress only: one site, or a network in subfolders or on subdomains.
+    Network,
     Create,
 }
+
+/// The WordPress network choices (D-065): `--multisite` values and their labels.
+pub const NETWORKS: [(&str, &str); 3] =
+    [("", "one site"), ("subdir", "a network in subfolders"), ("subdomain", "a network on subdomains")];
 
 /// The New project wizard (D-063, `n` on the Sites page): a template from `newproject::TEMPLATES`,
 /// a name, and the template's kit and database; indexes into the template's lists.
@@ -118,6 +124,8 @@ pub struct NewView {
     pub name: String,
     pub kit: usize,
     pub db: usize,
+    /// An index into `NETWORKS`.
+    pub network: usize,
     pub field: NewField,
     pub error: Option<String>,
 }
@@ -125,7 +133,15 @@ pub struct NewView {
 impl Default for NewView {
     fn default() -> Self {
         let laravel = TEMPLATES.iter().position(|t| t.key == "laravel").unwrap_or(0);
-        Self { template: laravel, name: String::new(), kit: 0, db: 0, field: NewField::Template, error: None }
+        Self {
+            template: laravel,
+            name: String::new(),
+            kit: 0,
+            db: 0,
+            network: 0,
+            field: NewField::Template,
+            error: None,
+        }
     }
 }
 
@@ -155,6 +171,9 @@ impl NewView {
         if self.db().is_some() {
             fields.push(NewField::Db);
         }
+        if self.template().key == "wordpress" {
+            fields.push(NewField::Network);
+        }
         fields.push(NewField::Create);
         fields
     }
@@ -164,10 +183,11 @@ impl NewView {
         match self.field {
             NewField::Template => {
                 self.template = step(self.template, TEMPLATES.len());
-                (self.kit, self.db) = (0, 0);
+                (self.kit, self.db, self.network) = (0, 0, 0);
             }
             NewField::Kit => self.kit = step(self.kit, self.template().kits.len()),
             NewField::Db => self.db = step(self.db, self.template().dbs.len()),
+            NewField::Network => self.network = step(self.network, NETWORKS.len()),
             NewField::Name | NewField::Create => {}
         }
     }
@@ -182,7 +202,10 @@ impl NewView {
             php: None,
             db: self.db().filter(|d| Some(*d) != t.dbs.first().copied()).map(str::to_string),
             kit: Some(self.kit()).filter(|k| !k.is_empty()).map(str::to_string),
-            multisite: None,
+            multisite: (t.key == "wordpress")
+                .then(|| NETWORKS[self.network % NETWORKS.len()].0)
+                .filter(|m| !m.is_empty())
+                .map(str::to_string),
         }
     }
 }
@@ -195,6 +218,8 @@ pub struct AccountRow {
     /// "kept" (Devid set it), "none" (the main account, trusted from this computer), "unknown".
     pub password: String,
     pub main: bool,
+    /// D-065: it may make databases (MySQL: named `<name>_…`).
+    pub create_databases: bool,
 }
 
 /// One engine's accounts: add one, give one a new password, copy its `.env` lines, remove it.
@@ -507,6 +532,7 @@ impl App {
                 database: u["database"].as_str().map(String::from),
                 password: s(&u["password"]),
                 main: u["main"] == true,
+                create_databases: u["create_databases"] == true,
             })
             .collect();
         self.mode = Mode::Accounts(AccountsView {
@@ -647,6 +673,37 @@ impl App {
                 self.mode = Mode::Input { purpose: InputFor::Account(v.engine), text: String::new() };
                 return Action::None;
             }
+            // D-065: let an account make databases, for an app with a database per tenant, or stop it.
+            KeyCode::Char('m') => match v.rows.get(v.index).cloned() {
+                _ if v.engine == "mongodb" => {
+                    self.message = Some(("MongoDB accounts cannot be let make databases".into(), true));
+                }
+                Some(row) if row.main => {
+                    self.message = Some((format!("{} is the main account; it can make databases", row.name), true));
+                }
+                Some(row) => {
+                    let (engine, name, on) = (v.engine.clone(), row.name.clone(), !row.create_databases);
+                    let what = match (on, engine.as_str()) {
+                        (true, "mysql") => {
+                            format!("Let {name} make and drop databases named {name}_…, one per tenant?")
+                        }
+                        (true, _) => format!("Let {name} make databases? It owns the ones it makes."),
+                        (false, _) => format!("Stop {name} making databases? The ones it made stay."),
+                    };
+                    let done = match on {
+                        true => format!("{name} may make databases"),
+                        false => format!("{name} can no longer make databases"),
+                    };
+                    self.mode = Mode::ConfirmAccount {
+                        question: what,
+                        request: Box::new(Request::DbUserCreateDatabases { engine, name, on }),
+                        done,
+                        back: Box::new(v),
+                    };
+                    return Action::None;
+                }
+                None => {}
+            },
             KeyCode::Char(c @ ('p' | 'c' | 'y' | 'd')) => {
                 if let Some(row) = v.rows.get(v.index).cloned() {
                     let (engine, name) = (v.engine.clone(), row.name.clone());
@@ -2385,6 +2442,22 @@ mod tests {
         );
         assert_eq!(app.reopen_accounts.as_deref(), Some("mysql"), "the view comes back after a removal");
 
+        // D-065: m lets an account make databases, or stops it, after a question.
+        app.open_accounts(&json!({"engine": "mysql", "series": "8.4", "users": [
+            {"name": "root", "main": true, "password": "none"},
+            {"name": "shop", "database": "shop", "password": "kept", "create_databases": false},
+        ]}));
+        app.handle_key(ch('m'));
+        assert!(matches!(app.mode, Mode::Accounts(_)) && app.message.as_ref().is_some_and(|m| m.0.contains("main")));
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(ch('m'));
+        let Mode::ConfirmAccount { question, .. } = &app.mode else { panic!("a question first") };
+        assert!(question.contains("databases named shop_…"), "{question}");
+        assert_eq!(
+            daemon_json(app.handle_key(ch('y'))),
+            json!({"cmd": "db_user_create_databases", "engine": "mysql", "name": "shop", "on": true})
+        );
+
         app.open_accounts(&json!({"engine": "mysql", "series": "8.4", "users": []}));
         app.handle_key(ch('a'));
         for c in "blog blogdb".chars() {
@@ -2468,6 +2541,22 @@ mod tests {
                 multisite: None,
             }
         );
+        // D-065: WordPress offers a network; the request carries it unless it is one site.
+        let mut v =
+            NewView { template: TEMPLATES.iter().position(|t| t.key == "wordpress").unwrap(), ..Default::default() };
+        assert!(v.fields().contains(&NewField::Network));
+        let Request::NewProject { multisite, .. } = v.request() else { panic!() };
+        assert_eq!(multisite, None, "one site by default");
+        v.field = NewField::Network;
+        v.cycle(1);
+        let Request::NewProject { multisite, .. } = v.request() else { panic!() };
+        assert_eq!(multisite.as_deref(), Some("subdir"));
+        v.cycle(1);
+        let Request::NewProject { multisite, .. } = v.request() else { panic!() };
+        assert_eq!(multisite.as_deref(), Some("subdomain"));
+        v.field = NewField::Template;
+        v.cycle(1);
+        assert_eq!(v.network, 0, "another template starts as one site again");
         let v = NewView { template: TEMPLATES.iter().position(|t| t.key == "next").unwrap(), ..Default::default() };
         assert_eq!(v.fields(), [NewField::Template, NewField::Name, NewField::Create]);
         // ← on the template wraps around the list; esc closes.

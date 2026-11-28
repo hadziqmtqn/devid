@@ -2,7 +2,7 @@
 
 > Scope: every site also answers on its subdomains, `https://<sub>.<name>.test`, with a certificate for them; accounts that may create databases; WordPress Multisite in `devid new` (D-065)
 > Verified against: 2026-11-28 (Devid 0.22.0, main c11bebd; `dns.rs`, `ca.rs`, `nginx.rs`, `caddy.rs`, `apache.rs`, `db.rs`)
-> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results"). **S2 built 2026-11-28:** subdomains and their certificates on nginx, Caddy and Apache, checked on the M1 and in CI (see "S2 results"). **S3 built 2026-11-28:** accounts that may make databases, on MySQL and PostgreSQL in the CLI (see "S3 results"). **S4 built 2026-11-28:** `devid new wordpress --multisite subdomain|subdir`, served on nginx, Caddy and Apache (see "S4 results").
+> Status: accepted 2026-11-28 (D-065): the owner chose this phase over a Linux desktop app and Windows ("Subdomain dulu") and took every recommendation ("Ya, ikuti semua"). Its answers are in "Owner's answers". **S1 done 2026-11-28** on the M1 and the Ubuntu VM (see "S1 results"). **S2 built 2026-11-28:** subdomains and their certificates on nginx, Caddy and Apache, checked on the M1 and in CI (see "S2 results"). **S3 built 2026-11-28:** accounts that may make databases, on MySQL and PostgreSQL in the CLI (see "S3 results"). **S4 built 2026-11-28:** `devid new wordpress --multisite subdomain|subdir`, served on nginx, Caddy and Apache (see "S4 results"). **S5 in progress 2026-11-28:** the TUI and the app built, with 0.23.0-rc.1 (see "S5 results"); the guide, the rc's checks and 0.23.0 follow.
 
 On 2026-11-26, Phase 15 left two things for later: WordPress Multisite (the owner said "ya nanti kamu catat") and a multi-tenant option for Laravel ("Ya, catat"). Both need the same serving, which Devid lacks: subdomains of a site and their certificates. Multi-tenant apps with one database per tenant also need an account that may create databases (`phase-15.md`, "Not in this phase"). On 2026-11-28 the owner chose this work as Phase 16. They asked for suggestions before any documentation, and this plan records the ones they accepted.
 
@@ -296,6 +296,32 @@ So the weekly template check can make both kinds of network on its spare ports, 
   | `a.b.net2.test` | handshake refused | handshake refused | no valid certificate |
 
   Before the rules, S1's probe got 404 for `/shop2/wp-login.php` and a redirect loop for `/shop2/wp-admin/`.
+- **CI on devid#169** (new-templates run 46148476389) made all 26 templates on macOS 15 and Ubuntu 24.04, `wp-subdir` and `wp-subdomain` included, so both kinds of network also work on Linux.
+
+## S5 results (2026-11-28)
+
+What changed is in the timeline record `docs/implementation-timeline/subdomains/2026-11-28-s5-tui-app.md`. In short:
+
+- **The daemon** adds `subdomains` (`https://*.<host>`, with the port off 443) and `wp_network` to each site in `sites`.
+- **The CLI:** `devid app` says `also: https://*.<host> (one level of subdomains, same certificate)`.
+- **The TUI:**
+  - a site's menu starts with a dim line, "Also https://*.<host>";
+  - the New project wizard has a Sites field for WordPress: one site, a network in subfolders, or a network on subdomains;
+  - in Databases › Accounts, `m` lets an account make databases, or stops it, after a question, and the list marks such accounts "makes databases".
+- **The app:**
+  - a site's page starts its App card with a Subdomains row, `*.<host>`, with the explanation in its (i) tooltip (D-055);
+  - the New project sheet has a Sites select for WordPress: One site, In subfolders, On subdomains. Its facts say how a site is added and where, and the ready view has a Network row;
+  - New account has "May make databases" for MySQL and PostgreSQL, with what it allows in a tooltip;
+  - an account's … menu has "Let it make databases…" or "Stop making databases…", after a question, and its line says "makes databases".
+- **Version 0.23.0-rc.1.** The release notes add the subdomains, `--multisite` and accounts that may make databases.
+
+**Checks:**
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass: 189 tests with a fake HOME, and `passwd_home_matches_home` on its own with the real one. The TUI's tests cover the wizard's Sites field and the accounts' `m`.
+- **The app in a browser harness:** Phase 15's harness served `crates/gui/ui` with a fake `invoke`, in the app's built-in browser.
+  - **A site's page:** the Subdomains row reads `*.erdbpro-saas.test`.
+  - **The New project sheet:** WordPress shows PHP and Sites in one row. A first try had "Network in subfolders" and "Network on subdomains", which the third-width select cut ("Network on su…"), and a tool line that wrapped. The labels became In subfolders and On subdomains, and the tool line drops `--subdomains`. Create sent `multisite: "subdomain"`, and the ready view showed the Network row.
+  - **Databases:** shop's line said "makes databases". Its menu offered "Stop making databases…", and the question sent `on: false`. New account with "May make databases" sent `create_databases: true`.
+- **Not checked yet:** the real app (WKWebView) and the owner's try, which come with the rc.
 
 ## Milestones
 
