@@ -380,6 +380,7 @@ async function parkFolder() {
 const NP_TPL = {
   laravel: { group: 'php' },
   wordpress: { group: 'php', tool: 'WP-CLI: core download, config create, core install' },
+  // D-065: `--multisite`.
   symfony: { group: 'php' },
   codeigniter: { group: 'php', tool: 'composer create-project codeigniter4/appstarter' },
   php: { group: 'php', tool: 'a folder with index.php' },
@@ -452,6 +453,7 @@ function npLimits(np) {
 function npTool(np) {
   if (np.tpl === 'laravel') return 'composer create-project ' + (np.kit ? 'laravel/' + np.kit + '-starter-kit --stability=dev' : 'laravel/laravel');
   if (np.tpl === 'symfony') return np.kit ? 'composer create-project symfony/skeleton' : 'composer create-project symfony/skeleton, then composer require webapp';
+  if (np.tpl === 'wordpress' && np.multisite) return 'WP-CLI: core download, config create, core multisite-install';
   return NP_TPL[np.tpl]?.tool || '';
 }
 
@@ -469,6 +471,8 @@ function npFacts(np) {
     out.push(['A ' + label + ' account and database ', h('span.dv-mono', { 'data-np-db': '' }, npDbName(np.name || 'name')),
       np.users[eng] ? '' : ', checked when the job starts', false]);
     if (np.tpl === 'wordpress') out.push(['Admin account admin, with a password shown once', false]);
+    if (np.tpl === 'wordpress' && np.multisite) out.push(['A network: ', h('span.dv-mono', {}, 'wp site create --slug=shop'), ' adds ',
+      h('span.dv-mono', {}, np.multisite === 'subdomain' ? 'shop.' + (np.name || 'name') + '.' + (st.tld || 'test') : (np.name || 'name') + '.' + (st.tld || 'test') + '/shop'), false]);
   } else if (np.tpl === 'laravel' || (np.tpl === 'symfony' && npWebApp(np))) {
     out.push(['SQLite in the project, no server to run', false]);
   }
@@ -483,7 +487,7 @@ function npFacts(np) {
  *  shows again. */
 async function newProject() {
   if (S.np && (S.np.stage === 'making' || S.np.unseen)) { Object.assign(S.np, { hidden: false, unseen: false }); return npDraw(); }
-  const np = { stage: 'form', tpl: 'laravel', name: '', kit: '', db: '', php: '', folder: '', other: '', error: '',
+  const np = { stage: 'form', tpl: 'laravel', name: '', kit: '', db: '', php: '', multisite: '', folder: '', other: '', error: '',
     templates: null, node: null, parked: [], sites: [], users: {}, steps: [], times: {}, log: '', dl: null };
   S.np = np;
   npDraw();
@@ -590,7 +594,7 @@ function npForm(np) {
     NP_ORDER.map((k) => np.templates.find((x) => x.template === k)).filter((x) => x && (NP_TPL[x.template]?.group || 'php') === group).map((x) => {
       const why = x.limits.filter((l) => !l.includes('starter kits')).map(capital).join(' ');
       return h('button.np-item', { type: 'button', role: 'radio', 'aria-checked': String(np.tpl === x.template), title: why || null,
-        onclick: () => { np.focus = 'item'; set({ tpl: x.template, kit: '', db: '', php: '' })(); }, onkeydown: npArrow },
+        onclick: () => { np.focus = 'item'; set({ tpl: x.template, kit: '', db: '', php: '', multisite: '' })(); }, onkeydown: npArrow },
       tile(x.template), h('span.dv-grow.dv-ellipsis', {}, x.label), why ? h('span.np-flag', { 'aria-label': why }) : null);
     })]) : h('div.dv-sub.np-loading', {}, np.error ? '' : 'Loading the templates…');
   const phpOptions = [{ value: '', label: 'Default (' + st.default_php + ')' }]
@@ -621,6 +625,9 @@ function npForm(np) {
     t.dbs.length > 1 && npWebApp(np) ? opt('Database', 'SQLite needs no server. MySQL or PostgreSQL: Devid makes an account and a database named after the project, writes them to ' + (np.tpl === 'symfony' ? '.env.local' : '.env') + (np.tpl === 'laravel' ? ' and migrates' : '') + '. A database that is off starts first.',
       npSelect('Database', np.db || t.dbs[0], t.dbs.map((d) => ({ value: d, label: { sqlite: 'SQLite', mysql: 'MySQL', pgsql: 'PostgreSQL' }[d] || d })),
         (v) => { np.db = v; npDraw(); })) : null,
+    np.tpl === 'wordpress' ? opt('Sites', 'One site, or a network of sites with one install. In subfolders: name.test/shop. On subdomains: shop.name.test, which Devid serves with the site’s certificate.',
+      npSelect('Sites', np.multisite, [{ value: '', label: 'One site' }, { value: 'subdir', label: 'In subfolders' },
+        { value: 'subdomain', label: 'On subdomains' }], (v) => { np.multisite = v; npDraw(); })) : null,
   ].filter(Boolean) : [];
   return [
     h('div.np-head', {}, h('h2', { id: 'np-t' }, 'New project'),
@@ -689,7 +696,8 @@ async function npCreate(np) {
     }
     np.path = parent + '/' + np.name;
     np.reply = await daemon({ cmd: 'new_project', template: np.tpl, name: np.name, path: np.path, php: np.php || null,
-      db: np.db && np.db !== t.dbs[0] ? np.db : null, kit: np.kit || null });
+      db: np.db && np.db !== t.dbs[0] ? np.db : null, kit: np.kit || null,
+      multisite: np.tpl === 'wordpress' && np.multisite ? np.multisite : null });
     np.stage = 'ready';
   } catch (e) {
     np.stage = 'failed';
@@ -819,7 +827,9 @@ function npReady(np) {
           btn('Copy', () => invoke('copy_text', { text: r.admin.password, what: 'the admin password' })
             .then((m) => toast(m, false, 'Keep it somewhere safe: Devid does not keep it.'), (e) => toast(String(e), true)))),
         row(h('span.np-k', {}, 'Dashboard'), h('span.dv-grow.dv-mono.dv-ellipsis', {}, r.url + '/wp-admin'),
-          btn('Open', () => openTarget({ what: 'site', name: r.name, path: '/wp-admin/' }))))] : null),
+          btn('Open', () => openTarget({ what: 'site', name: r.name, path: '/wp-admin/' }))),
+        np.multisite ? row(h('span.np-k', {}, 'Network'), h('span.dv-grow', {}, h('span.dv-mono', {}, 'wp site create --slug=shop'),
+          ' adds a site', tip(np.multisite === 'subdomain' ? 'At shop.' + r.url.replace('https://', '') + ', with the same certificate.' : 'At ' + r.url + '/shop.'))) : null)] : null),
     h('div.np-foot', {},
       h('span.dv-sub.dv-grow.dv-ellipsis.dv-mono', {}, 'Log: ' + r.log),
       h('button.dv-btn', { type: 'button', onclick: done }, 'Done'),
@@ -1598,7 +1608,8 @@ function dbAccountRow(d, u) {
   const pgMain = u.main && d.engine === 'postgresql';
   const sub = u.main
     ? (u.password === 'none' ? 'Main account · no password from this Mac' : 'Main account' + (u.database ? ' · in ' + u.database : ''))
-    : (u.database ? 'Database ' + u.database : 'No database of its own') + (unknown ? ' · password not known to Devid' : '');
+    : (u.database ? 'Database ' + u.database : 'No database of its own') + (unknown ? ' · password not known to Devid' : '')
+      + (u.create_databases ? ' · makes databases' : '');
   return h('div.dv-row', {},
     h('div.dv-grow', {}, h('div.db-name.dv-mono', {}, u.name), h('div.dv-sub', {}, sub)),
     btn('Copy .env', () => copyDb(d.engine, u.name, false), '', { disabled: !!S.busy || unknown, 'aria-label': 'Copy .env for ' + u.name,
@@ -1608,6 +1619,8 @@ function dbAccountRow(d, u) {
         run: () => copyDb(d.engine, u.name, true) },
       { label: 'New password…', disabled: pgMain, title: pgMain ? 'postgres is trusted from this Mac, so a password would never be checked' : null,
         run: () => newDbPassword(d.engine, u.name) },
+      d.engine === 'mongodb' ? null : { label: u.create_databases ? 'Stop making databases…' : 'Let it make databases…', disabled: !!u.main,
+        title: u.main ? 'The main account can make databases already' : null, run: () => toggleDbCreate(d.engine, u) },
       '-',
       { label: 'Remove…', danger: true, disabled: !!u.main, title: u.main ? 'The main account stays' : null, run: () => removeDbAccount(d.engine, u) },
     ]));
@@ -1687,7 +1700,7 @@ const stopDb = (engine) => act('Stopping ' + dbLabel(engine) + '…', () => daem
 function addDbAccount(engine) {
   const e = DB_ENGINES[engine];
   const mongo = engine === 'mongodb';
-  const f = { name: '', db: '', dbAuto: true, own: true, pwMode: 'gen', pw: '', error: '' };
+  const f = { name: '', db: '', dbAuto: true, own: true, create: false, pwMode: 'gen', pw: '', error: '' };
   const issue = () => {
     if (!DB_NAME.test(f.name)) return f.name ? 'Name: lowercase letters, digits and _, starting with a letter or _.' : 'Type a name.';
     if ((mongo || f.own) && !DB_NAME.test(f.db)) return 'Database: lowercase letters, digits and _, starting with a letter or _.';
@@ -1700,7 +1713,7 @@ function addDbAccount(engine) {
     try {
       const own = mongo || f.own;
       const r = await daemon({ cmd: 'db_user_add', engine, name: f.name, database: own ? f.db : null,
-        password: f.pwMode === 'own' ? f.pw : null, no_database: !own });
+        password: f.pwMode === 'own' ? f.pw : null, no_database: !own, create_databases: !mongo && f.create });
       S.db.stale = true;
       showDbSecret(r, true);
       refresh(true);
@@ -1720,6 +1733,9 @@ function addDbAccount(engine) {
     mongo ? h('p.dv-sub', {}, 'The account lives in this database and reads and writes it.')
       : h('label.db-checkrow', {}, h('input.dv-check', { type: 'checkbox', checked: f.own, 'aria-label': 'A database of its own',
         onchange: (ev) => { f.own = ev.target.checked; draw(); } }), 'A database of its own, with every right on it'),
+    // D-065: for an app with a database per tenant.
+    mongo ? null : h('label.db-checkrow', {}, h('input.dv-check', { type: 'checkbox', checked: f.create, 'aria-label': 'May make databases',
+      onchange: (ev) => { f.create = ev.target.checked; } }), 'May make databases', tip(dbCreateAbout(engine, null))),
     h('div.db-pwrow', {}, h('span.dv-sub', { id: 'dba-pw-l' }, 'Password'),
       h('div.dv-seg', { role: 'group', 'aria-labelledby': 'dba-pw-l' }, [['gen', 'Generate'], ['own', 'Choose']].map(([k, label]) =>
         h('button', { type: 'button', 'aria-pressed': String(f.pwMode === k), onclick: () => { f.pwMode = k; draw(); } }, label)))),
@@ -1757,6 +1773,23 @@ async function newDbPassword(engine, name) {
     showDbSecret(r, false);
     refresh(true);
   } catch (e) { toast(String(e), true); }
+}
+
+/** D-065: what an account that may make databases can make; `name` is null in the New account dialog. */
+const dbCreateAbout = (engine, name) => engine === 'mysql'
+  ? 'For an app with a database per tenant: ' + (name || 'the account') + ' may make and drop databases named ' + (name || '<account>') + '_…, and no others. '
+    + 'Set the tenancy package’s database prefix to ' + (name || '<account>') + '_.'
+  : 'For an app with a database per tenant: ' + (name || 'the account') + ' may make databases, and owns the ones it makes.';
+
+async function toggleDbCreate(engine, u) {
+  const on = !u.create_databases;
+  const yes = on
+    ? await ask('Let ' + u.name + ' make databases?', dbCreateAbout(engine, u.name), 'Allow')
+    : await ask('Stop ' + u.name + ' making databases?', 'The databases it made stay, with their data.', 'Stop');
+  if (!yes) return;
+  S.db.stale = true;
+  act('Saving…', () => daemon({ cmd: 'db_user_create_databases', engine, name: u.name, on }),
+    on ? u.name + ' may make databases' : u.name + ' can no longer make databases');
 }
 
 async function removeDbAccount(engine, u) {
@@ -1827,6 +1860,10 @@ function siteDetail(s) {
   // Explanations sit in tooltips (the owner, 2026-11-22); what needs action, such as a missing PHP
   // or a busy port, stays on the page.
   const app = card(
+    // D-065: said once, here; how to use them is in the tooltip.
+    s.subdomains ? row(titled('Subdomains', 'One level of subdomains, such as shop.' + host + ', reaches this site too, with the same certificate. '
+      + 'Laravel’s Route::domain(), WordPress networks and tenancy packages use them; the app sees the name in the Host header.'),
+    h('span.dv-mono.dv-select-text', {}, s.subdomains.replace('https://', ''))) : null,
     row(titled('Type', typeSet ? 'Set by you' + (s.detected ? '; detected: ' + presetLabel(s.detected) + '.' : '; nothing detected.')
       : s.detected ? 'Detected from the project files.' : 'Nothing detected; served as PHP, as before.'),
     typeSet ? btn('Use detected', () => act('Saving…', () => daemon({ cmd: 'app_reset', ...site }), host + ' follows detection again'), 'ghost') : null,

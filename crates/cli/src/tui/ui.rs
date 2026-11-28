@@ -539,6 +539,12 @@ fn draw_overlay(frame: &mut Frame, app: &App) {
                 .map(|site| format!(" Vite (Safari): set APP_URL={} in .env", s(&site["vite"]["want"])));
             let width = vite.as_ref().map_or(52, |v| (v.chars().count() as u16 + 4).max(52));
             let mut lines: Vec<Line> = vite.map(|v| Line::styled(v, warn(app))).into_iter().collect();
+            // D-065: said once, at the top of the site's menu.
+            if let Some(sub) =
+                (app.page == Page::Sites).then(|| app.sites.get(*row)).flatten().and_then(|s| s["subdomains"].as_str())
+            {
+                lines.push(hint(&format!(" Also {sub}")));
+            }
             lines.extend(items.iter().enumerate().map(|(i, (k, label))| {
                 let line = format!(" {k}  {label}");
                 if i == *index { Line::styled(line, selected()) } else { Line::raw(line) }
@@ -716,16 +722,21 @@ fn draw_accounts(frame: &mut Frame, v: &AccountsView) {
             "none" => "none from this computer",
             _ => "not known to Devid (p sets one)",
         };
+        // D-065: an account that may make databases says so after its password.
         let text = format!(
-            " {} {:<18} {:<18} {password}",
+            " {} {:<18} {:<18} {password}{}",
             if i == v.index { "›" } else { " " },
             r.name,
-            r.database.as_deref().unwrap_or("-")
+            r.database.as_deref().unwrap_or("-"),
+            if r.create_databases { " · makes databases" } else { "" }
         );
         lines.push(if i == v.index { Line::styled(text, selected()) } else { Line::raw(text) });
     }
     lines.push(Line::raw(""));
     lines.push(hint(" a add · p new password · c copy .env · y copy password · d remove · esc close"));
+    if v.engine != "mongodb" {
+        lines.push(hint(" m let it make databases (one per tenant), or stop it"));
+    }
     popup(frame, 80, lines.len() as u16 + 2, &format!("{} {} · Accounts", v.label, v.series), lines);
 }
 
@@ -752,6 +763,10 @@ fn draw_new(frame: &mut Frame, app: &App, v: &NewView) {
     if let Some(db) = v.db() {
         lines.push(row(NewField::Db, "Database", format!("‹ {db} ›")));
     }
+    if v.fields().contains(&NewField::Network) {
+        let (_, label) = super::app::NETWORKS[v.network % super::app::NETWORKS.len()];
+        lines.push(row(NewField::Network, "Sites", format!("‹ {label} ›")));
+    }
     lines.push(Line::raw(""));
     lines.push(row(NewField::Create, "", "[ Create ]".into()));
     lines.push(Line::raw(""));
@@ -764,6 +779,12 @@ fn draw_new(frame: &mut Frame, app: &App, v: &NewView) {
     lines.push(hint(place));
     let about = match (t.node.is_some(), t.key) {
         (true, _) => " Your Node (nvm) and npm; the dev server starts on the site's first visit",
+        (_, "wordpress") if v.network == 1 => {
+            " Each site at <name>.test/<site>; `wp site create --slug=<site>` adds one"
+        }
+        (_, "wordpress") if v.network == 2 => {
+            " Each site at <site>.<name>.test; `wp site create --slug=<site>` adds one"
+        }
         (_, "wordpress") => " A MySQL account from Devid; the admin password is shown once",
         (_, "laravel") if !v.kit().is_empty() => " A starter kit needs Node.js 22.18+, 24.11+ or 26+",
         (_, "laravel" | "symfony") => " MySQL and PostgreSQL get a Devid account named after the project",
